@@ -35,6 +35,7 @@
 
 #include "zephyr/console/console.h"
 #include "opalib_control_pid.h"
+#include "LCDLib.hpp"
 
 // #define BUCK_BOARD
 #define BOOST_BOARD
@@ -83,14 +84,14 @@ static float meas_data; // temp storage meas value (ctrl task)
 float32_t duty_cycle = 0.5;
 float32_t duty_cycle_PID = 0.5;
 
+uint32_t incremental_value;
+bool Is_pressed = false;
+LCD lcd(PA13, PA14, PA15, PB3, PA2, PA3);
+
 #ifdef BUCK_BOARD
 static float32_t voltage_reference = 10; //voltage reference 
-static float32_t pid_period = control_task_period / 1000000.0f;
-static float Kb = 1e4;               // back-tracking coefficient
-
 
 /* PID coefficient for a 8.6ms step response*/
-static float32_t integrator_mem = 0; // integral memory
 static float32_t kp = 0.000215;
 static float32_t ki = 2.86;
 static float32_t kd = 0.0;
@@ -100,12 +101,8 @@ static float32_t kd = 0.0;
 
 #ifdef BOOST_BOARD
 static float32_t voltage_reference = 20; //voltage reference 
-static float32_t pid_period = control_task_period / 1000000.0f;
-static float Kb = 1e4;               // back-tracking coefficient
-
 
 /* PID coefficient for a 8.6ms step response*/
-static float32_t integrator_mem = 0; // integral memory
 static float32_t kp = 0.000215;
 static float32_t ki = 2.86;
 static float32_t kd = 0.0;
@@ -125,6 +122,9 @@ void setup_routine()
    // Setup the hardware first
     spin.version.setBoardVersion(TWIST_v_1_1_2);
 
+    lcd.begin(16,2);
+    lcd.setCursor(0, 0);
+
     /* voltage mode BUCK and BOOST definition */
 
     #ifdef BUCK_BOARD
@@ -135,7 +135,10 @@ void setup_routine()
     #ifdef BOOST_BOARD
     twist.setVersion(shield_TWIST_V1_3);
     twist.initAllBoost();
+    spin.timer.startLogTimer3IncrementalEncoder();
+    spin.gpio.configurePin(PC8, INPUT);
     #endif
+
 
     opalib_control_init_interleaved_pid(kp, ki, kd, control_task_period);
 
@@ -211,9 +214,15 @@ void loop_application_task()
         }
         else if (mode == POWERMODE)
         {
+
+            incremental_value = spin.timer.getTimer3IncrementalEncoderValue();
             spin.led.turnOn();
 
+            lcd.printf("HELLO WORLD \n");
+
             #ifdef BOOST_BOARD
+            printk("%i:", Is_pressed);
+            printk("%u:", incremental_value);
             printk("%f:", duty_cycle_PID);
             #endif
             printk("%f:", duty_cycle);
@@ -261,6 +270,7 @@ void loop_critical_task()
     if (meas_data != -10000)
         V_high = meas_data;
 
+    Is_pressed = spin.gpio.readPin(PC8);
 
     if (mode == IDLEMODE)
     {
@@ -272,6 +282,7 @@ void loop_critical_task()
     }
     else if (mode == POWERMODE)
     {
+
         #ifdef BUCK_BOARD
         duty_cycle = opalib_control_interleaved_pid_calculation(voltage_reference, V1_low_value);
         twist.setAllDutyCycle(duty_cycle); // For buck/boost voltage mode 

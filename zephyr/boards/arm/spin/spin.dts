@@ -236,6 +236,13 @@ zephyr_udc0: &usb {
 	status = "okay";
 };
 
+
+&timers3 {
+	pinctrl-0 = < &tim3_ch1_pb4 &tim3_ch2_pc7>;
+	pinctrl-names = "incremental_encoder 2";
+	status = "okay";
+};
+
 &timers6 {
 	status = "okay";
 };

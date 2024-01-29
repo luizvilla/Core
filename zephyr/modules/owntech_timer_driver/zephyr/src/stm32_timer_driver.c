@@ -41,6 +41,8 @@ static int timer_stm32_init(const struct device* dev)
 
 	if (tim_dev == TIM4)
 		init_timer_4();
+	else if (tim_dev == TIM3)
+		init_timer_3();
 	else if (tim_dev == TIM6)
 		init_timer_6();
 	else if (tim_dev == TIM7)
@@ -96,7 +98,7 @@ void timer_stm32_config(const struct device* dev, const struct timer_config_t* c
 			irq_enable(data->interrupt_line);
 		}
 	}
-	else if (tim_dev == TIM4)
+	else if (tim_dev == TIM4 || tim_dev == TIM3)
 	{
 		if (config->timer_enable_encoder == 1)
 		{
@@ -117,6 +119,9 @@ void timer_stm32_config(const struct device* dev, const struct timer_config_t* c
 			}
 
 			// Configure GPIO
+
+			if(tim_dev == TIM4)
+			{
 			LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOB);
 
 			LL_GPIO_SetPinMode(GPIOB,LL_GPIO_PIN_3,LL_GPIO_MODE_ALTERNATE);
@@ -136,6 +141,31 @@ void timer_stm32_config(const struct device* dev, const struct timer_config_t* c
 			LL_GPIO_SetPinOutputType(GPIOB,LL_GPIO_PIN_7,LL_GPIO_OUTPUT_PUSHPULL);
 			LL_GPIO_SetPinPull(GPIOB,LL_GPIO_PIN_7,pull);
 			LL_GPIO_SetAFPin_0_7(GPIOB,LL_GPIO_PIN_7,LL_GPIO_AF_2);
+			}
+			else if(tim_dev == TIM3)
+			{
+			LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOB);
+			LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOC);
+			LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOD);
+
+			LL_GPIO_SetPinMode(GPIOD,LL_GPIO_PIN_2,LL_GPIO_MODE_ALTERNATE);
+			LL_GPIO_SetPinSpeed(GPIOD,LL_GPIO_PIN_2,LL_GPIO_SPEED_FREQ_LOW);
+			LL_GPIO_SetPinOutputType(GPIOD,LL_GPIO_PIN_2,LL_GPIO_OUTPUT_PUSHPULL);
+			LL_GPIO_SetPinPull(GPIOD,LL_GPIO_PIN_2,pull);
+			LL_GPIO_SetAFPin_0_7(GPIOD,LL_GPIO_PIN_2,LL_GPIO_AF_2);
+
+			LL_GPIO_SetPinMode 		(GPIOB,LL_GPIO_PIN_4,LL_GPIO_MODE_ALTERNATE);
+			LL_GPIO_SetPinSpeed		(GPIOB,LL_GPIO_PIN_4,LL_GPIO_SPEED_FREQ_LOW);
+			LL_GPIO_SetPinOutputType(GPIOB,LL_GPIO_PIN_4,LL_GPIO_OUTPUT_PUSHPULL);
+			LL_GPIO_SetPinPull		(GPIOB,LL_GPIO_PIN_4,pull);
+			LL_GPIO_SetAFPin_0_7	(GPIOB,LL_GPIO_PIN_4,LL_GPIO_AF_2);
+
+			LL_GPIO_SetPinMode(GPIOC,LL_GPIO_PIN_7,LL_GPIO_MODE_ALTERNATE);
+			LL_GPIO_SetPinSpeed(GPIOC,LL_GPIO_PIN_7,LL_GPIO_SPEED_FREQ_LOW);
+			LL_GPIO_SetPinOutputType(GPIOC,LL_GPIO_PIN_7,LL_GPIO_OUTPUT_PUSHPULL);
+			LL_GPIO_SetPinPull(GPIOC,LL_GPIO_PIN_7,pull);
+			LL_GPIO_SetAFPin_0_7(GPIOC,LL_GPIO_PIN_7,LL_GPIO_AF_2);
+			}
 		}
 	}
 }
@@ -154,7 +184,7 @@ void timer_stm32_start(const struct device* dev)
 			LL_TIM_EnableCounter(tim_dev);
 		}
 	}
-	else if (tim_dev == TIM4)
+	else if (tim_dev == TIM4 || tim_dev == TIM3)
 	{
 		if (data->timer_mode == incremental_coder)
 		{
@@ -176,7 +206,7 @@ void timer_stm32_stop(const struct device* dev)
 			LL_TIM_DisableIT_UPDATE(tim_dev);
 		}
 	}
-	else if (tim_dev == TIM4)
+	else if (tim_dev == TIM4 || tim_dev == TIM3)
 	{
 		if (data->timer_mode == incremental_coder)
 		{
@@ -237,6 +267,37 @@ void init_timer_4()
 	LL_TIM_EnableEncoderIndex(TIM4);
 }
 
+void init_timer_3()
+{
+	// Configure Timer in incremental coder mode
+
+	// Peripheral clock enable
+	LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM3);
+
+	LL_TIM_InitTypeDef TIM_InitStruct = {0};
+	TIM_InitStruct.Prescaler = 0;
+	TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
+	TIM_InitStruct.Autoreload = 65535;
+	TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
+
+	LL_TIM_Init(TIM3, &TIM_InitStruct);
+	LL_TIM_EnableARRPreload(TIM3);
+	LL_TIM_SetEncoderMode(TIM3, LL_TIM_ENCODERMODE_X4_TI12);
+	LL_TIM_IC_SetActiveInput(TIM3, LL_TIM_CHANNEL_CH1, LL_TIM_ACTIVEINPUT_DIRECTTI);
+	LL_TIM_IC_SetPrescaler(TIM3, LL_TIM_CHANNEL_CH1, LL_TIM_ICPSC_DIV1);
+	LL_TIM_IC_SetFilter(TIM3, LL_TIM_CHANNEL_CH1, LL_TIM_IC_FILTER_FDIV16_N5);
+	LL_TIM_IC_SetPolarity(TIM3, LL_TIM_CHANNEL_CH1, LL_TIM_IC_POLARITY_RISING);
+	LL_TIM_IC_SetActiveInput(TIM3, LL_TIM_CHANNEL_CH2, LL_TIM_ACTIVEINPUT_DIRECTTI);
+	LL_TIM_IC_SetPrescaler(TIM3, LL_TIM_CHANNEL_CH2, LL_TIM_ICPSC_DIV1);
+	LL_TIM_IC_SetFilter(TIM3, LL_TIM_CHANNEL_CH2, LL_TIM_IC_FILTER_FDIV1);
+	LL_TIM_IC_SetPolarity(TIM3, LL_TIM_CHANNEL_CH2, LL_TIM_IC_POLARITY_RISING);
+	LL_TIM_SetTriggerOutput(TIM3, LL_TIM_TRGO_RESET);
+	LL_TIM_DisableMasterSlaveMode(TIM3);
+	LL_TIM_ConfigETR(TIM3, LL_TIM_ETR_POLARITY_NONINVERTED, LL_TIM_ETR_PRESCALER_DIV1, LL_TIM_ETR_FILTER_FDIV1);
+	LL_TIM_ConfigIDX(TIM3, LL_TIM_INDEX_ALL|LL_TIM_INDEX_POSITION_DOWN_DOWN|LL_TIM_INDEX_UP_DOWN);
+	LL_TIM_EnableEncoderIndex(TIM3);
+}
+
 void init_timer_6()
 {
 	LL_TIM_InitTypeDef TIM_InitStruct = {0};
@@ -292,6 +353,30 @@ DEVICE_DT_DEFINE(TIMER4_NODE,
                  timer_stm32_init,
                  NULL,
                  &timer4_data,
+                 NULL,
+                 PRE_KERNEL_1,
+                 CONFIG_KERNEL_INIT_PRIORITY_DEVICE,
+                 &timer_funcs
+                );
+
+#endif // Timer 4
+
+
+// Timer3
+#if DT_NODE_HAS_STATUS(TIMER3_NODE, okay)
+
+struct stm32_timer_driver_data timer3_data =
+{
+	.timer_struct       = TIM3,
+	.interrupt_line     = TIMER3_INTERRUPT_LINE,
+	.interrupt_prio     = TIMER3_INTERRUPT_PRIO,
+	.timer_irq_callback = NULL
+};
+
+DEVICE_DT_DEFINE(TIMER3_NODE,
+                 timer_stm32_init,
+                 NULL,
+                 &timer3_data,
                  NULL,
                  PRE_KERNEL_1,
                  CONFIG_KERNEL_INIT_PRIORITY_DEVICE,

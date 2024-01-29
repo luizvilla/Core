@@ -53,11 +53,21 @@ public:
 	void startLogTimer4IncrementalEncoder();
 
 	/**
-	 * @brief Gets the encoder step value.
+	 * @brief Launches the timer3 which is adapted for reading an encoder.
+	 */
+	void startLogTimer3IncrementalEncoder();
+
+	/**
+	 * @brief Gets the encoder step value for timer 4. 
 	 * @return An uint32 value of the counter which corresponds to the step of the system.
 	 */
 	uint32_t getTimer4IncrementalEncoderValue();
 
+	/**
+	 * @brief Gets the encoder step value for timer 3.
+	 * @return An uint32 value of the counter which corresponds to the step of the system.
+	 */
+	uint32_t getTimer3IncrementalEncoderValue();
 
 
 private:
@@ -66,10 +76,14 @@ private:
 	 * @brief Initializes timer 4.
 	 */
 	void timer4Initialize();
+	void timer3Initialize();
 
 	// Variables
 	static bool timer4init;
 	static bool timer4started;
+
+	static bool timer3init;
+	static bool timer3started;
 
 
 };

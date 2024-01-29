@@ -43,7 +43,7 @@ void TimerHAL::timer4Initialize()
 		{
 			.timer_enable_irq = 0,
 			.timer_enable_encoder = 1,
-			.timer_enc_pin_mode = pull_up
+			.timer_enc_pin_mode = pull_down,
 
 		};
 		timer_config(timer4, &timer_cfg);
@@ -73,6 +73,58 @@ uint32_t TimerHAL::getTimer4IncrementalEncoderValue()
 	if (timer4started == true)
 	{
 		return timer_get_count(timer4);
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+static const struct device* timer3 = DEVICE_DT_GET(TIMER3_DEVICE);
+
+bool TimerHAL::timer3init    = false;
+bool TimerHAL::timer3started = false;
+
+
+void TimerHAL::timer3Initialize()
+{
+	if (device_is_ready(timer3) == true)
+	{
+		// Configure timer
+		struct timer_config_t timer_cfg =
+		{
+			.timer_enable_irq = 0,
+			.timer_enable_encoder = 1,
+			.timer_enc_pin_mode = pull_down,
+
+		};
+		timer_config(timer3, &timer_cfg);
+		timer3init = true;
+	}
+}
+
+void TimerHAL::startLogTimer3IncrementalEncoder()
+{
+	if (timer3init == false)
+	{
+		timer3Initialize();
+	}
+
+	if (timer3started == false)
+	{
+		if (device_is_ready(timer3) == true)
+		{
+			timer_start(timer3);
+			timer3started = true;
+		}
+	}
+}
+
+uint32_t TimerHAL::getTimer3IncrementalEncoderValue()
+{
+	if (timer3started == true)
+	{
+		return timer_get_count(timer3);
 	}
 	else
 	{
