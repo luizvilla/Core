@@ -33,18 +33,86 @@
 #include "TwistAPI.h"
 #include "SpinAPI.h"
 
+#include "zephyr/console/console.h"
+#include "opalib_control_pid.h"
+
+// #define BUCK_BOARD
+#define BOOST_BOARD
+
 //--------------SETUP FUNCTIONS DECLARATION-------------------
 void setup_routine(); // Setups the hardware and software of the system
 
 //--------------LOOP FUNCTIONS DECLARATION--------------------
-void loop_background_task();   // Code to be executed in the background task
+void loop_communication_task(); // code to be executed in the slow communication task
+void loop_application_task();   // Code to be executed in the background task
 void loop_critical_task();     // Code to be executed in real time in the critical task
 
 //--------------USER VARIABLES DECLARATIONS-------------------
+enum power_mode
+{
+    MODE_BOOST_ONLY = 0,
+    MODE_BACK2BACK,
+    MODE_PAC,
+};
+
+enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
+{
+    IDLEMODE = 0,
+    POWERMODE
+};
+
+uint8_t mode = IDLEMODE;
+
+static uint32_t control_task_period = 100; //[us] period of the control task
+static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
+
+uint8_t received_serial_char;
+
+/* Measure variables */
+
+static float32_t V1_low_value;
+static float32_t V2_low_value;
+static float32_t I1_low_value;
+static float32_t I2_low_value;
+static float32_t I_high;
+static float32_t V_high;
 
 
+static float meas_data; // temp storage meas value (ctrl task)
+
+float32_t duty_cycle = 0.5;
+float32_t duty_cycle_PID = 0.5;
+
+#ifdef BUCK_BOARD
+static float32_t voltage_reference = 10; //voltage reference 
+static float32_t pid_period = control_task_period / 1000000.0f;
+static float Kb = 1e4;               // back-tracking coefficient
+
+
+/* PID coefficient for a 8.6ms step response*/
+static float32_t integrator_mem = 0; // integral memory
+static float32_t kp = 0.000215;
+static float32_t ki = 2.86;
+static float32_t kd = 0.0;
+
+#endif
+
+
+#ifdef BOOST_BOARD
+static float32_t voltage_reference = 20; //voltage reference 
+static float32_t pid_period = control_task_period / 1000000.0f;
+static float Kb = 1e4;               // back-tracking coefficient
+
+
+/* PID coefficient for a 8.6ms step response*/
+static float32_t integrator_mem = 0; // integral memory
+static float32_t kp = 0.000215;
+static float32_t ki = 2.86;
+static float32_t kd = 0.0;
+#endif
 
 //--------------SETUP FUNCTIONS-------------------------------
+
 
 /**
  * This is the setup routine.
@@ -54,33 +122,111 @@ void loop_critical_task();     // Code to be executed in real time in the critic
  */
 void setup_routine()
 {
-    // Setup the hardware first
+   // Setup the hardware first
     spin.version.setBoardVersion(TWIST_v_1_1_2);
 
+    /* voltage mode BUCK and BOOST definition */
+
+    #ifdef BUCK_BOARD
+    twist.setVersion(shield_TWIST_V1_2);
+    twist.initAllBuck();
+    #endif
+
+    #ifdef BOOST_BOARD
+    twist.setVersion(shield_TWIST_V1_3);
+    twist.initAllBoost();
+    #endif
+
+    opalib_control_init_interleaved_pid(kp, ki, kd, control_task_period);
+
+    data.enableTwistDefaultChannels();
+
     // Then declare tasks
-    uint32_t background_task_number = task.createBackground(loop_background_task);
-    //task.createCritical(loop_critical_task, 500); // Uncomment if you use the critical task
+    uint32_t app_task_number = task.createBackground(loop_application_task);
+    uint32_t com_task_number = task.createBackground(loop_communication_task);
+    task.createCritical(loop_critical_task, 100); // Uncomment if you use the critical task
 
     // Finally, start tasks
-    task.startBackground(background_task_number);
-    //task.startCritical(); // Uncomment if you use the critical task
+    task.startBackground(app_task_number);
+    task.startBackground(com_task_number);
+    task.startCritical(); // Uncomment if you use the critical task
 }
 
 //--------------LOOP FUNCTIONS--------------------------------
+
+
+void loop_communication_task()
+{
+    while (1)
+    {
+        received_serial_char = console_getchar();
+        switch (received_serial_char)
+        {
+        case 'h':
+            //----------SERIAL INTERFACE MENU-----------------------
+            printk(" ________________________________________\n");
+            printk("|     ------- MENU ---------             |\n");
+            printk("|     press i : idle mode                |\n");
+            printk("|     press s : serial mode              |\n");
+            printk("|     press p : power mode               |\n");
+            printk("|     press u : duty cycle UP            |\n");
+            printk("|     press d : duty cycle DOWN          |\n");
+            printk("|________________________________________|\n\n");
+            //------------------------------------------------------
+            break;
+        case 'i':
+            printk("idle mode\n");
+            mode = IDLEMODE;
+            break;
+        case 'p':
+            printk("power mode\n");
+            mode = POWERMODE;
+            break;
+        case 'u':
+            duty_cycle += 0.05;
+            break;
+        case 'd':
+            duty_cycle -= 0.05;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 
 /**
  * This is the code loop of the background task
  * It is executed second as defined by it suspend task in its last line.
  * You can use it to execute slow code such as state-machines.
  */
-void loop_background_task()
+void loop_application_task()
 {
-    // Task content
-    printk("Hello World! \n");
-    spin.led.toggle();
+    while (1)
+    {
 
-    // Pause between two runs of the task
-    task.suspendBackgroundMs(1000);
+        if (mode == IDLEMODE)
+        {
+            spin.led.turnOff();
+        }
+        else if (mode == POWERMODE)
+        {
+            spin.led.turnOn();
+
+            #ifdef BOOST_BOARD
+            printk("%f:", duty_cycle_PID);
+            #endif
+            printk("%f:", duty_cycle);
+            printk("%f:", I1_low_value);
+            printk("%f:", V1_low_value);
+            printk("%f:", I2_low_value);
+            printk("%f:", V2_low_value);
+            printk("%f:", I_high);
+            printk("%f\n", V_high);
+        }
+        k_msleep(100);
+    }
+
 }
 
 /**
@@ -91,6 +237,65 @@ void loop_background_task()
  */
 void loop_critical_task()
 {
+    meas_data = data.getLatest(I1_LOW);
+    if (meas_data < 10000 && meas_data > -10000)
+        I1_low_value = meas_data;
+
+    meas_data = data.getLatest(V1_LOW);
+    if (meas_data != -10000)
+        V1_low_value = meas_data;
+
+    meas_data = data.getLatest(V2_LOW);
+    if (meas_data != -10000)
+        V2_low_value = meas_data;
+
+    meas_data = data.getLatest(I2_LOW);
+    if (meas_data < 10000 && meas_data > -10000)
+        I2_low_value = meas_data;
+
+    meas_data = data.getLatest(I_HIGH);
+    if (meas_data < 10000 && meas_data > -10000)
+        I_high = meas_data;
+
+    meas_data = data.getLatest(V_HIGH);
+    if (meas_data != -10000)
+        V_high = meas_data;
+
+
+    if (mode == IDLEMODE)
+    {
+        if (pwm_enable == true)
+        {
+            twist.stopAll();
+        }
+        pwm_enable = false;
+    }
+    else if (mode == POWERMODE)
+    {
+        #ifdef BUCK_BOARD
+        duty_cycle = opalib_control_interleaved_pid_calculation(voltage_reference, V1_low_value);
+        twist.setAllDutyCycle(duty_cycle); // For buck/boost voltage mode 
+        #endif
+
+        #ifdef BOOST_BOARD
+        duty_cycle_PID = opalib_control_interleaved_pid_calculation(voltage_reference, V_high);
+        twist.setLegDutyCycle(LEG1, duty_cycle_PID);
+        twist.setLegDutyCycle(LEG2, duty_cycle);
+        #endif
+
+
+
+        /* Set POWER ON */
+        if (!pwm_enable)
+        {
+            pwm_enable = true;
+            twist.startLeg(LEG1);
+            #ifdef BOOST_BOARD
+            twist.startLeg(LEG2);
+            #endif
+        }
+
+    }
 
 }
 
