@@ -84,12 +84,28 @@ static float meas_data; // temp storage meas value (ctrl task)
 float32_t duty_cycle = 0.5;
 float32_t duty_cycle_PID = 0.5;
 
-uint32_t incremental_value;
-bool Is_pressed = false;
-LCD lcd(PA13, PA14, PA15, PB3, PA2, PA3);
+uint32_t incremental_value_3;
+uint32_t incremental_value_4;
+uint32_t incremental_value_3_old;
+uint32_t incremental_value_4_old;
+
+int32_t diff_incremental_value_3;
+int32_t diff_incremental_value_4;
+
+float32_t sign_increment = 0;
+
+#define LEFT_BUTTON PA5
+#define RIGHT_BUTTON PC8
+
+bool Is_3_pressed = false;
+bool Is_4_pressed = false;
+bool Is_4_pressed_old = false;
+bool change_mode = false;
+
+LCD lcd(PA13, PB10, PB2, PC5, PA7, PA4);
 
 #ifdef BUCK_BOARD
-static float32_t voltage_reference = 10; //voltage reference 
+static float32_t voltage_reference = 10; //voltage reference
 
 /* PID coefficient for a 8.6ms step response*/
 static float32_t kp = 0.000215;
@@ -100,7 +116,7 @@ static float32_t kd = 0.0;
 
 
 #ifdef BOOST_BOARD
-static float32_t voltage_reference = 20; //voltage reference 
+static float32_t voltage_reference = 40; //voltage reference
 
 /* PID coefficient for a 8.6ms step response*/
 static float32_t kp = 0.000215;
@@ -133,12 +149,13 @@ void setup_routine()
     #endif
 
     #ifdef BOOST_BOARD
-    twist.setVersion(shield_TWIST_V1_3);
+    twist.setVersion(shield_TWIST_V1_2);
     twist.initAllBoost();
     spin.timer.startLogTimer3IncrementalEncoder();
-    spin.gpio.configurePin(PC8, INPUT);
+    spin.timer.startLogTimer4IncrementalEncoder();
+    spin.gpio.configurePin(LEFT_BUTTON, INPUT);
+    spin.gpio.configurePin(RIGHT_BUTTON, INPUT);
     #endif
-
 
     opalib_control_init_interleaved_pid(kp, ki, kd, control_task_period);
 
@@ -205,37 +222,69 @@ void loop_communication_task()
  */
 void loop_application_task()
 {
-    while (1)
+    Is_3_pressed = spin.gpio.readPin(LEFT_BUTTON);
+    Is_4_pressed_old = Is_4_pressed;
+    Is_4_pressed = spin.gpio.readPin(RIGHT_BUTTON);
+
+    if(Is_4_pressed == false && Is_4_pressed_old == true) change_mode = true;
+
+    if (mode == IDLEMODE)
+    {
+        spin.led.turnOff();
+        lcd.clear();
+        lcd.printf("IDLE");
+        if(change_mode == true){
+            mode = POWERMODE;
+            change_mode = false;
+        }
+    }
+    else if (mode == POWERMODE)
     {
 
-        if (mode == IDLEMODE)
-        {
-            spin.led.turnOff();
+        spin.led.turnOn();
+
+        lcd.printf("D=%.3f\nVHigh=%.3f",duty_cycle, V_high);
+
+        if(change_mode == true){
+            mode = IDLEMODE;
+            change_mode = false;
         }
-        else if (mode == POWERMODE)
-        {
-
-            incremental_value = spin.timer.getTimer3IncrementalEncoderValue();
-            spin.led.turnOn();
-
-            lcd.printf("HELLO WORLD \n");
-
-            #ifdef BOOST_BOARD
-            printk("%i:", Is_pressed);
-            printk("%u:", incremental_value);
-            printk("%f:", duty_cycle_PID);
-            #endif
-            printk("%f:", duty_cycle);
-            printk("%f:", I1_low_value);
-            printk("%f:", V1_low_value);
-            printk("%f:", I2_low_value);
-            printk("%f:", V2_low_value);
-            printk("%f:", I_high);
-            printk("%f\n", V_high);
-        }
-        k_msleep(100);
     }
 
+
+    incremental_value_3_old = incremental_value_3;
+    incremental_value_4_old = incremental_value_4;
+    incremental_value_3 = spin.timer.getTimer3IncrementalEncoderValue();
+    incremental_value_4 = spin.timer.getTimer4IncrementalEncoderValue();
+    diff_incremental_value_3 = incremental_value_3 - incremental_value_3_old;
+    diff_incremental_value_4 = incremental_value_4 - incremental_value_4_old;
+
+    if (diff_incremental_value_4>0){
+        sign_increment = 1;
+    }else if (diff_incremental_value_4<0){
+        sign_increment = -1;
+    }else{
+        sign_increment = 0;
+    }
+
+
+    duty_cycle = duty_cycle + sign_increment*0.01;
+
+    #ifdef BOOST_BOARD
+    printk("%i:", Is_3_pressed);
+    printk("%i:", Is_4_pressed);
+    printk("%d:", diff_incremental_value_3);
+    printk("%d:", diff_incremental_value_4);
+    printk("%f:", duty_cycle_PID);
+    #endif
+    printk("%f:", duty_cycle);
+    printk("%f:", I1_low_value);
+    printk("%f:", V1_low_value);
+    printk("%f:", I2_low_value);
+    printk("%f:", V2_low_value);
+    printk("%f:", I_high);
+    printk("%f\n", V_high);
+    task.suspendBackgroundMs(100);
 }
 
 /**
@@ -247,30 +296,29 @@ void loop_application_task()
 void loop_critical_task()
 {
     meas_data = data.getLatest(I1_LOW);
-    if (meas_data < 10000 && meas_data > -10000)
+    if (meas_data < 10000 && meas_data > NO_VALUE)
         I1_low_value = meas_data;
 
     meas_data = data.getLatest(V1_LOW);
-    if (meas_data != -10000)
+    if (meas_data != NO_VALUE)
         V1_low_value = meas_data;
 
     meas_data = data.getLatest(V2_LOW);
-    if (meas_data != -10000)
+    if (meas_data != NO_VALUE)
         V2_low_value = meas_data;
 
     meas_data = data.getLatest(I2_LOW);
-    if (meas_data < 10000 && meas_data > -10000)
+    if (meas_data < 10000 && meas_data > NO_VALUE)
         I2_low_value = meas_data;
 
     meas_data = data.getLatest(I_HIGH);
-    if (meas_data < 10000 && meas_data > -10000)
+    if (meas_data < 10000 && meas_data > NO_VALUE)
         I_high = meas_data;
 
     meas_data = data.getLatest(V_HIGH);
-    if (meas_data != -10000)
+    if (meas_data != NO_VALUE)
         V_high = meas_data;
 
-    Is_pressed = spin.gpio.readPin(PC8);
 
     if (mode == IDLEMODE)
     {
@@ -285,7 +333,7 @@ void loop_critical_task()
 
         #ifdef BUCK_BOARD
         duty_cycle = opalib_control_interleaved_pid_calculation(voltage_reference, V1_low_value);
-        twist.setAllDutyCycle(duty_cycle); // For buck/boost voltage mode 
+        twist.setAllDutyCycle(duty_cycle); // For buck/boost voltage mode
         #endif
 
         #ifdef BOOST_BOARD
