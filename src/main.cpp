@@ -59,13 +59,17 @@ enum power_mode
 enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
 {
     IDLEMODE = 0,
-    POWERMODE
+    POWERMODE,
+    CLOSEDMODE
 };
 
 uint8_t mode = IDLEMODE;
 
 static uint32_t control_task_period = 100; //[us] period of the control task
 static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
+
+static bool leg1_pwm_enable = false;            //[bool] state of the PWM (ctrl task)
+static bool leg2_pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 
 uint8_t received_serial_char;
 
@@ -93,16 +97,36 @@ int32_t diff_incremental_value_3;
 int32_t diff_incremental_value_4;
 
 float32_t sign_increment = 0;
+float32_t sign_increment_3 = 0;
 
-#define LEFT_BUTTON PA5
+float32_t gain_V1   = 0.044924;
+float32_t offset_V1 = -89.828;
+float32_t gain_V2   = 0.04553;
+float32_t offset_V2 = -91.562;
+float32_t gain_VH   = 0.029879;
+float32_t offset_VH = -0.092;
+float32_t gain_I1   = 0.005552;
+float32_t offset_I1 = -11.271;
+float32_t gain_I2   = 0.005439;
+float32_t offset_I2 = -11.26;
+float32_t gain_IH   = 0.004986;
+float32_t offset_IH = -9.94;
+
+
+#define LEFT_BUTTON PB11
 #define RIGHT_BUTTON PC8
 
 bool Is_3_pressed = false;
 bool Is_4_pressed = false;
 bool Is_4_pressed_old = false;
-bool change_mode = false;
+bool Is_3_pressed_old = false;
 
-LCD lcd(PA13, PB10, PB2, PC5, PA7, PA4);
+bool change_mode = false;
+bool open_loop_mode = false;
+bool closed_loop_mode = false;
+
+LCD lcd(PB10, PA13, PB2, PC5, PA7, PA4);
+// LCD ( RS,   E,    D4,  D5,  D6,  D7);
 
 #ifdef BUCK_BOARD
 static float32_t voltage_reference = 10; //voltage reference
@@ -116,7 +140,7 @@ static float32_t kd = 0.0;
 
 
 #ifdef BOOST_BOARD
-static float32_t voltage_reference = 40; //voltage reference
+static float32_t voltage_reference = 25; //voltage reference
 
 /* PID coefficient for a 8.6ms step response*/
 static float32_t kp = 0.000215;
@@ -149,7 +173,7 @@ void setup_routine()
     #endif
 
     #ifdef BOOST_BOARD
-    twist.setVersion(shield_TWIST_V1_2);
+    twist.setVersion(shield_TWIST_V1_3);
     twist.initAllBoost();
     spin.timer.startLogTimer3IncrementalEncoder();
     spin.timer.startLogTimer4IncrementalEncoder();
@@ -157,9 +181,18 @@ void setup_routine()
     spin.gpio.configurePin(RIGHT_BUTTON, INPUT);
     #endif
 
+
+
     opalib_control_init_interleaved_pid(kp, ki, kd, control_task_period);
 
     data.enableTwistDefaultChannels();
+
+    data.setParameters(V1_LOW,gain_V1, offset_V1);
+    data.setParameters(V2_LOW,gain_V2, offset_V2);
+    data.setParameters(V_HIGH,gain_VH, offset_VH);
+    data.setParameters(I1_LOW,gain_I1, offset_I1);
+    data.setParameters(I2_LOW,gain_I2, offset_I2);
+    data.setParameters(I_HIGH,gain_IH, offset_IH);
 
     // Then declare tasks
     uint32_t app_task_number = task.createBackground(loop_application_task);
@@ -222,32 +255,37 @@ void loop_communication_task()
  */
 void loop_application_task()
 {
+    Is_3_pressed_old = Is_3_pressed;
     Is_3_pressed = spin.gpio.readPin(LEFT_BUTTON);
+
+    if(Is_3_pressed == false && Is_3_pressed_old == true) closed_loop_mode = !closed_loop_mode;
+
     Is_4_pressed_old = Is_4_pressed;
     Is_4_pressed = spin.gpio.readPin(RIGHT_BUTTON);
 
-    if(Is_4_pressed == false && Is_4_pressed_old == true) change_mode = true;
+    if(Is_4_pressed == false && Is_4_pressed_old == true) open_loop_mode = !open_loop_mode;
+
 
     if (mode == IDLEMODE)
     {
         spin.led.turnOff();
         lcd.clear();
         lcd.printf("IDLE");
-        if(change_mode == true){
+
+        if(open_loop_mode == true || closed_loop_mode == true){
             mode = POWERMODE;
-            change_mode = false;
         }
+
     }
     else if (mode == POWERMODE)
     {
 
         spin.led.turnOn();
 
-        lcd.printf("D=%.3f\nVHigh=%.3f",duty_cycle, V_high);
+        lcd.printf("D=%.3f DC=%2.f\nVHigh=%.3f",duty_cycle_PID, duty_cycle, V_high);
 
-        if(change_mode == true){
+        if(open_loop_mode == false && closed_loop_mode == false){
             mode = IDLEMODE;
-            change_mode = false;
         }
     }
 
@@ -259,6 +297,7 @@ void loop_application_task()
     diff_incremental_value_3 = incremental_value_3 - incremental_value_3_old;
     diff_incremental_value_4 = incremental_value_4 - incremental_value_4_old;
 
+    //finds out the sign of timer 4
     if (diff_incremental_value_4>0){
         sign_increment = 1;
     }else if (diff_incremental_value_4<0){
@@ -267,15 +306,29 @@ void loop_application_task()
         sign_increment = 0;
     }
 
+    //finds out the sign of timer 3
+    if (diff_incremental_value_3>0){
+        sign_increment_3 = 1;
+    }else if (diff_incremental_value_3<0){
+        sign_increment_3 = -1;
+    }else{
+        sign_increment_3 = 0;
+    }
 
-    duty_cycle = duty_cycle + sign_increment*0.01;
+    duty_cycle = duty_cycle + sign_increment*0.1;
+    voltage_reference = voltage_reference + sign_increment_3*0.1;
 
     #ifdef BOOST_BOARD
     printk("%i:", Is_3_pressed);
+    printk("%i:", Is_3_pressed_old);
+    printk("%i:", closed_loop_mode);
     printk("%i:", Is_4_pressed);
+    printk("%i:", Is_4_pressed_old);
+    printk("%i:", open_loop_mode);
     printk("%d:", diff_incremental_value_3);
     printk("%d:", diff_incremental_value_4);
     printk("%f:", duty_cycle_PID);
+    printk("%f:", voltage_reference);
     #endif
     printk("%f:", duty_cycle);
     printk("%f:", I1_low_value);
@@ -322,11 +375,13 @@ void loop_critical_task()
 
     if (mode == IDLEMODE)
     {
-        if (pwm_enable == true)
-        {
-            twist.stopAll();
+        if (leg1_pwm_enable == true){
+            twist.stopLeg(LEG1);
+            leg1_pwm_enable = false;
+        } else if(leg2_pwm_enable == true){
+            twist.stopLeg(LEG1);
+            leg2_pwm_enable = false;
         }
-        pwm_enable = false;
     }
     else if (mode == POWERMODE)
     {
@@ -337,22 +392,33 @@ void loop_critical_task()
         #endif
 
         #ifdef BOOST_BOARD
-        duty_cycle_PID = opalib_control_interleaved_pid_calculation(voltage_reference, V_high);
-        twist.setLegDutyCycle(LEG1, duty_cycle_PID);
-        twist.setLegDutyCycle(LEG2, duty_cycle);
-        #endif
-
-
-
-        /* Set POWER ON */
-        if (!pwm_enable)
-        {
-            pwm_enable = true;
-            twist.startLeg(LEG1);
-            #ifdef BOOST_BOARD
-            twist.startLeg(LEG2);
-            #endif
+        if(closed_loop_mode == true){
+            if (!leg1_pwm_enable){
+                leg1_pwm_enable = true;
+                twist.startLeg(LEG1); //turns on leg1 is the left button is pressed
+             }
+            duty_cycle_PID = opalib_control_interleaved_pid_calculation(voltage_reference, V_high);
+            twist.setLegDutyCycle(LEG1, duty_cycle_PID);
+        }else{
+            if (leg1_pwm_enable){
+                leg1_pwm_enable = false;
+                twist.stopLeg(LEG1); //turns off leg1 is the left button is pressed
+             }
         }
+
+        if(open_loop_mode == true){
+            if (!leg2_pwm_enable){
+                leg2_pwm_enable = true;
+                twist.startLeg(LEG2); //turns on leg2 is the right button is pressed
+             }
+            twist.setLegDutyCycle(LEG2, duty_cycle);
+        }else{
+            if (leg2_pwm_enable){
+                leg2_pwm_enable = false;
+                twist.stopLeg(LEG2); // turns off leg 2 if the right button is pressed
+             }
+        }
+        #endif
 
     }
 
