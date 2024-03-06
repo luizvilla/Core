@@ -28,79 +28,185 @@
  */
 
 //--------------OWNTECH APIs----------------------------------
-#include "DataAPI.h"
+#include "SpinAPI.h"
 #include "TaskAPI.h"
 #include "TwistAPI.h"
-#include "SpinAPI.h"
+#include "DataAPI.h"
 
-//--------------SETUP FUNCTIONS DECLARATION-------------------
-void setup_routine(); // Setups the hardware and software of the system
+#include "comm_protocol.h"
 
-//--------------LOOP FUNCTIONS DECLARATION--------------------
-void loop_background_task();   // Code to be executed in the background task
-void loop_critical_task();     // Code to be executed in real time in the critical task
+//----------- USER INCLUDE ----------------------
 
-//--------------USER VARIABLES DECLARATIONS-------------------
+//-------------LOOP FUNCTIONS DECLARATION----------------------
+void loop_communication_task(); // code to be executed in the slow communication task
+int8_t CommTask_num;            // Communication Task number
+void loop_application_task();   // code to be executed in the fast application task
+int8_t AppTask_num;             // Application Task number
+void loop_control_task();       // code to be executed in real-time at 20kHz
+
+//--------------USER VARIABLES DECLARATIONS----------------------
+
+static uint32_t control_task_period = 100; //[us] period of the control task
+static bool pwm_enable_leg_1 = false;            //[bool] state of the PWM (ctrl task)
+static bool pwm_enable_leg_2 = false;            //[bool] state of the PWM (ctrl task)
+
+// uint8_t received_serial_char;
+
+float32_t V1_low_value;
+float32_t V2_low_value;
+float32_t I1_low_value;
+float32_t I2_low_value;
+float32_t I_high_value;
+float32_t V_high_value;
+
+float32_t delta_V1;
+float32_t V1_max = 0.0;
+float32_t V1_min = 0.0;
+float32_t delta_V2;
+float32_t V2_max = 0.0;
+float32_t V2_min = 0.0;
 
 
+//---------------------------------------------------------------
 
-//--------------SETUP FUNCTIONS-------------------------------
+//---------------SETUP FUNCTIONS----------------------------------
 
-/**
- * This is the setup routine.
- * It is used to call functions that will initialize your spin, twist, data and/or tasks.
- * In this example, we setup the version of the spin board and a background task.
- * The critical task is defined but not started.
- */
-void setup_routine()
+void setup_hardware()
 {
-    // Setup the hardware first
+    console_init();
+
     spin.version.setBoardVersion(TWIST_v_1_1_2);
 
-    // Then declare tasks
-    uint32_t background_task_number = task.createBackground(loop_background_task);
-    //task.createCritical(loop_critical_task, 500); // Uncomment if you use the critical task
-
-    // Finally, start tasks
-    task.startBackground(background_task_number);
-    //task.startCritical(); // Uncomment if you use the critical task
+    twist.setVersion(shield_TWIST_V1_3);
+    twist.initAllBuck(); // initialize in buck mode leg1 and leg2
 }
 
-//--------------LOOP FUNCTIONS--------------------------------
-
-/**
- * This is the code loop of the background task
- * It is executed second as defined by it suspend task in its last line.
- * You can use it to execute slow code such as state-machines.
- */
-void loop_background_task()
+void setup_software()
 {
-    // Task content
-    printk("Hello World! \n");
-    spin.led.toggle();
+    data.enableTwistDefaultChannels();
 
-    // Pause between two runs of the task
-    task.suspendBackgroundMs(1000);
+    task.createCritical(&loop_control_task, control_task_period);
+    task.startCritical();
+
+    CommTask_num = task.createBackground(loop_communication_task);
+    AppTask_num =  task.createBackground(loop_application_task);
+
+    task.startBackground(CommTask_num);
+    task.startBackground(AppTask_num);
+
 }
 
-/**
- * This is the code loop of the critical task
- * It is executed every 500 micro-seconds defined in the setup_software function.
- * You can use it to execute an ultra-fast code with the highest priority which cannot be interruped.
- * It is from it that you will control your power flow.
- */
-void loop_critical_task()
+//---------------LOOP FUNCTIONS----------------------------------
+
+void loop_communication_task()
+{
+    received_char = console_getchar();
+    initial_handle(received_char);
+}
+
+void loop_application_task()
+{
+    switch(mode)
+    {
+        case IDLE:
+            spin.led.turnOff();
+            if(!print_done) {
+                printk("IDLE \n");
+                print_done = true;
+            }
+            break;
+        case POWER_OFF:
+            spin.led.toggle();
+            if(!print_done) {
+                printk("POWER OFF \n");
+                print_done = true;
+            }
+            printk("{%u,%u,%u,%u}:", RS485_success,
+                                     Sync_success,
+                                     Analog_success,
+                                     Can_success);
+            printk("[%d,%d,%d,%d,%d]:", power_leg_settings[LEG1].settings[0],
+                                        power_leg_settings[LEG1].settings[1],
+                                        power_leg_settings[LEG1].settings[2],
+                                        power_leg_settings[LEG1].settings[3],
+                                        power_leg_settings[LEG1].settings[4]);
+            printk("%f:", power_leg_settings[LEG1].duty_cycle);
+            printk("%f:", power_leg_settings[LEG1].reference_value);
+            printk("%s:", power_leg_settings[LEG1].tracking_var_name);
+            printk("%f:", tracking_vars[LEG1].address[0]);
+            printk("\n");
+            break;
+        case POWER_ON:
+            spin.led.turnOn();
+            if(!print_done) {
+                printk("POWER ON \n");
+                print_done = true;
+            }
+            printk("%f:", power_leg_settings[LEG1].duty_cycle);
+            printk("%f:", power_leg_settings[LEG2].duty_cycle);
+            printk("\n");
+
+            break;
+        default:
+            break;
+    }
+
+     task.suspendBackgroundMs(100);
+}
+
+
+void loop_control_task()
 {
 
+    switch(mode){
+        case IDLE:
+            twist.stopLeg(LEG1);
+            twist.stopLeg(LEG2);
+            pwm_enable_leg_1 = false;
+            pwm_enable_leg_2 = false;
+
+            break;
+
+        case POWER_OFF:
+
+            twist.stopLeg(LEG1);
+            twist.stopLeg(LEG2);
+            pwm_enable_leg_1 = false;
+            pwm_enable_leg_2 = false;
+
+            break;
+
+        case POWER_ON:
+
+
+            if(!pwm_enable_leg_1 && power_leg_settings[LEG1].settings[BOOL_LEG]) {twist.startLeg(LEG1); pwm_enable_leg_1 = true;}
+            if(!pwm_enable_leg_2 && power_leg_settings[LEG2].settings[BOOL_LEG]) {twist.startLeg(LEG2); pwm_enable_leg_2 = true;}
+
+
+            if(power_leg_settings[LEG1].settings[BOOL_LEG]){
+                    twist.setLegDutyCycle(LEG1, power_leg_settings[LEG1].duty_cycle ); //uses the normal convention by default
+            }
+
+            if(power_leg_settings[LEG2].settings[BOOL_LEG]){
+                    twist.setLegDutyCycle(LEG2, power_leg_settings[LEG2].duty_cycle); //uses the normal convention by default
+            }
+
+            break;
+        default:
+            break;
+    }
 }
+
 
 /**
  * This is the main function of this example
  * This function is generic and does not need editing.
  */
+
 int main(void)
 {
-    setup_routine();
+    setup_hardware();
+    setup_software();
 
     return 0;
 }
