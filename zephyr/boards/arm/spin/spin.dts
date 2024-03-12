@@ -27,7 +27,7 @@
 		zephyr,console = &cdc_acm_uart0;
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
-		zephyr,can-primary = &can1;
+		zephyr,canbus = &can1;
 		zephyr,boot-mode = &retention0;
 	};
 
