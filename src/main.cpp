@@ -37,8 +37,8 @@
 #include "opalib_control_pid.h"
 #include "LCDLib.hpp"
 
-// #define BUCK_BOARD
-#define BOOST_BOARD
+#define BUCK_BOARD
+// #define BOOST_BOARD
 
 //--------------SETUP FUNCTIONS DECLARATION-------------------
 void setup_routine(); // Setups the hardware and software of the system
@@ -85,8 +85,8 @@ static float32_t V_high;
 
 static float meas_data; // temp storage meas value (ctrl task)
 
-float32_t duty_cycle = 0.5;
-float32_t duty_cycle_PID = 0.5;
+float32_t duty_cycle = 0.1;
+float32_t duty_cycle_PID = 0.1;
 
 uint32_t incremental_value_3;
 uint32_t incremental_value_4;
@@ -125,7 +125,8 @@ bool change_mode = false;
 bool open_loop_mode = false;
 bool closed_loop_mode = false;
 
-LCD lcd(PB10, PA13, PB2, PC5, PA7, PA4);
+static uint8_t mode_counter = 0;
+LCD lcd(PA13, PB10, PB2, PC5, PA7, PA4);
 // LCD ( RS,   E,    D4,  D5,  D6,  D7);
 
 #ifdef BUCK_BOARD
@@ -164,12 +165,19 @@ void setup_routine()
 
     lcd.begin(16,2);
     lcd.setCursor(0, 0);
+    lcd.clear();
+    lcd.printf("SYSTEM ON");
 
     /* voltage mode BUCK and BOOST definition */
 
     #ifdef BUCK_BOARD
     twist.setVersion(shield_TWIST_V1_2);
     twist.initAllBuck();
+    spin.ngnd.turnOn();
+    spin.timer.startLogTimer3IncrementalEncoder();
+    spin.timer.startLogTimer4IncrementalEncoder();
+    spin.gpio.configurePin(LEFT_BUTTON, INPUT);
+    spin.gpio.configurePin(RIGHT_BUTTON, INPUT);
     #endif
 
     #ifdef BOOST_BOARD
@@ -255,15 +263,19 @@ void loop_communication_task()
  */
 void loop_application_task()
 {
-    Is_3_pressed_old = Is_3_pressed;
-    Is_3_pressed = spin.gpio.readPin(LEFT_BUTTON);
+    // Is_3_pressed_old = Is_3_pressed;
+    // Is_3_pressed = spin.gpio.readPin(LEFT_BUTTON);
 
-    if(Is_3_pressed == false && Is_3_pressed_old == true) closed_loop_mode = !closed_loop_mode;
+    // if(Is_3_pressed == false && Is_3_pressed_old == true) closed_loop_mode = !closed_loop_mode;
 
     Is_4_pressed_old = Is_4_pressed;
     Is_4_pressed = spin.gpio.readPin(RIGHT_BUTTON);
 
-    if(Is_4_pressed == false && Is_4_pressed_old == true) open_loop_mode = !open_loop_mode;
+    if(Is_4_pressed == false && Is_4_pressed_old == true){
+        mode_counter++;
+        if (mode_counter == 3) mode_counter = 0;
+        // open_loop_mode = !open_loop_mode;
+        }
 
 
     if (mode == IDLEMODE)
@@ -272,21 +284,26 @@ void loop_application_task()
         lcd.clear();
         lcd.printf("IDLE");
 
-        if(open_loop_mode == true || closed_loop_mode == true){
-            mode = POWERMODE;
-        }
+        // if(open_loop_mode == true || closed_loop_mode == true){
+        //     mode = POWERMODE;
+        // }
+        if(mode_counter>0) mode = POWERMODE;
 
     }
     else if (mode == POWERMODE)
     {
 
         spin.led.turnOn();
-
-        lcd.printf("D=%.3f DC=%2.f\nVHigh=%.3f",duty_cycle_PID, duty_cycle, V_high);
-
-        if(open_loop_mode == false && closed_loop_mode == false){
-            mode = IDLEMODE;
+        if(mode_counter == 1){
+            lcd.printf("CLOSED LOOP MODE\nV=%.2f V2=%.2f",voltage_reference, V2_low_value);
+        }else{
+            lcd.printf("OPEN LOOP MODE  \nD=%.2f V2=%.2f",duty_cycle, V2_low_value);
+            // lcd.printf("DP=%.2f DM=%.2f\nVR=%.2f V1=%.2f",duty_cycle_PID, duty_cycle, voltage_reference, V1_low_value);
         }
+        if(mode_counter==0) mode = IDLEMODE;
+        // if(open_loop_mode == false && closed_loop_mode == false){
+        //     mode = IDLEMODE;
+        // }
     }
 
 
@@ -315,10 +332,9 @@ void loop_application_task()
         sign_increment_3 = 0;
     }
 
-    duty_cycle = duty_cycle + sign_increment*0.1;
+    duty_cycle = duty_cycle + sign_increment*0.01;
     voltage_reference = voltage_reference + sign_increment_3*0.1;
 
-    #ifdef BOOST_BOARD
     printk("%i:", Is_3_pressed);
     printk("%i:", Is_3_pressed_old);
     printk("%i:", closed_loop_mode);
@@ -329,7 +345,6 @@ void loop_application_task()
     printk("%d:", diff_incremental_value_4);
     printk("%f:", duty_cycle_PID);
     printk("%f:", voltage_reference);
-    #endif
     printk("%f:", duty_cycle);
     printk("%f:", I1_low_value);
     printk("%f:", V1_low_value);
@@ -379,7 +394,7 @@ void loop_critical_task()
             twist.stopLeg(LEG1);
             leg1_pwm_enable = false;
         } else if(leg2_pwm_enable == true){
-            twist.stopLeg(LEG1);
+            twist.stopLeg(LEG2);
             leg2_pwm_enable = false;
         }
     }
@@ -387,8 +402,21 @@ void loop_critical_task()
     {
 
         #ifdef BUCK_BOARD
-        duty_cycle = opalib_control_interleaved_pid_calculation(voltage_reference, V1_low_value);
-        twist.setAllDutyCycle(duty_cycle); // For buck/boost voltage mode
+        if(mode_counter == 1){ //mode closed loop
+            if (!leg2_pwm_enable){
+                leg2_pwm_enable = true;
+                twist.startLeg(LEG2); //turns on leg1 is the left button is pressed
+             }
+            duty_cycle_PID = opalib_control_interleaved_pid_calculation(voltage_reference, V2_low_value);
+            twist.setLegDutyCycle(LEG2, duty_cycle_PID);
+        }else if(mode_counter == 2){
+            twist.setLegDutyCycle(LEG2, duty_cycle);
+        }else{
+            if (leg2_pwm_enable){
+                leg2_pwm_enable = false;
+                twist.stopLeg(LEG2); // turns off leg 2 if the mode counter is lower than 2
+             }
+        }
         #endif
 
         #ifdef BOOST_BOARD
