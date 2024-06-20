@@ -118,8 +118,10 @@ def upload_pre(source, target, env):
 		upload_options = env.BoardConfig().get("upload", {})
 
 	if not bool(upload_options.get("disable_flushing", False)):
-		env.FlushSerialBuffer(spin_port)
-
+		try: 
+			env.FlushSerialBuffer(spin_port)
+		except:
+			print("flushing serial failed")
 	env.TouchSerialPort(spin_port, 1200)
 
 	# Wait for board to reboot in bootloader mode
