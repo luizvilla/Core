@@ -300,10 +300,10 @@ void loop_control_task()
 
             //calls the pid calculation if the converter in either in mode buck or boost
             if(power_leg_settings[LEG1].settings[BOOL_BUCK] || power_leg_settings[LEG1].settings[BOOL_BOOST])
-                power_leg_settings[LEG1].duty_cycle = opalib_control_leg1_pid_calculation(power_leg_settings[LEG1].reference_value , tracking_vars[LEG1].address[0]);
+                power_leg_settings[LEG1].duty_cycle = opalib_control_leg1_pid_calculation(power_leg_settings[LEG1].reference_value , *power_leg_settings[LEG1].tracking_variable);
 
             if(power_leg_settings[LEG2].settings[BOOL_BUCK] || power_leg_settings[LEG2].settings[BOOL_BOOST])
-                power_leg_settings[LEG2].duty_cycle = opalib_control_leg1_pid_calculation(power_leg_settings[LEG2].reference_value , tracking_vars[LEG2].address[0]);
+                power_leg_settings[LEG2].duty_cycle = opalib_control_leg2_pid_calculation(power_leg_settings[LEG2].reference_value , *power_leg_settings[LEG2].tracking_variable);
 
             if(power_leg_settings[LEG1].settings[BOOL_LEG]){
                 if(power_leg_settings[LEG1].settings[BOOL_BOOST]){
