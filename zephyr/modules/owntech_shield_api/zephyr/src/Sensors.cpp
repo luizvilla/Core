@@ -366,6 +366,42 @@ void SensorsAPI::setOwnverterTempMeas(ownverter_temp_sensor_t temperature_sensor
 	}
 }
 
+#ifdef CONFIG_SHIELD_POWERVERTER
+
+void SensorsAPI::enableDefaultPowerverterSensors()
+{
+	/**
+	 * Defines the triggers of all ADCs.
+	 * 	ADC 1 - Triggered by HRTIM C, which is linked to event 3
+	 * 	ADC 2 - Triggered by HRTIM A, which is linked to event 1
+	 * 	ADC 3, 4 and 5 - Triggered by software
+	 * 					They are mainly used for non-real-time measurements,
+	 * 					such as temperature
+	 */
+	spin.data.configureTriggerSource(ADC_1, TRIG_PWM);
+	spin.data.configureTriggerSource(ADC_2, TRIG_PWM);
+	spin.data.configureTriggerSource(ADC_3, TRIG_SOFTWARE);
+	spin.data.configureTriggerSource(ADC_4, TRIG_SOFTWARE);
+	spin.data.configureTriggerSource(ADC_5, TRIG_SOFTWARE);
+
+	/**
+	 * Defines ADC 1 and ADC 2 measurements as discontinuous.
+	 * This is specially helpful for creating synchronous measurements.
+	 * Each measurement is done once per period of HRTIM at a precise moment
+	 */
+	spin.data.configureDiscontinuousMode(ADC_1, 1);
+	spin.data.configureDiscontinuousMode(ADC_2, 1);
+
+	/* Creates the list of measurements of the ADC 1 */
+	this->enableSensor(V1_LOW, ADC_1);
+	this->enableSensor(V2_LOW, ADC_1);
+	this->enableSensor(V_HIGH, ADC_1);
+
+	/* Creates the list of measurements of the ADC 2 */
+	this->enableSensor(I1_LOW, ADC_2);
+	this->enableSensor(I2_LOW, ADC_2);
+	this->enableSensor(I_HIGH, ADC_2);
+}
 
 #endif
 

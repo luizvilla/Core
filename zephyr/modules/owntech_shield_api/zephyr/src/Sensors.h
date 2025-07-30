@@ -459,6 +459,36 @@ public:
 	void setOwnverterTempMeas(ownverter_temp_sensor_t temperature_sensor);
 #endif
 
+#ifdef CONFIG_SHIELD_OWNVERTER
+
+	/**
+	 * @brief This function is used to enable acquisition of all voltage/current
+	 *        sensors on the PowerVerter shield.
+	 * 
+	 * @note  ADCs are triggered simultaneously.
+	 * 
+	 * @note  Sensors are attributed to ADC1 and ADC2 as follows: 
+	 * 
+	 * - `ADC1_LIST[3]`: [`V1_LOW`,`V2_LOW`, `V_HIGH`]  
+	 *      
+	 * - `ADC2_LIST[3]`: [`I1_LOW`,`I2_LOW`, `I_HIGH`]
+	 *        
+	 * This function will configure ADC 1 and 2 to be automatically triggered 
+	 * by the HRTIM, so the board must be configured as a power converted to 
+	 * enable HRTIM events.
+	 * 
+	 * All other ADCs remain software triggered, thus will only be acquired 
+	 * when triggerAcquisition() is called.
+	 * 
+	 * It also configures the gpios that control the MUX that chooses which
+	 * temperature will be measured.
+	 *
+	 * @note  This function must be called *before* ADC is started.
+	 */
+	void enableDefaultPowerverterSensors();
+
+#endif
+
 #ifdef CONFIG_SHIELD_TWIST
 
 	/**
