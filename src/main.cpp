@@ -32,6 +32,7 @@
 #include "ScopeMimicry.h"
 #include "SpinAPI.h"
 #include "TaskAPI.h"
+#include "CommunicationAPI.h"
 #include "ShieldAPI.h"
 #include "arm_math_types.h"
 #include "control_factory.h"
@@ -93,6 +94,37 @@ static three_phase_t Vabc;
 static three_phase_t duty_abc;
 static dqo_t Vdq;
 static float32_t angle_4_control;
+
+uint8_t buffer_tx[6];
+uint8_t buffer_rx[6];
+
+/* Communication frames structures */
+typedef struct {
+	uint32_t angle:32;
+	uint8_t  status:8;
+	uint8_t  nodata:8;
+} __packed angle_frame_t;
+
+typedef struct {
+	uint32_t current:32;
+	uint8_t  status:8;
+	uint8_t  nodata:8;
+} __packed current_frame_t;
+
+
+angle_frame_t data_angle_2_send;
+current_frame_t data_current_received;
+
+typedef struct {
+	uint16_t V1:12;
+	uint16_t V2:12;
+	uint16_t I1:12;
+	uint16_t I2:12;
+	uint16_t VH:12;
+	uint16_t IH:12;
+	uint8_t status:4;
+	uint8_t id:4;
+} __packed phase_frame_t;
 
 /* Variables used to get static value for ScopeMimicry */
 static float32_t duty_a, duty_b;
@@ -166,6 +198,14 @@ uint16_t k_app_idx;
 ScopeMimicry scope(SCOPE_SIZE, 11);
 static bool is_downloading;
 static bool memory_print;
+
+void reception_function(void)
+{
+	/* Here we are the communication master, so when we the slave send something
+	we receive the current frame. */
+	data_current_received = *(current_frame_t *) buffer_rx;
+}
+
 
 bool mytrigger()
 {
@@ -360,7 +400,9 @@ void init_variables()
 void setup_routine()
 {
 	/* Setup the hardware first */
+	communication.sync.initMaster();
 	shield.power.initBuck(ALL);
+	communication.rs485.configure(buffer_tx, buffer_rx, sizeof(buffer_tx), reception_function, SPEED_10M);
 	shield.sensors.enableDefaultPowerverterSensors();
 
 	/* Scope configuration */
@@ -389,7 +431,7 @@ void setup_routine()
 					task.createBackground(loop_background_task);
 
 	uint32_t app_task_number = task.createBackground(application_task);
-	task.createCritical(loop_critical_task, control_task_period);
+	task.createCritical(loop_critical_task, control_task_period, source_hrtim);
 
 	/* Finally, start tasks */
 	task.startBackground(background_task_number);
@@ -528,12 +570,24 @@ void loop_critical_task()
 	switch (control_state) {
 	case OFFSET_ST:
 		stop_pwm_and_reset_states_ifnot();
+		data_angle_2_send.angle = -1;
+		data_angle_2_send.status = OFFSET_ST;
+		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
+		communication.rs485.startTransmission();
 		break;
 	case IDLE_ST:
 		stop_pwm_and_reset_states_ifnot();
+		data_angle_2_send.angle = -1;
+		data_angle_2_send.status = IDLE_ST;
+		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
+		communication.rs485.startTransmission();
 		break;
 	case ERROR_ST:
 		stop_pwm_and_reset_states_ifnot();
+		data_angle_2_send.angle = -1;
+		data_angle_2_send.status = ERROR_ST;
+		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
+		communication.rs485.startTransmission();
 		break;
 	case POWER_ST:
 		/* Control loop is executed here */
@@ -541,6 +595,12 @@ void loop_critical_task()
 		compute_duties();
 		apply_duties();
 		start_pwms_ifnot();
+
+		/* send angle reference to slave */
+		data_angle_2_send.angle = angle_ref;
+		data_angle_2_send.status = POWER_ST;
+		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
+		communication.rs485.startTransmission();
 		break;
 	}
 
