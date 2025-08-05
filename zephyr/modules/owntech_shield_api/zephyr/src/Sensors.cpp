@@ -366,6 +366,8 @@ void SensorsAPI::setOwnverterTempMeas(ownverter_temp_sensor_t temperature_sensor
 	}
 }
 
+#endif
+
 #ifdef CONFIG_SHIELD_POWERVERTER
 
 void SensorsAPI::enableDefaultPowerverterSensors()

@@ -23,7 +23,7 @@
             leg-name = "LEG1";
 			pwms = <&pwma 1 0>, <&pwma 2 0>;
             pwm-pin-num = <12 14>;
-            driver-pin-num = <19>;
+            driver-pin-num = <0>;
             current-pin-num = <25>;
             default-adc = "ADC_1";
             default-adc-decim = <1>;
@@ -38,7 +38,7 @@
             leg-name = "LEG2";
 			pwms = <&pwmc 1 0>, <&pwmc 2 0>;
             pwm-pin-num = <2 4>;
-            driver-pin-num = <22>;
+            driver-pin-num = <0>;
             current-pin-num = <30>;
             default-adc = "ADC_2";
             default-adc-decim = <1>;
@@ -53,7 +53,7 @@
             leg-name = "LEG3";
 			pwms = <&pwme 1 0>, <&pwme 2 0>;
             pwm-pin-num = <10 11>;
-            driver-pin-num = <56>;
+            driver-pin-num = <0>;
             current-pin-num = <1>;
             default-adc = "UNKNOWN_ADC";
             default-adc-decim = <1>;

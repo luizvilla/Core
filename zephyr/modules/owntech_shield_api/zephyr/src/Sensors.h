@@ -459,7 +459,7 @@ public:
 	void setOwnverterTempMeas(ownverter_temp_sensor_t temperature_sensor);
 #endif
 
-#ifdef CONFIG_SHIELD_OWNVERTER
+#ifdef CONFIG_SHIELD_POWERVERTER
 
 	/**
 	 * @brief This function is used to enable acquisition of all voltage/current
