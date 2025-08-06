@@ -384,17 +384,17 @@ void _hrtim_callback()
         LL_HRTIM_ClearFlag_SYNC(HRTIM1);
     }
 
-    if (LL_HRTIM_GetSyncOutConfig(HRTIM1) == LL_HRTIM_SYNCOUT_POSITIVE_PULSE)
-    {
-        /* In case of master communication mode, the master will send a
-        synchronization pulse every control period allowing the slave to
-        synchronize its control task execution to master control task execution */
-        LL_GPIO_SetPinMode(GPIOB, LL_GPIO_PIN_1, LL_GPIO_MODE_ALTERNATE);
+    // if (LL_HRTIM_GetSyncOutConfig(HRTIM1) == LL_HRTIM_SYNCOUT_POSITIVE_PULSE)
+    // {
+    //     /* In case of master communication mode, the master will send a
+    //     synchronization pulse every control period allowing the slave to
+    //     synchronize its control task execution to master control task execution */
+    //     LL_GPIO_SetPinMode(GPIOB, LL_GPIO_PIN_1, LL_GPIO_MODE_ALTERNATE);
 
-        k_busy_wait(1);
+    //     k_busy_wait(1);
 
-        LL_GPIO_SetPinMode(GPIOB, LL_GPIO_PIN_1, LL_GPIO_MODE_OUTPUT);
-    }
+    //     LL_GPIO_SetPinMode(GPIOB, LL_GPIO_PIN_1, LL_GPIO_MODE_OUTPUT);
+    // }
 
     if (user_callback != NULL)
     {

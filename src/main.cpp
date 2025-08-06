@@ -100,13 +100,13 @@ uint8_t buffer_rx[6];
 
 /* Communication frames structures */
 typedef struct {
-	uint32_t angle:32;
+	float32_t angle;
 	uint8_t  status:8;
 	uint8_t  nodata:8;
 } __packed angle_frame_t;
 
 typedef struct {
-	uint32_t current:32;
+	float32_t current;
 	uint8_t  status:8;
 	uint8_t  nodata:8;
 } __packed current_frame_t;
@@ -114,17 +114,6 @@ typedef struct {
 
 angle_frame_t data_angle_2_send;
 current_frame_t data_current_received;
-
-typedef struct {
-	uint16_t V1:12;
-	uint16_t V2:12;
-	uint16_t I1:12;
-	uint16_t I2:12;
-	uint16_t VH:12;
-	uint16_t IH:12;
-	uint8_t status:4;
-	uint8_t id:4;
-} __packed phase_frame_t;
 
 /* Variables used to get static value for ScopeMimicry */
 static float32_t duty_a, duty_b;
@@ -204,6 +193,10 @@ void reception_function(void)
 	/* Here we are the communication master, so when we the slave send something
 	we receive the current frame. */
 	data_current_received = *(current_frame_t *) buffer_rx;
+	if (data_current_received.status == ERROR_ST)
+	{
+		control_state = IDLE_ST;
+	}
 }
 
 
@@ -400,8 +393,8 @@ void init_variables()
 void setup_routine()
 {
 	/* Setup the hardware first */
-	communication.sync.initMaster();
 	shield.power.initBuck(ALL);
+	communication.sync.initMaster();
 	communication.rs485.configure(buffer_tx, buffer_rx, sizeof(buffer_tx), reception_function, SPEED_10M);
 	shield.sensors.enableDefaultPowerverterSensors();
 

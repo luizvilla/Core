@@ -54,6 +54,8 @@ void SyncCommunication::initMaster()
 	LL_GPIO_SetPinPull      (GPIOB, LL_GPIO_PIN_1, LL_GPIO_PULL_NO);
 	LL_GPIO_SetAFPin_0_7    (GPIOB, LL_GPIO_PIN_1, LL_GPIO_AF_13);
 
+    LL_GPIO_SetPinMode(GPIOB, LL_GPIO_PIN_1, LL_GPIO_MODE_ALTERNATE);
+
 	LL_HRTIM_TIM_CounterEnable(HRTIM1, LL_HRTIM_TIMER_A);
 }
 
@@ -71,7 +73,7 @@ void SyncCommunication::initSlave()
 	/* HRTIM_SCIN pin configuration */
 	LL_AHB2_GRP1_EnableClock(LL_AHB2_GRP1_PERIPH_GPIOB);
 
-#ifdef CONFIG_SHIELD_TWIST_V1_4_1
+#ifdef CONFIG_SHIELD_TWIST_V1_4_1 || CONFIG_SHIELD_POWERVERTER_V0_9_0
 	LL_GPIO_SetPinMode      (GPIOB, LL_GPIO_PIN_2, LL_GPIO_MODE_ALTERNATE);
 	LL_GPIO_SetPinSpeed     (GPIOB,
 							 LL_GPIO_PIN_2,
