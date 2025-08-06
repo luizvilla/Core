@@ -69,11 +69,6 @@ static const uint32_t control_task_period = (uint32_t)(Ts * 1.e6F);
 static float32_t tmpI1_offset;
 static float32_t tmpI2_offset;
 
-/* Variables to control the open loop SPWM */
-static float32_t amplitude;
-static float32_t pulsation;
-static float32_t angle_ref;
-
 /* Power LEG measures */
 static float32_t meas_data;
 static float32_t I1_low_value;
@@ -90,10 +85,17 @@ static float32_t I_high;
 static float32_t V_high;
 
 /* Three phase system and Park DQ Frame (dqo) */
+/* Three phase system and Park DQ Frame (dqo) */
 static three_phase_t Vabc;
 static three_phase_t duty_abc;
+static three_phase_t Iabc;
 static dqo_t Vdq;
+static dqo_t Idq;
+static dqo_t Idq_ref;
 static float32_t angle_4_control;
+
+/* We only make torque control. */
+static float32_t manual_Iq_ref;
 
 uint8_t buffer_tx[6];
 uint8_t buffer_rx[6];
@@ -112,15 +114,21 @@ typedef struct {
 } __packed current_frame_t;
 
 
-angle_frame_t data_angle_2_send;
-current_frame_t data_current_received;
+current_frame_t data_current_2_send;
+angle_frame_t data_angle_received;
 
 /* Variables used to get static value for ScopeMimicry */
+static three_phase_t Iabc_ref;
 static float32_t duty_a, duty_b;
+static float32_t Ia_ref;
+static float32_t Ib_ref;
 static float32_t Va;
-static float32_t Vb;
+static float32_t Iq_meas;
+static float32_t Iq_ref;
+static float32_t Iq_max;
 static float32_t Vd, Vq;
-static float32_t angle_index_f;
+static float32_t angle_ref;
+
 
 /**
  * Low Pass Filters Init
@@ -184,7 +192,7 @@ uint8_t asked_mode = IDLEMODE;
 
 const uint16_t SCOPE_SIZE = 512;
 uint16_t k_app_idx;
-ScopeMimicry scope(SCOPE_SIZE, 11);
+ScopeMimicry scope(SCOPE_SIZE, 10);
 static bool is_downloading;
 static bool memory_print;
 
@@ -192,13 +200,17 @@ void reception_function(void)
 {
 	/* Here we are the communication master, so when we the slave send something
 	we receive the current frame. */
-	data_current_received = *(current_frame_t *) buffer_rx;
-	if (data_current_received.status == ERROR_ST)
+	data_angle_received = *(angle_frame_t *) buffer_rx;
+	if (data_angle_received.angle != -1)
+	{
+		angle_4_control = data_angle_received.angle;
+	}
+	else
 	{
 		control_state = IDLE_ST;
 	}
+	communication.rs485.startTransmission();
 }
-
 
 bool mytrigger()
 {
@@ -221,6 +233,8 @@ void dump_scope_datas(ScopeMimicry &scope) {
 void init_filt_and_reg(void)
 {
 	vHigh_filter.reset(V_HIGH_MIN);
+	pi_d.reset();
+	pi_q.reset();
 	error_counter = 0;
 }
 
@@ -272,16 +286,6 @@ inline void retrieve_analog_datas()
 }
 
 /**
- * Create an angle_ref that increments from 0 to 2pi and resets.
- * It creates the angle sawtooth at a given pulsation.
- */
-inline void compute_angle_ref()
-{
-    angle_ref += pulsation * Ts;
-    angle_ref = ot_modulo_2pi(angle_ref);
-}
-
-/**
  * Handles current limits and switch to Error state if limits exceeded.
  */
 inline void overcurrent_mngt()
@@ -297,6 +301,36 @@ inline void overcurrent_mngt()
 }
 
 /**
+ * Performs Torque control using Field Oriented Control algorithm
+ */
+inline void control_torque()
+{
+
+	Idq_ref.q = manual_Iq_ref;
+
+	/* Saturation */
+	if (Idq_ref.q > Iq_max) {
+		Idq_ref.q = Iq_max;
+	}
+	if (Idq_ref.q < -Iq_max) {
+		Idq_ref.q = -Iq_max;
+	}
+
+	Idq_ref.d = 0.0F;
+	Iabc.a = I1_low_value;
+	Iabc.b = I2_low_value;
+	Iabc.c = -(Iabc.a + Iabc.b);
+
+	Idq = Transform::to_dqo(Iabc, angle_4_control);
+	Vdq.d = pi_d.calculateWithReturn(Idq_ref.d, Idq.d);
+	Vdq.q = pi_q.calculateWithReturn(Idq_ref.q, Idq.q);
+	Vdq.o = 0.0F;
+
+	Vabc = Transform::to_threephase(Vdq, angle_4_control);
+}
+
+
+/**
  * Stops PWM and reset filter and PID states
  */
 inline void stop_pwm_and_reset_states_ifnot()
@@ -307,16 +341,6 @@ inline void stop_pwm_and_reset_states_ifnot()
 		init_filt_and_reg();
 		pwm_enable = false;
 	}
-}
-
-/**
- * Performs transform to generate open loop SPWM.
- */
-inline void generate_SPWM()
-{
-	angle_4_control = angle_ref;
-    Vdq = {0.0F, amplitude, 0.0F};
-	Vabc = Transform::to_threephase(Vdq, angle_4_control);
 }
 
 /**
@@ -359,10 +383,6 @@ void init_variables()
 	/* Time counter */
 	counter_time = 0;
 
-    /* References */
-    amplitude = 1;
-    pulsation = 100;
-
 	/* Measurements variables */
 	I1_low_value = 0.0F;
 	I2_low_value = 0.0F;
@@ -377,6 +397,10 @@ void init_variables()
 	asked_mode = IDLEMODE;
 	/* We begin to measure the current offset before all */
 	control_state = OFFSET_ST;
+
+
+	Iq_max = 2.0;
+	manual_Iq_ref = 0.0F;
 }
 /* --------------SETUP FUNCTIONS------------------------------- */
 
@@ -394,7 +418,7 @@ void setup_routine()
 {
 	/* Setup the hardware first */
 	shield.power.initBuck(ALL);
-	communication.sync.initMaster();
+	communication.sync.initSlave();
 	communication.rs485.configure(buffer_tx, buffer_rx, sizeof(buffer_tx), reception_function, SPEED_10M);
 	shield.sensors.enableDefaultPowerverterSensors();
 
@@ -402,13 +426,13 @@ void setup_routine()
 	scope.connectChannel(V12_value, "V12_value");           /* 0 */
 	scope.connectChannel(Vq, "Vq");                         /* 1 */
 	scope.connectChannel(Vd, "Vd");                         /* 2 */
-	scope.connectChannel(Va, "Va");                         /* 3 */
-	scope.connectChannel(Vb, "Vb");                         /* 4 */
-	scope.connectChannel(duty_a, "dutyA");     	            /* 5 */
-	scope.connectChannel(duty_b, "dutyB");                  /* 6 */
-	scope.connectChannel(angle_ref, "angle_ref");           /* 7 */
-	scope.connectChannel(amplitude, "amplitude ref");       /* 8 */
-	scope.connectChannel(pulsation, "pulsation ref");       /* 9 */
+	scope.connectChannel(I1_low_value, "I1_low_value");     /* 3 */
+	scope.connectChannel(I2_low_value, "I2_low_value");     /* 4 */
+	scope.connectChannel(I_high, "I_high_value");     	    /* 5 */
+	scope.connectChannel(Iq_meas, "Iq_meas");               /* 6 */
+	scope.connectChannel(Ib_ref, "Ib_ref");                 /* 7 */
+	scope.connectChannel(Ia_ref, "Ia_ref");                 /* 8 */
+	scope.connectChannel(angle_ref, "angle_ref");           /* 9 */
 	scope.connectChannel(control_state_f, "control_state"); /* 10 */
 	scope.set_trigger(&mytrigger);
 	scope.set_delay(0.0);
@@ -456,16 +480,10 @@ void loop_background_task()
 	case 'r':
 		is_downloading = true;
 	case 'u':
-		amplitude += 0.1;
+		manual_Iq_ref += 0.1;
 		break;
 	case 'd':
-		amplitude -= 0.1F;
-		break;
-    case 'y':
-		pulsation += 0.1;
-		break;
-	case 's':
-		pulsation -= 0.1F;
+		manual_Iq_ref -= 0.1F;
 		break;
 	case 'm':
 		/* To print scope datas in ownplot as soon as possible */
@@ -485,9 +503,10 @@ void application_task()
 {
 	if (!memory_print) {
 		printk("%7.2f:", V_high);
-        printk("%7.2f:", amplitude);
-        printk("%7.2f:", pulsation);
-		printk("%7d\r\n", control_state);
+		printk("%7.2f:", Iq_max);
+		printk("%7.2f:", manual_Iq_ref);
+		printk("%7.2f:", I1_offset);
+		printk("%7d:\r\n", control_state);
 
 	} else {
 		/* If memory_print is true then we plot scope datas in an infinite loop
@@ -556,56 +575,54 @@ void loop_critical_task()
 
 	retrieve_analog_datas();
 
-    compute_angle_ref();
-
 	overcurrent_mngt();
 
 	switch (control_state) {
 	case OFFSET_ST:
 		stop_pwm_and_reset_states_ifnot();
-		data_angle_2_send.angle = -1;
-		data_angle_2_send.status = OFFSET_ST;
-		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
-		communication.rs485.startTransmission();
+		data_current_2_send.current = -1;
+		data_current_2_send.status = OFFSET_ST;
+		memcpy(buffer_tx, &data_current_2_send, sizeof(data_current_2_send));
 		break;
 	case IDLE_ST:
 		stop_pwm_and_reset_states_ifnot();
-		data_angle_2_send.angle = -1;
-		data_angle_2_send.status = IDLE_ST;
-		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
-		communication.rs485.startTransmission();
+		data_current_2_send.current = -1;
+		data_current_2_send.status = IDLE_ST;
+		memcpy(buffer_tx, &data_current_2_send, sizeof(data_current_2_send));
 		break;
 	case ERROR_ST:
 		stop_pwm_and_reset_states_ifnot();
-		data_angle_2_send.angle = -1;
-		data_angle_2_send.status = ERROR_ST;
-		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
-		communication.rs485.startTransmission();
+		data_current_2_send.current = -1;
+		data_current_2_send.status = ERROR_ST;
+		memcpy(buffer_tx, &data_current_2_send, sizeof(data_current_2_send));
 		break;
 	case POWER_ST:
 		/* Control loop is executed here */
-		generate_SPWM();
+		control_torque();
 		compute_duties();
 		apply_duties();
 		start_pwms_ifnot();
 
 		/* send angle reference to slave */
-		data_angle_2_send.angle = angle_ref;
-		data_angle_2_send.status = POWER_ST;
-		memcpy(buffer_tx, &data_angle_2_send, sizeof(data_angle_2_send));
-		communication.rs485.startTransmission();
+		data_current_2_send.current = Idq.q;
+		data_current_2_send.status = POWER_ST;
+		memcpy(buffer_tx, &data_current_2_send, sizeof(data_current_2_send));
 		break;
 	}
 
 	/* Decimation is used to reduce rate of plotting in ScopeMimicry */
 	if (counter_time % decimation == 0) {
-		angle_index_f = angle_ref;
 		Va = Vabc.a;
-        Vb = Vabc.b;
 		duty_a = duty_abc.a;
 		duty_b = duty_abc.b;
+		Iq_ref = Idq_ref.q;
+		Iq_meas = Idq.q;
 		Vd = Vdq.d;
 		Vq = Vdq.q;
+		Iabc_ref = Transform::to_threephase(Idq_ref, angle_4_control);
+		Ia_ref = Iabc_ref.a;
+		Ib_ref = Iabc_ref.b;
+		angle_ref = angle_4_control;
 		counter_time_f = (float32_t)counter_time;
 		control_state_f = control_state;
 		scope.acquire();
