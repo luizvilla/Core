@@ -68,6 +68,7 @@ static const uint32_t control_task_period = (uint32_t)(Ts * 1.e6F);
 /* Variables to compute Sensor offset */
 static float32_t tmpI1_offset;
 static float32_t tmpI2_offset;
+static float32_t tmpIhigh_offset;
 
 /* Power LEG measures */
 static float32_t meas_data;
@@ -75,6 +76,7 @@ static float32_t I1_low_value;
 static float32_t I2_low_value;
 static float32_t I1_offset;
 static float32_t I2_offset;
+static float32_t IHigh_offset;
 static const float32_t NB_OFFSET = 2000.0;
 static float32_t V1_low_value;
 static float32_t V2_low_value;
@@ -172,7 +174,7 @@ enum serial_interface_menu_mode
 
 /* List of possible control states */
 enum control_state_mode {
-	OFFSET_ST = 0,
+	OFFSET_ST = 4,
 	IDLE_ST = 1,
 	POWER_ST = 2,
 	ERROR_ST = 3
@@ -192,7 +194,7 @@ uint8_t asked_mode = IDLEMODE;
 
 const uint16_t SCOPE_SIZE = 512;
 uint16_t k_app_idx;
-ScopeMimicry scope(SCOPE_SIZE, 10);
+ScopeMimicry scope(SCOPE_SIZE, 11);
 static bool is_downloading;
 static bool memory_print;
 
@@ -207,7 +209,7 @@ void reception_function(void)
 	}
 	else
 	{
-		control_state = IDLE_ST;
+		asked_mode = IDLEMODE;
 	}
 	communication.rs485.startTransmission();
 }
@@ -256,6 +258,7 @@ inline void retrieve_analog_datas()
 	if (control_state == OFFSET_ST && counter_time < NB_OFFSET) {
 		tmpI1_offset += I1_low_value;
 		tmpI2_offset += I2_low_value;
+		tmpIhigh_offset += I_high;
 	}
 
 	meas_data = shield.sensors.getLatestValue(V_HIGH);
@@ -266,7 +269,7 @@ inline void retrieve_analog_datas()
 	meas_data = shield.sensors.getLatestValue(I_HIGH);
 	if (meas_data != NO_VALUE) {
 		/* Sign is negative because of the way hardware sensor is routed */
-		I_high = -meas_data;
+		I_high = -meas_data + IHigh_offset;
 	}
 
 	meas_data = shield.sensors.getLatestValue(V1_LOW);
@@ -295,7 +298,7 @@ inline void overcurrent_mngt()
 	    I_high > DC_CURRENT_LIMIT) {
 		error_counter++;
 	}
-	if (error_counter > 2) {
+	if (error_counter > 10) {
 		control_state = ERROR_ST;
 	}
 }
@@ -391,6 +394,7 @@ void init_variables()
 	/* Offset variables */
 	I1_offset = 0.0F;
 	I2_offset = 0.0F;
+	IHigh_offset = 0.0F;
 	/* State view of the pwm */
 	pwm_enable = false;
 	/* Idle or power mode*/
@@ -442,7 +446,7 @@ void setup_routine()
 	init_filt_and_reg();
 	init_variables();
 	spin.led.turnOn();
-
+	spin.dac.initConstValue(2); // DAC 2 initialization
 	/* Declare tasks */
 	uint32_t background_task_number =
 					task.createBackground(loop_background_task);
@@ -469,13 +473,21 @@ void loop_background_task()
 	received_serial_char = console_getchar();
 	switch (received_serial_char) {
 	case 'p':
-		printk("power asked");
+		printk("power asked\r\n");
 		asked_mode = POWERMODE;
 		scope.start();
 		break;
 	case 'i':
-		printk("idle asked");
+		printk("idle asked\r\n");
 		asked_mode = IDLEMODE;
+		break;
+	case 'o':
+		printk("offset asked\r\n");
+		counter_time = 0; 
+		tmpI1_offset = 0;
+		tmpI2_offset = 0;
+		tmpIhigh_offset = 0;
+		control_state = OFFSET_ST;
 		break;
 	case 'r':
 		is_downloading = true;
@@ -506,6 +518,8 @@ void application_task()
 		printk("%7.2f:", Iq_max);
 		printk("%7.2f:", manual_Iq_ref);
 		printk("%7.2f:", I1_offset);
+		printk("%7.2f:", I2_offset);
+		printk("%7.2f:", IHigh_offset);
 		printk("%7d:\r\n", control_state);
 
 	} else {
@@ -537,6 +551,7 @@ void application_task()
 			spin.led.turnOff();
 			I1_offset = -tmpI1_offset / NB_OFFSET;
 			I2_offset = -tmpI2_offset / NB_OFFSET;
+			IHigh_offset = -tmpIhigh_offset / NB_OFFSET;
 			control_state = IDLE_ST;
 		}
 		break;
@@ -576,6 +591,8 @@ void loop_critical_task()
 	retrieve_analog_datas();
 
 	overcurrent_mngt();
+
+	spin.dac.setConstValue(2, 1, (uint32_t) ((angle_4_control/7)*4096));
 
 	switch (control_state) {
 	case OFFSET_ST:
