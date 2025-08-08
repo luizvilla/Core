@@ -98,6 +98,8 @@ static float32_t angle_4_control;
 
 /* We only make torque control. */
 static float32_t manual_Iq_ref;
+static float32_t manual_Id_ref;
+
 
 uint8_t buffer_tx[6];
 uint8_t buffer_rx[6];
@@ -145,8 +147,8 @@ static float32_t inverse_Vhigh;
  *  PID
  */
 
-static float32_t Kp = 30 * 0.035;
-static float32_t Ti = 0.002029;
+static float32_t Kp = 0.035;
+static float32_t Ti = 0.001029;
 static float32_t Td = 0.0F;
 static float32_t N = 1.0;
 /* Coefficient 0.4 comes from Va_max =  (α_max - 0.5) * Udc     */
@@ -194,7 +196,7 @@ uint8_t asked_mode = IDLEMODE;
 
 const uint16_t SCOPE_SIZE = 512;
 uint16_t k_app_idx;
-ScopeMimicry scope(SCOPE_SIZE, 11);
+ScopeMimicry scope(SCOPE_SIZE, 12);
 static bool is_downloading;
 static bool memory_print;
 
@@ -235,6 +237,9 @@ void dump_scope_datas(ScopeMimicry &scope) {
 void init_filt_and_reg(void)
 {
 	vHigh_filter.reset(V_HIGH_MIN);
+	Vabc.a = 0;
+	Vabc.b = 0;
+	Vabc.c = 0;
 	pi_d.reset();
 	pi_q.reset();
 	error_counter = 0;
@@ -310,6 +315,7 @@ inline void control_torque()
 {
 
 	Idq_ref.q = manual_Iq_ref;
+	Idq_ref.d = manual_Id_ref;
 
 	/* Saturation */
 	if (Idq_ref.q > Iq_max) {
@@ -319,9 +325,8 @@ inline void control_torque()
 		Idq_ref.q = -Iq_max;
 	}
 
-	Idq_ref.d = 0.0F;
-	Iabc.a = I1_low_value;
-	Iabc.b = I2_low_value;
+	Iabc.a = I2_low_value;
+	Iabc.b = I1_low_value;
 	Iabc.c = -(Iabc.a + Iabc.b);
 
 	Idq = Transform::to_dqo(Iabc, angle_4_control);
@@ -355,6 +360,9 @@ inline void compute_duties()
 	duty_abc.a = (Vabc.a * inverse_Vhigh + 0.5);
 	duty_abc.b = (Vabc.b * inverse_Vhigh + 0.5);
 	duty_abc.c = (Vabc.c * inverse_Vhigh + 0.5);
+	// duty_abc.a = (0.5);
+	// duty_abc.b = (0.5);
+	// duty_abc.c = (0.5);
 }
 
 /**
@@ -403,8 +411,10 @@ void init_variables()
 	control_state = OFFSET_ST;
 
 
-	Iq_max = 2.0;
+	Iq_max = 10.0;
 	manual_Iq_ref = 0.0F;
+	manual_Id_ref = 0.0F;
+
 }
 /* --------------SETUP FUNCTIONS------------------------------- */
 
@@ -438,6 +448,8 @@ void setup_routine()
 	scope.connectChannel(Ia_ref, "Ia_ref");                 /* 8 */
 	scope.connectChannel(angle_ref, "angle_ref");           /* 9 */
 	scope.connectChannel(control_state_f, "control_state"); /* 10 */
+	scope.connectChannel(Va, "Va");                         /* 11 */
+
 	scope.set_trigger(&mytrigger);
 	scope.set_delay(0.0);
 	scope.start();
@@ -484,6 +496,9 @@ void loop_background_task()
 	case 'o':
 		printk("offset asked\r\n");
 		counter_time = 0; 
+		I1_offset = 0;
+		I2_offset = 0;
+		IHigh_offset = 0;
 		tmpI1_offset = 0;
 		tmpI2_offset = 0;
 		tmpIhigh_offset = 0;
@@ -492,10 +507,16 @@ void loop_background_task()
 	case 'r':
 		is_downloading = true;
 	case 'u':
-		manual_Iq_ref += 0.1;
+		manual_Iq_ref += 0.1F;
+		break;
+	case 'y':
+		manual_Id_ref += 0.1F;
 		break;
 	case 'd':
 		manual_Iq_ref -= 0.1F;
+		break;
+	case 's':
+		manual_Id_ref -= 0.1F;
 		break;
 	case 'm':
 		/* To print scope datas in ownplot as soon as possible */
@@ -517,6 +538,7 @@ void application_task()
 		printk("%7.2f:", V_high);
 		printk("%7.2f:", Iq_max);
 		printk("%7.2f:", manual_Iq_ref);
+		printk("%7.2f:", manual_Id_ref);
 		printk("%7.2f:", I1_offset);
 		printk("%7.2f:", I2_offset);
 		printk("%7.2f:", IHigh_offset);
@@ -538,6 +560,8 @@ void application_task()
 		printk("%.2f:", scope.get_channel_value(k_app_idx, 7));
 		printk("%.2f:", scope.get_channel_value(k_app_idx, 8));
 		printk("%.2f:", scope.get_channel_value(k_app_idx, 9));
+		printk("%.2f:", scope.get_channel_value(k_app_idx, 10));
+		printk("%.2f:", scope.get_channel_value(k_app_idx, 11));
 		printk("\n");
 	}
 
