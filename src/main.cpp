@@ -86,6 +86,7 @@ uint32_t decimation = 1;
 
 static float32_t Udc = 30.0F; // dc voltage supply assumed [V]
 static float f0 = 50.0F; // fundamental frequency [Hz]
+static float f_init = 50.0F; // initial frequency [Hz]
 static float32_t w0 = 2.0F * PI * f0;   // pulsation [rad/s]
 /* Sinewave settings */
 static float32_t Vgrid_ref; //[V]
@@ -112,7 +113,7 @@ static Pid pid;
 
 
 const float f_start     = 50.0f;     // Hz
-const float f_end       = 5000.0f;   // Hz
+const float f_end       = 10000.0f;   // Hz
 const float T_sweep     = SCOPE_LENGTH*Ts;      // seconds to go from f_start to f_end
 const bool  sweep_loop  = true;      // true: loop; false: hold at f_end
 
@@ -132,7 +133,8 @@ static bool trigger = false;
 enum serial_interface_menu_mode // LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER
 {
     IDLEMODE = 0,
-    POWERMODE
+    POWERMODE,
+    CHIRPMODE
 };
 
 uint8_t mode = IDLEMODE;
@@ -178,12 +180,12 @@ void setup_routine()
     shield.power.connectCapacitor(LEG1);
     shield.power.disconnectCapacitor(LEG2);
 
-    scope.connectChannel(I1_low_value, "I1_low_value");
-    scope.connectChannel(V1_low_value, "V1_low_value");
+    scope.connectChannel(I2_low_value, "I1_low_value");
+    scope.connectChannel(V2_low_value, "V1_low_value");
     scope.connectChannel(duty_cycle, "duty_cycle");
 	scope.connectChannel(theta, "theta");
 	scope.connectChannel(f0, "f0");
-    scope.set_delay(0.0F);
+    scope.set_delay(0.05F);
     scope.set_trigger(a_trigger);
     scope.start();
 
@@ -226,6 +228,12 @@ void loop_communication_task()
     case 'p':
         printk("power mode\n");
         mode = POWERMODE;
+        break;
+    case 'c':
+        printk("chirp mode\n");
+        f0 = f_start;
+        trigger = true;
+        mode = CHIRPMODE;
         break;
     case 'u':
         f0 += 50;
@@ -338,10 +346,11 @@ void loop_critical_task()
         if (pwm_enable == true)
         {
             shield.power.stop(ALL);
+
         }
         pwm_enable = false;
     }
-    else if (mode == POWERMODE)
+    else if (mode == POWERMODE || mode == CHIRPMODE)
     {
         trigger = true;
         theta_before = theta;
@@ -351,12 +360,18 @@ void loop_critical_task()
 			The next line implements the chirp 
 			it should be commented for fixed frequency operation
 		*/
-        f0 += k_lin * Ts;  
+        if(mode == CHIRPMODE){
+            f0 += k_lin * Ts;
+            if(f0>f_end){
+                mode = IDLEMODE;
+            }
+            scope.acquire();
+        }  
 
         w0 = 2.0F * PI * f0;
 
         duty_cycle = (ot_sin(theta)/2.5)+0.5;
-        shield.power.setDutyCycle(LEG1,duty_cycle);
+        shield.power.setDutyCycle(LEG2,duty_cycle);
 
         /* Set POWER ON */
         if (!pwm_enable)
@@ -366,10 +381,10 @@ void loop_critical_task()
         }
     }
 
-    if (critical_task_counter%decimation == 0) 
-    {
-        scope.acquire();
-    }
+    // if (critical_task_counter%decimation == 0 && mode != CHIRPMODE) 
+    // {
+    //     scope.acquire();
+    // }
 
 
 }
