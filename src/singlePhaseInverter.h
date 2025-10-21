@@ -52,13 +52,17 @@ public:
     // Calculate function
     float32_t calculateDuty(float32_t vgrid_meas, float32_t igrid_meas);
 
-    dqo_t getVdq();
+    dqo_t getVdqIn();
+
+    dqo_t getVdqOut();
 
     clarke_t getIab();
 
     clarke_t getVab();
 
     dqo_t getIdq();
+
+    dqo_t getIdqRefDelta();
 
     dqo_t getPower();
 

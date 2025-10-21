@@ -84,6 +84,7 @@ int8_t singlePhaseInverter::init(inverter_mode mode, float32_t grid_Vpk, float32
     _Idq_ref_delta.q = 0.0;
 
     _current_pi_params.Kp = 0.001;      // kp is 2* 66e-6 Henry/100e-3 seconds
+    _current_pi_params.Kp = 1.0;
     _current_pi_params.Ti = 0.0003;      // Ti is 4*Taui = 400e-3
     _current_pi_params.Td = 0.0;
     _current_pi_params.N = 1.0;
@@ -113,14 +114,13 @@ int8_t singlePhaseInverter::init(inverter_mode mode, float32_t grid_Vpk, float32
 // Calculate function for singlePhaseInverter
 float32_t singlePhaseInverter::calculateDuty(float32_t vgrid_meas, float32_t igrid_meas) {
 
+    _theta = ot_modulo_2pi(_theta + _w * _Ts);
 
     if(_mode == FORMING){
         _w = _w_ref;
     }else if(_mode == FOLLOWING){
         _w = _w_ref + _pll_pi.calculateWithReturn(0, -1.0*_Vdq.q);;
     }
-
-    _theta = ot_modulo_2pi(_theta + _w * _Ts);  
 
     _Vab = _sogi_v.calc(vgrid_meas,_w);
     _Iab = _sogi_i.calc(igrid_meas,_w);
@@ -129,7 +129,7 @@ float32_t singlePhaseInverter::calculateDuty(float32_t vgrid_meas, float32_t igr
     _Idq = Transform::rotation_to_dqo(_Iab, _theta);
 
     if(_mode == FORMING){
-        _Idq_ref_delta.d = _voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
+        _Idq_ref_delta.d = 1.0;//_voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
         _Idq_ref_delta.q = _voltage_q_pi.calculateWithReturn(_Vdq_ref.q, _Vdq.q); 
     }else if(_mode == FOLLOWING){
         _Idq_ref_delta.d = 0;
@@ -139,20 +139,20 @@ float32_t singlePhaseInverter::calculateDuty(float32_t vgrid_meas, float32_t igr
     _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref.d + _Idq_ref_delta.d, _Idq.d); 
     _Vdq_output.q = _current_q_pi.calculateWithReturn(_Idq_ref.q + _Idq_ref_delta.q, _Idq.q); 
 
-    if(_mode == FORMING){
-        _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
-        _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
-    }else if(_mode == FOLLOWING){
-        _Vdq_output.d = _Vdq_output.d + _Vdq.d; 
-        _Vdq_output.q = _Vdq_output.q + _Vdq.q;
-    }
+    // if(_mode == FORMING){
+    //     _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
+    //     _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
+    // }else if(_mode == FOLLOWING){
+    //     _Vdq_output.d = _Vdq_output.d + _Vdq.d; 
+    //     _Vdq_output.q = _Vdq_output.q + _Vdq.q;
+    // }
 
     _Vab_output = Transform::rotation_to_clarke(_Vdq_output, _theta);
 
     _Vond = _Vab_output.alpha;
     _duty_cycle = _Vond /(2.0F * _V_bus ) + 0.5F;
 
-    // // Calculate active and reactive power
+    // // // Calculate active and reactive power
     _power.d = 0.5F * (_Vdq.d * _Idq.d + _Vdq.q * _Idq.q);
     _power.q = 0.5F * (_Idq.d * _Vdq.q - _Idq.q * _Vdq.d);
 
@@ -160,14 +160,23 @@ float32_t singlePhaseInverter::calculateDuty(float32_t vgrid_meas, float32_t igr
 
 }
 
-dqo_t singlePhaseInverter::getVdq(){
+dqo_t singlePhaseInverter::getVdqIn(){
     return _Vdq;
+}
+
+dqo_t singlePhaseInverter::getVdqOut(){
+    return _Vdq_output;
 }
 
 
 dqo_t singlePhaseInverter::getIdq(){
     return _Idq;
 }
+
+dqo_t singlePhaseInverter::getIdqRefDelta(){
+    return _Idq_ref_delta;
+}
+
 
 dqo_t singlePhaseInverter::getPower(){
     return _power;
