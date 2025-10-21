@@ -83,9 +83,10 @@ int8_t singlePhaseInverter::init(inverter_mode mode, float32_t grid_Vpk, float32
     _Idq_ref_delta.d = 0.0;
     _Idq_ref_delta.q = 0.0;
 
-    _current_pi_params.Kp = 0.001;      // kp is 2* 66e-6 Henry/100e-3 seconds
-    _current_pi_params.Kp = 1.0;
-    _current_pi_params.Ti = 0.0003;      // Ti is 4*Taui = 400e-3
+    _current_pi_params.Ts = Ts;
+    // Skogestad IMC tuning, assuming H=I/Vinv = 1/R+Ls
+    _current_pi_params.Kp = 0.010;  // Kp_i is L/Tcm L=66uH, Tc_i=6.6ms
+    _current_pi_params.Ti = 3.3e-6; // Ti_i is L/R, R=20
     _current_pi_params.Td = 0.0;
     _current_pi_params.N = 1.0;
     _current_pi_params.upper_bound = 30;
@@ -95,8 +96,9 @@ int8_t singlePhaseInverter::init(inverter_mode mode, float32_t grid_Vpk, float32
     _current_q_pi.init(_current_pi_params);
 
 
-    _voltage_pi_params.Kp = 0.01;      // kp is 2* 66e-6 Henry/100e-3 seconds
-    _voltage_pi_params.Ti = 0.003;      // Ti is 4*Taui = 400e-3
+    _voltage_pi_params.Ts = Ts;
+    _voltage_pi_params.Kp = 0.1;      // kp_v = Tc_i / Tv_i = 1/A (where A is a ratio between the two Tc. A must be greater than 1 or 10)
+    _voltage_pi_params.Ti = 66e-3;      // Ti_v = 10*Tc_i (too much oscillation, we multiplied Ti_v by 10 )
     _voltage_pi_params.Td = 0.0;
     _voltage_pi_params.N = 1.0;
     _voltage_pi_params.upper_bound = 30;
@@ -129,23 +131,30 @@ float32_t singlePhaseInverter::calculateDuty(float32_t vgrid_meas, float32_t igr
     _Idq = Transform::rotation_to_dqo(_Iab, _theta);
 
     if(_mode == FORMING){
-        _Idq_ref_delta.d = 1.0;//_voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
+        /* This is the outer voltage loop of the grid forming */
+        _Idq_ref_delta.d = _voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
         _Idq_ref_delta.q = _voltage_q_pi.calculateWithReturn(_Vdq_ref.q, _Vdq.q); 
+
+        /* This is the inner current loop of the grid forming */
+        _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref_delta.d, _Idq.d); 
+        _Vdq_output.q = _current_q_pi.calculateWithReturn(_Idq_ref_delta.q, _Idq.q); 
+
     }else if(_mode == FOLLOWING){
-        _Idq_ref_delta.d = 0;
-        _Idq_ref_delta.q = 0;
+        /* This is the current control loop of the grid following */
+        _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref.d, _Idq.d); 
+        _Vdq_output.q = _current_q_pi.calculateWithReturn(_Idq_ref.q, _Idq.q); 
     }
 
-    _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref.d + _Idq_ref_delta.d, _Idq.d); 
-    _Vdq_output.q = _current_q_pi.calculateWithReturn(_Idq_ref.q + _Idq_ref_delta.q, _Idq.q); 
 
-    // if(_mode == FORMING){
-    //     _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
-    //     _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
-    // }else if(_mode == FOLLOWING){
-    //     _Vdq_output.d = _Vdq_output.d + _Vdq.d; 
-    //     _Vdq_output.q = _Vdq_output.q + _Vdq.q;
-    // }
+    if(_mode == FORMING){
+        // _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
+        // _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
+        _Vdq_output.d = _Vdq_output.d; 
+        _Vdq_output.q = _Vdq_output.q;
+    }else if(_mode == FOLLOWING){
+        _Vdq_output.d = _Vdq_output.d + _Vdq.d; 
+        _Vdq_output.q = _Vdq_output.q + _Vdq.q;
+    }
 
     _Vab_output = Transform::rotation_to_clarke(_Vdq_output, _theta);
 

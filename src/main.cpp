@@ -275,7 +275,7 @@ void setup_routine()
 	scope.connectChannel(Vab.alpha, "Valpha");
 	scope.connectChannel(Vab.beta, "Vbeta");
 	scope.connectChannel(omega, "omega");
-    scope.set_delay(0.0F);
+    scope.set_delay(0.1F);
     scope.set_trigger(a_trigger);
     scope.start();
 
@@ -385,6 +385,7 @@ void loop_communication_task()
 				if (Vdq_ref.d < Vdq_ref_max.d)
 				{
 					Vdq_ref.d += 5.0F;
+                    trigger = true;
 				}
             break;
         case 'c':
@@ -458,21 +459,17 @@ switch (mode) {
     }
     else
     {
-	    printk("%d:", mode);
-	    printk("% 6.2f:", (double)Vgrid_amplitude_ref);
-	    printk("% 6.2f:", (double)Vgrid_amplitude);
-	    printk("% 6.2f:", (double)V1_low_value);
-	    printk("%7.3f:", (double)power.d);
-	    printk("%7.3f|", (double)power.q);
+	    printk("Mode %d:", mode);
+	    printk("V1 % 6.2f:", (double)V1_low_value);
 
-		printk("%7.3f:", (double)Vdq_ref.d);
-		printk("%7.3f:", (double)Vdq.d);
-		printk("%7.3f|", (double)Vdq_output.d);
+		printk("Vd_ref %7.3f:", (double)Vdq_ref.d);
+		printk("Vd_in %7.3f:", (double)Vdq.d);
+		printk("Vd_out %7.3f|", (double)Vdq_output.d);
         
-		printk("%7.3f:", (double)Idq_ref_delta.d);
-		printk("%7.3f:", (double)Idq.d);
-		//printk("%7.3f:", (double)Idq_ref.d);
-        printk(" Vdc %7.2f:", (double)V_high_filt);
+		printk("Id_delta %7.3f:", (double)Idq_ref_delta.d);
+		printk("Id_in  %7.3f:", (double)Idq.d);
+		printk("Id_ref %7.3f|", (double)Idq_ref.d);
+        printk("Vdc %7.2f:", (double)V_high_filt);
         printk("\n");
     }
     task.suspendBackgroundMs(100);
