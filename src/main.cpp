@@ -74,6 +74,7 @@ static float32_t I2_current_offset = 0.25; // [A]
 
 
 static float32_t Vgrid_meas; // [V]
+static float32_t VN_meas; // [V]
 static float32_t Igrid_meas; // [V]
 
 
@@ -87,15 +88,13 @@ static singlePhaseInverter inverter;
 
 static dqo_t power;
 
-static float32_t Vnet;
-static float32_t virtual_Vgrid_amplitude = 18.0F;
-static float32_t Vq_net;
 
 static dqo_t Vdq; // Vdq measure (in)
 static dqo_t Vdq_output; // Inverter output
 static dqo_t Vdq_ref;
 static dqo_t Vdq_ref_max;
-static dqo_t Vdq_ref_min;
+static dqo_t Vdq_ref_min; 
+static float32_t Valpha_in_out;
 
 static dqo_t Idq;
 static dqo_t Idq_ref;
@@ -122,22 +121,25 @@ static float32_t Vond;
 static float32_t R_load = 10;
 
 static float32_t Ialpha, Ibeta;
-static const float32_t sync_power_tolerance = 0.1;
 static bool is_net_synchronized;
 static float32_t omega;
 
-static inverter_mode local_mode = FORMING;
+static inverter_mode local_mode = FOLLOWING;
 
 /* duty_cycle*/
-static float32_t duty_cycle;// [No unit]
+static float32_t delta_duty_cycle;// [No unit]
+static float32_t duty_cycle_1;// [No unit]
+static float32_t duty_cycle_2;// [No unit]
+static float32_t duty_cycle_offset;// [No unit]
 
-static float32_t Udc = 40.0F; // dc voltage supply assumed [V]
+static float32_t Udc = 63.0F; // dc voltage supply assumed [V]
 static const float f0 = 50.0F; // fundamental frequency [Hz]
 static const float32_t w0 = 2.0F * PI * f0;   // pulsation [rad/s]
+static const float32_t sync_power_tolerance = 0.01*w0;
 /* Sinewave settings */
 static float32_t Vgrid_ref; //[V]
-static float32_t Vgrid_amplitude_ref = 0.0F; // [V]
-static float32_t Vgrid_amplitude = 0.0F; // [V]
+static float32_t Vgrid_amplitude_ref = 20.0F; // [V]
+static float32_t Vgrid_amplitude = 20.0F; // [V]
 static float angle = 0.F; // [rad]
 static float theta = 0.F; // [rad]
 
@@ -165,11 +167,19 @@ Sogi sogi_v;
 
 // comes from "filters.h"
 LowPassFirstOrderFilter vHighFilter(Ts, 0.1F);
+LowPassFirstOrderFilter VqFilter(Ts, 1.0F);
 static uint32_t critical_task_counter;
+static uint32_t decimation = 1;
+static uint32_t sync_counter=0;
+static uint32_t desync_counter=0;
+static uint32_t power_counter=0;
+static float32_t desync_counter_scope;
+static bool sync_start_flag = false;
+static float32_t Vq_filtered;
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
-static ScopeMimicry scope(1024, 22);
+static ScopeMimicry scope(1024, 17);
 static bool is_downloading;
 static bool trigger = false;
 //---------------------------------------------------------------
@@ -252,30 +262,46 @@ void setup_routine()
     // DISABLE DC LOW CAPACITORS
     shield.power.disconnectCapacitor(LEG1);
     shield.power.disconnectCapacitor(LEG2);
+    
 
     scope.connectChannel(I1_low_value, "I1_low_value");
-    scope.connectChannel(I_high, "I_High");
-    scope.connectChannel(V1_low_value, "V1_low_value");
-    scope.connectChannel(V2_low_value, "V2_low_value");
-    scope.connectChannel(V_high_filt, "V_high_filt");
-    scope.connectChannel(duty_cycle, "duty_cycle");
-    scope.connectChannel(power.d, "power_p");
-    scope.connectChannel(power.q, "power_q");
-    scope.connectChannel(Vdq_ref.d, "Vd_ref");
-    scope.connectChannel(theta, "theta");
-	scope.connectChannel(I2_low_value, "I2_low_value");
+    // scope.connectChannel(I_high, "I_High");
+    // scope.connectChannel(Vgrid_meas, "Vgrid");
+    // scope.connectChannel(V1_low_value, "V1_low_value");
+    // scope.connectChannel(V2_low_value, "V2_low_value");
+    // scope.connectChannel(V_high_filt, "V_high_filt");
+    scope.connectChannel(delta_duty_cycle, "duty_cycle");
+    scope.connectChannel(duty_cycle_1, "duty_cycle_1");
+    scope.connectChannel(duty_cycle_2, "duty_cycle_2");
+    // scope.connectChannel(duty_cycle_offset, "duty_cycle_offset");
+    // scope.connectChannel(power.d, "power_p");
+    // scope.connectChannel(power.q, "power_q");
+    // scope.connectChannel(Vdq_ref.d, "Vd_ref");
+    // scope.connectChannel(theta, "theta");
+	// scope.connectChannel(I2_low_value, "I2_low_value");
 	scope.connectChannel(Idq.d, "Id");
 	scope.connectChannel(Idq.q, "Iq");
-	scope.connectChannel(Idq_ref_delta.q, "Idelta_q");
-    scope.connectChannel(Idq_ref_delta.d, "Idelta_d");
+	scope.connectChannel(Idq_ref.d, "Id_ref");
+	// scope.connectChannel(Idq_ref_delta.q, "Idelta_q");
+    // scope.connectChannel(Idq_ref_delta.d, "Idelta_d");
 	scope.connectChannel(Iab.alpha, "Ialpha");
 	scope.connectChannel(Iab.beta, "Ibeta");
-	scope.connectChannel(Vdq.d, "Vd_ond");
-	scope.connectChannel(Vdq.q, "Vq_ond");
+
+    
+	// scope.connectChannel(VN_meas, "VN_meas");
+	// scope.connectChannel(desync_counter_scope, "desync_counter");
+    scope.connectChannel(Vdq.q, "Vq_in");
+	scope.connectChannel(Vdq.d, "Vd_in");
+    scope.connectChannel(Vdq_output.q, "Vq_out");
+	scope.connectChannel(Vdq_output.d, "Vd_out");
+	// scope.connectChannel(Vq_filtered, "Vq_filtered");
 	scope.connectChannel(Vab.alpha, "Valpha");
 	scope.connectChannel(Vab.beta, "Vbeta");
-	scope.connectChannel(omega, "omega");
-    scope.set_delay(0.1F);
+	scope.connectChannel(Valpha_in_out, "Valpha(out-in)");
+	scope.connectChannel(Vab_output.alpha, "ValphaOut");
+	scope.connectChannel(Vab_output.beta, "VbetaOut");
+	// scope.connectChannel(omega, "omega");
+    scope.set_delay(0.5F);
     scope.set_trigger(a_trigger);
     scope.start();
 
@@ -285,7 +311,7 @@ void setup_routine()
     // ac_meas_config.w0 = w0;
     // ac_meas_config.Ts = Ts;
 
-    inverter.init(local_mode, Udc, w0, Ts);
+    inverter.init(local_mode, Vgrid_amplitude_ref, w0, Ts);
 
     sogi_v.init(500.0, Ts);
     sogi_i.init(500.0, Ts);
@@ -321,7 +347,7 @@ void setup_routine()
 
     /* buck voltage mode */
     shield.power.initBuck(LEG1);
-    shield.power.initBoost(LEG2);
+    shield.power.initBuck(LEG2);
 
     // Then declare tasks
     uint32_t app_task_number = task.createBackground(loop_application_task);
@@ -370,29 +396,57 @@ void loop_communication_task()
                 }
             break;
         case 'u':
-				if (Vdq_ref.d < Vdq_ref_max.d)
-				{
-					Vdq_ref.d += 1.0F;
-				}
+                if(local_mode == FORMING){
+                    if (Vdq_ref.d < Vdq_ref_max.d)
+                    {
+                        Vdq_ref.d += 1.0F;
+                    }
+                }else{
+                    if (Idq_ref.d < Idq_ref_max.d)
+                    {
+                        Idq_ref.d += 0.1F;
+                    }                    
+                }
             break;
         case 'j':
-				if (Vdq_ref.d > Vdq_ref_min.d)
-				{
-					Vdq_ref.d -= 1.0F;
-				}
+                if(local_mode == FORMING){
+                    if (Vdq_ref.d > Vdq_ref_min.d)
+                    {
+                        Vdq_ref.d -= 1.0F;
+                    }
+                }else{
+                    if (Idq_ref.d > Idq_ref_min.d)
+                    {
+                        Idq_ref.d -= 0.1F;
+                    }                    
+                }
+
             break;
         case 'd':
-				if (Vdq_ref.d < Vdq_ref_max.d)
-				{
-					Vdq_ref.d += 5.0F;
-                    trigger = true;
-				}
+                if(local_mode == FORMING){
+                    if (Vdq_ref.d < Vdq_ref_max.d)
+                    {
+                        Vdq_ref.d += 5.0F;
+                    }
+                }else{
+                    if (Idq_ref.d < Idq_ref_max.d)
+                    {
+                        Idq_ref.d -= 1.0F;
+                    }                    
+                }
             break;
         case 'c':
-				if (Vdq_ref.d > Vdq_ref_min.d)
-				{
-					Vdq_ref.d -= 5.0F;
-				}
+                if(local_mode == FORMING){
+                    if (Vdq_ref.d > Vdq_ref_min.d)
+                    {
+                        Vdq_ref.d += 5.0F;
+                    }
+                }else{
+                    if (Idq_ref.d > Idq_ref_min.d)
+                    {
+                        Idq_ref.d -= 1.0F;
+                    }                    
+                }
             break;
         case 'r':
             is_downloading = true;
@@ -420,19 +474,35 @@ void loop_application_task()
 // in each state we compute the transitions
 switch (mode) {
         case IDLEMODE:
-            if (mode_asked == POWERMODE && V_high_filt >= UDC_STARTUP) {
-                mode = STARTUPMODE;
+
+            if (local_mode == FORMING){
+                if (mode_asked == POWERMODE && V_high_filt >= UDC_STARTUP) {
+                    mode = STARTUPMODE;
+                } 
+            }else{
+                if (mode_asked == POWERMODE && Vgrid_meas >= 10 && V_high_filt >= UDC_STARTUP) {
+                    mode = STARTUPMODE;
+                }
             }
             spin.led.turnOn();
         break;
         case STARTUPMODE:
-            if (duty_cycle > 0.49F ) mode = POWERMODE;
+            if (local_mode == FORMING && delta_duty_cycle > 0.49F )
+            {
+                mode = POWERMODE;
+            } 
+            else if(local_mode == FOLLOWING && is_net_synchronized == true) 
+            {
+                mode = POWERMODE;
+                if (is_net_synchronized) spin.led.toggle();
+            }
+
         break;
         case POWERMODE:
             if (mode_asked == IDLEMODE) {
                 mode = IDLEMODE;
             }
-            spin.led.toggle();
+            if (is_net_synchronized) spin.led.toggle();
         break;
         case ERRORMODE:
         break;
@@ -451,6 +521,7 @@ switch (mode) {
             printk("%7.3f:", (double)power.d);
             printk("%7.3f:", (double)power.q);
 			printk("%7.3f:", (double)Idq_ref.d);
+			printk("%7.3f:", (double)VN_meas);
             printk("\n");
         } else {
             dump_scope_datas(scope);
@@ -460,12 +531,19 @@ switch (mode) {
     else
     {
 	    printk("Mode %d:", mode);
+	    printk("W %.0f:", omega);
+            printk("% 7.3f:", (double)Vgrid_amplitude_ref);
 	    printk("V1 % 6.2f:", (double)V1_low_value);
 
 		printk("Vd_ref %7.3f:", (double)Vdq_ref.d);
 		printk("Vd_in %7.3f:", (double)Vdq.d);
 		printk("Vd_out %7.3f|", (double)Vdq_output.d);
+
+		printk("Vq_ref %7.3f:", (double)Vdq_ref.q);
+		printk("Vq_in %7.3f:", (double)Vdq.q);
+		printk("Vq_out %7.3f|", (double)Vdq_output.q);
         
+
 		printk("Id_delta %7.3f:", (double)Idq_ref_delta.d);
 		printk("Id_in  %7.3f:", (double)Idq.d);
 		printk("Id_ref %7.3f|", (double)Idq_ref.d);
@@ -484,6 +562,7 @@ switch (mode) {
 void loop_critical_task()
 {
     critical_task_counter++;
+
     // RETRIEVE MEASUREMENTS
     meas_data = shield.sensors.getLatestValue(I1_LOW);
     if (meas_data != NO_VALUE) I1_low_value = meas_data - I1_current_offset;
@@ -506,6 +585,7 @@ void loop_critical_task()
     V_high_filt = vHighFilter.calculateWithReturn(V_high);
 
     Vgrid_meas = V1_low_value-V2_low_value;
+    VN_meas = (V1_low_value+V2_low_value)/2;
     Igrid_meas = I1_low_value;
     // Igrid_meas = I1_low_value;
 
@@ -528,91 +608,126 @@ void loop_critical_task()
             spin.led.turnOff();
             pwm_enable = false;
         }
-        Vgrid_amplitude = 0.F;
-        duty_cycle = DUTY_MIN;
+        // duty_cycle = DUTY_MIN;
     }
 
     if (mode == STARTUPMODE) { // ramp up the common voltage to Udc/2
 
-        duty_cycle = rate_limiter(0.5F, duty_cycle, 50.0F); // ramp of 50/s
-        if (duty_cycle > 0.5F) {
-            duty_cycle = 0.5F;
-        }
-        shield.power.setDutyCycle(LEG2, 1-duty_cycle);
-        shield.power.setDutyCycle(LEG1, duty_cycle);
-        // WE START THE PWM
-        if (!pwm_enable)
-        {
-            shield.power.start(ALL);
-            pwm_enable = true;
+        if(local_mode == FORMING){
+
+            delta_duty_cycle = rate_limiter(0.5F, delta_duty_cycle, 50.0F); // ramp of 50/s
+            if (delta_duty_cycle > 0.5F) {
+                delta_duty_cycle = 0.5F;
+            }
+            shield.power.setDutyCycle(LEG2, 1-delta_duty_cycle);
+            shield.power.setDutyCycle(LEG1, delta_duty_cycle);
+            // WE START THE PWM
+            if (!pwm_enable)
+            {
+                shield.power.start(ALL);
+                pwm_enable = true;
+            }
+
+        } else {
+            inverter.inputProcessing(Vgrid_meas,Igrid_meas);             
+            Vdq = inverter.getVdqIn();
+
+            if (omega < w0 + sync_power_tolerance &&
+                omega > w0 -sync_power_tolerance)
+            {
+                sync_counter++;
+                if(sync_counter>2000){
+                    is_net_synchronized = true;
+                    sync_counter = 0;                                    
+                }
+            } else {
+                sync_counter=0;
+                is_net_synchronized = false;                
+            }
+
         }
     }
+
     if (mode == POWERMODE)
     {
-        inverter.setVBus(V_high_filt);
-        inverter.setVdqRef(Vdq_ref);
-        duty_cycle = inverter.calculateDuty(Vgrid_meas,Igrid_meas); 
-        
-        Vdq = inverter.getVdqOut();
-        
-        if(local_mode == FOLLOWING){
+        inverter.inputProcessing(Vgrid_meas,Igrid_meas);             
 
-            if (Vdq.q < sync_power_tolerance &&
-                Vdq.q > -sync_power_tolerance && 
-                critical_task_counter > 1000)
-            {
-                is_net_synchronized = true;
+        is_net_synchronized = omega <= w0 + sync_power_tolerance && 
+                              omega >= w0 -sync_power_tolerance; 
+
+        if (is_net_synchronized == false)
+        {
+            desync_counter++;
+            desync_counter_scope = (float32_t)desync_counter;
+            if(desync_counter > 200){
+                desync_counter = 0;
+                mode_asked = IDLEMODE;
+                mode = IDLEMODE;
+                printk("System no longer synchronized \n");
+            }                
+        }
+
+        inverter.setVBus(V_high_filt);
+
+        if (local_mode == FORMING ){
+            inverter.setVdqRef(Vdq_ref);
+        }else{
+            inverter.setIdqRef(Idq_ref);
+        }
+
+        delta_duty_cycle = inverter.calculateDuty();
+
+
+        if(pwm_enable = false)
+        {        
+            duty_cycle_offset = VN_meas/V_high_filt;        
+        } 
+        else
+        {
+            if (duty_cycle_offset < 0.5F) {
+                duty_cycle_offset = rate_limiter(0.5F, duty_cycle_offset, 1.0F); // ramp of 0.1 duty / 100 ms = 0.1/0.1 = 1e-1/1e-1 = 1
+                
+            } else {
+                duty_cycle_offset = 0.5F;
+            }
+
+        }
+
+
+        duty_cycle_1 = delta_duty_cycle + duty_cycle_offset;
+        duty_cycle_2 = - delta_duty_cycle + duty_cycle_offset ;
+        
+        if (local_mode == FOLLOWING && !pwm_enable)
+        {
+            power_counter++;
+            if(power_counter>2000){
+                shield.power.start(ALL);
+                pwm_enable = true;
             }
         }
 
-        if(local_mode == FOLLOWING && is_net_synchronized == true){
-            shield.power.setDutyCycle(ALL, duty_cycle);
-        } else {
-            shield.power.setDutyCycle(ALL, duty_cycle);
-        }
 
 
-		// // trigger = true;
-        theta = inverter.getTheta();
-        Vdq = inverter.getVdqIn();
-        Vdq_output = inverter.getVdqOut();
-        Vab = inverter.getVab();
-        Idq = inverter.getIdq();
-        Idq_ref_delta = inverter.getIdqRefDelta();
-        omega = inverter.getw();
-
-		// if (Vq_net < sync_power_tolerance &&
-		// 	Vq_net > -sync_power_tolerance && critical_task_counter > 1000)
-		// {
-		// 	is_net_synchronized = true;
-		// }
-
-		// if (is_net_synchronized) {
-		// 	Id = inverter.getIdq().d;
-		// 	Iq = inverter.getIdq().q;
-		// 	Ialpha = inverter.getIab().alpha;
-		// 	Ibeta = inverter.getIab().beta;
-
-		// 	// Vdq.d = pi_current_d.calculateWithReturn(0.0, Id);
-		// 	// Vdq.q = pi_current_q.calculateWithReturn(Iq_ref, Iq);
-
-
-		// 	Vdq.d = Vd_ref;
-		// 	Vdq.q = 0;
-		// 	Vdq.o = 0.0;
-		// 	Vab = Transform::rotation_to_clarke(Vdq, inverter.getTheta());
-		// 	Vond = Vab.alpha;
-		// 	duty_cycle = Vond /(2.0F * Udc ) + 0.5F;
-		// }
-		// else
-		// {
-		// 	duty_cycle = 0.5;
-
-		// }
-        // shield.power.setDutyCycle(ALL, duty_cycle);
+        shield.power.setDutyCycle(LEG1, duty_cycle_1);
+        shield.power.setDutyCycle(LEG2, duty_cycle_2);
 
     }
-    if (critical_task_counter%1 == 0) {
+
+    /* Retrieve multiple data for debugging */
+    theta = inverter.getTheta();
+    Vdq = inverter.getVdqIn();
+    Vq_filtered = VqFilter.calculateWithReturn(Vdq.q);
+    Vdq_output = inverter.getVdqOut();
+    Vab = inverter.getVab();
+    Vab_output = inverter.getVabOutput();
+    Iab = inverter.getIab();
+    Idq = inverter.getIdq();
+    Idq_ref_delta = inverter.getIdqRefDelta();
+    omega = inverter.getw();
+    Valpha_in_out = Vab_output.alpha - Vab.alpha; 
+
+
+    if (critical_task_counter%decimation == 0) {
         spying_mode = (float32_t) mode;
         scope.acquire();
     }
