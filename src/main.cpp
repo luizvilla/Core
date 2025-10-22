@@ -179,7 +179,7 @@ static float32_t Vq_filtered;
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
-static ScopeMimicry scope(1024, 17);
+static ScopeMimicry scope(1024, 19);
 static bool is_downloading;
 static bool trigger = false;
 //---------------------------------------------------------------
@@ -265,12 +265,12 @@ void setup_routine()
     
 
     scope.connectChannel(I1_low_value, "I1_low_value");
-    // scope.connectChannel(I_high, "I_High");
-    // scope.connectChannel(Vgrid_meas, "Vgrid");
+    scope.connectChannel(I_high, "I_High");
+    scope.connectChannel(Vgrid_meas, "Vgrid");
     // scope.connectChannel(V1_low_value, "V1_low_value");
     // scope.connectChannel(V2_low_value, "V2_low_value");
-    // scope.connectChannel(V_high_filt, "V_high_filt");
-    scope.connectChannel(delta_duty_cycle, "duty_cycle");
+    scope.connectChannel(V_high, "V_high");
+    // scope.connectChannel(delta_duty_cycle, "duty_cycle");
     scope.connectChannel(duty_cycle_1, "duty_cycle_1");
     scope.connectChannel(duty_cycle_2, "duty_cycle_2");
     // scope.connectChannel(duty_cycle_offset, "duty_cycle_offset");
@@ -661,6 +661,7 @@ void loop_critical_task()
             desync_counter_scope = (float32_t)desync_counter;
             if(desync_counter > 200){
                 desync_counter = 0;
+                sync_counter = 0;
                 mode_asked = IDLEMODE;
                 mode = IDLEMODE;
                 printk("System no longer synchronized \n");

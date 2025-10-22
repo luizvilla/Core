@@ -132,6 +132,9 @@ void singlePhaseInverter::inputProcessing(float32_t vgrid_meas, float32_t igrid_
     _Vab = _sogi_v.calc(vgrid_meas,_w);
     _Iab = _sogi_i.calc(igrid_meas,_w);
 
+    _Vab.alpha = vgrid_meas;
+    _Iab.alpha = igrid_meas;
+
     _Vdq = Transform::rotation_to_dqo(_Vab, _theta);
     _Idq = Transform::rotation_to_dqo(_Iab, _theta);
 
@@ -161,10 +164,10 @@ float32_t singlePhaseInverter::calculateDuty() {
         _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
         _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
     }else if(_mode == FOLLOWING){
-        // _Vdq_output.d = _Vdq_output_pid.d + _Vdq.d; 
-        // _Vdq_output.q = _Vdq_output_pid.q + _Vdq.q;
-        _Vdq_output.d = _Vdq_output_pid.d + 23.0; 
-        _Vdq_output.q = _Vdq_output_pid.q + 0.0;
+        _Vdq_output.d = _Vdq_output_pid.d + _Vdq.d - _Idq.d; 
+        _Vdq_output.q = _Vdq_output_pid.q + _Vdq.q - _Idq.q;
+        // _Vdq_output.d = _Vdq_output_pid.d + 23.0; 
+        // _Vdq_output.q = _Vdq_output_pid.q + 0.0;
     }
 
     _Vab_output = Transform::rotation_to_clarke(_Vdq_output, _theta);
