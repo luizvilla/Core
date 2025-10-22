@@ -50,7 +50,10 @@ public:
     void reset();
 
     // Calculate function
-    float32_t calculateDuty(float32_t vgrid_meas, float32_t igrid_meas);
+
+    void inputProcessing(float32_t vgrid_meas, float32_t igrid_meas);
+
+    float32_t calculateDuty();
 
     dqo_t getVdqIn();
 
@@ -59,6 +62,8 @@ public:
     clarke_t getIab();
 
     clarke_t getVab();
+
+    clarke_t getVabOutput();
 
     dqo_t getIdq();
 
@@ -76,6 +81,8 @@ public:
 
     void setIdqRef(dqo_t Idq_ref);
 
+    void setVNRef(float32_t VN_ref);
+
 
 private:
     // Internal state variables
@@ -87,6 +94,7 @@ private:
     dqo_t _Vdq_ref;
     dqo_t _Vdq_ref_max;
     dqo_t _Vdq_ref_min;
+    dqo_t _Vdq_output_pid;
     dqo_t _Vdq_output;
 
     dqo_t _Idq;
@@ -99,6 +107,8 @@ private:
     float32_t _Iq_ref_delta = 0.0;
     float32_t _Vd_ref_max = 20.0;
     float32_t _Vd_ref_min = 0.0;
+
+    float32_t _VN_ref = 0.0;
 
     clarke_t _Vab;
     clarke_t _Vab_output;
