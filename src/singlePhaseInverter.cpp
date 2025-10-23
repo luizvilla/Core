@@ -35,7 +35,7 @@ singlePhaseInverter::singlePhaseInverter() : _w(0.0F) {}
 int8_t singlePhaseInverter::init(inverter_mode mode, float32_t grid_Vpk, float32_t grid_w0, float32_t Ts) {
 
     // parameters of the SOGI filter
-    float32_t rise_time = 5.0F * 2.0F * PI / grid_w0;
+    float32_t rise_time = 1.0F * 2.0F * PI / grid_w0;
     float32_t wn = 3.0F / rise_time;
     float32_t xsi = 0.7F;
     float32_t Kp = 2 * wn * xsi / grid_Vpk;
@@ -87,11 +87,11 @@ int8_t singlePhaseInverter::init(inverter_mode mode, float32_t grid_Vpk, float32
 
     _current_pi_params.Ts = Ts;
     // Skogestad IMC tuning, assuming H=I/Vinv = 1/R+Ls
-    // _current_pi_params.Kp = 0.010;  // Kp_i is L/Tcm L=66uH, Tc_i=6.6ms
+    _current_pi_params.Kp = 0.010;  // Kp_i is L/Tcm L=66uH, Tc_i=6.6ms
     // _current_pi_params.Kp = 0.05;  // Kp_i is L/Tcm L=66uH, Tc_i=13ms
-    _current_pi_params.Kp = 0.025;  // Kp_i is L/Tcm L=66uH, Tc_i=26ms
-    // _current_pi_params.Ti = 3.3e-6; // Ti_i is L/R, R=20
-    _current_pi_params.Ti = 66e-6; // Ti_i is L/R, R=1
+    // _current_pi_params.Kp = 0.025;  // Kp_i is L/Tcm L=66uH, Tc_i=26ms
+    _current_pi_params.Ti = 3.3e-6; // Ti_i is L/R, R=20
+    // _current_pi_params.Ti = 66e-6; // Ti_i is L/R, R=1
 
 
     _current_pi_params.Td = 0.0;
@@ -132,9 +132,6 @@ void singlePhaseInverter::inputProcessing(float32_t vgrid_meas, float32_t igrid_
     _Vab = _sogi_v.calc(vgrid_meas,_w);
     _Iab = _sogi_i.calc(igrid_meas,_w);
 
-    _Vab.alpha = vgrid_meas;
-    _Iab.alpha = igrid_meas;
-
     _Vdq = Transform::rotation_to_dqo(_Vab, _theta);
     _Idq = Transform::rotation_to_dqo(_Iab, _theta);
 
@@ -161,18 +158,19 @@ float32_t singlePhaseInverter::calculateDuty() {
 
 
     if(_mode == FORMING){
-        _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
-        _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
+        // _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
+        // _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
+        _Vdq_output.d = _Vdq_ref.d; 
+        _Vdq_output.q = _Vdq_ref.q;
     }else if(_mode == FOLLOWING){
-        _Vdq_output.d = _Vdq_output_pid.d + _Vdq.d - _Idq.d; 
-        _Vdq_output.q = _Vdq_output_pid.q + _Vdq.q - _Idq.q;
-        // _Vdq_output.d = _Vdq_output_pid.d + 23.0; 
-        // _Vdq_output.q = _Vdq_output_pid.q + 0.0;
+        _Vdq_output.d = _Vdq_output_pid.d + _Vdq.d; 
+        _Vdq_output.q = _Vdq_output_pid.q + _Vdq.q;
     }
 
     _Vab_output = Transform::rotation_to_clarke(_Vdq_output, _theta);
 
     _Vond = _Vab_output.alpha;
+
     _duty_cycle = _Vond /(2.0F * _V_bus );
 
     // // // Calculate active and reactive power
