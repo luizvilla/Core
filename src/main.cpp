@@ -124,7 +124,7 @@ static float32_t Ialpha, Ibeta;
 static bool is_net_synchronized;
 static float32_t omega;
 
-static inverter_mode local_mode = FOLLOWING;
+static inverter_mode local_mode = FORMING;
 
 /* duty_cycle*/
 static float32_t delta_duty_cycle;// [No unit]
@@ -132,7 +132,7 @@ static float32_t duty_cycle_1;// [No unit]
 static float32_t duty_cycle_2;// [No unit]
 static float32_t duty_cycle_offset;// [No unit]
 
-static float32_t Udc = 63.0F; // dc voltage supply assumed [V]
+static float32_t Udc = 20.0F; // dc voltage supply assumed [V]
 static const float f0 = 50.0F; // fundamental frequency [Hz]
 static const float32_t w0 = 2.0F * PI * f0;   // pulsation [rad/s]
 static const float32_t sync_power_tolerance = 0.01*w0;
@@ -265,12 +265,12 @@ void setup_routine()
     
 
     scope.connectChannel(I1_low_value, "I1_low_value");
-    scope.connectChannel(I_high, "I_High");
+    // scope.connectChannel(I_high, "I_High");
     scope.connectChannel(Vgrid_meas, "Vgrid");
     // scope.connectChannel(V1_low_value, "V1_low_value");
     // scope.connectChannel(V2_low_value, "V2_low_value");
     scope.connectChannel(V_high, "V_high");
-    // scope.connectChannel(delta_duty_cycle, "duty_cycle");
+    scope.connectChannel(delta_duty_cycle, "duty_cycle");
     scope.connectChannel(duty_cycle_1, "duty_cycle_1");
     scope.connectChannel(duty_cycle_2, "duty_cycle_2");
     // scope.connectChannel(duty_cycle_offset, "duty_cycle_offset");
@@ -348,6 +348,7 @@ void setup_routine()
     /* buck voltage mode */
     shield.power.initBuck(LEG1);
     shield.power.initBuck(LEG2);
+    // shield.power.setPhaseShift(LEG2,90);
 
     // Then declare tasks
     uint32_t app_task_number = task.createBackground(loop_application_task);
@@ -518,6 +519,7 @@ switch (mode) {
             printk("% 7.3f:", (double)I1_low_value);
             printk("% 7.3f:", (double)I2_low_value);
             printk("% 7.3f:", (double)V1_low_value);
+            printk("% 7.3f:", (double)V_high);
             printk("%7.3f:", (double)power.d);
             printk("%7.3f:", (double)power.q);
 			printk("%7.3f:", (double)Idq_ref.d);
@@ -565,7 +567,7 @@ void loop_critical_task()
 
     // RETRIEVE MEASUREMENTS
     meas_data = shield.sensors.getLatestValue(I1_LOW);
-    if (meas_data != NO_VALUE) I1_low_value = meas_data - I1_current_offset;
+    if (meas_data != NO_VALUE) I1_low_value = meas_data;
 
     meas_data = shield.sensors.getLatestValue(V1_LOW);
     if (meas_data != NO_VALUE) V1_low_value = meas_data;
@@ -574,7 +576,7 @@ void loop_critical_task()
     if (meas_data != NO_VALUE) V2_low_value = meas_data;
 
     meas_data = shield.sensors.getLatestValue(I2_LOW);
-    if (meas_data != NO_VALUE) I2_low_value = meas_data - I2_current_offset;
+    if (meas_data != NO_VALUE) I2_low_value = meas_data;
 
     meas_data = shield.sensors.getLatestValue(V_HIGH);
     if (meas_data != NO_VALUE) V_high = meas_data;
@@ -619,7 +621,9 @@ void loop_critical_task()
             if (delta_duty_cycle > 0.5F) {
                 delta_duty_cycle = 0.5F;
             }
-            shield.power.setDutyCycle(LEG2, 1-delta_duty_cycle);
+            duty_cycle_1 = delta_duty_cycle;
+            duty_cycle_2 = delta_duty_cycle;
+            shield.power.setDutyCycle(LEG2, delta_duty_cycle);
             shield.power.setDutyCycle(LEG1, delta_duty_cycle);
             // WE START THE PWM
             if (!pwm_enable)
@@ -650,23 +654,26 @@ void loop_critical_task()
 
     if (mode == POWERMODE)
     {
-        inverter.inputProcessing(Vgrid_meas,Igrid_meas);             
+        inverter.inputProcessing(Vgrid_meas,Igrid_meas);
+        
+        if(local_mode == FOLLOWING){
+            is_net_synchronized = omega <= w0 + sync_power_tolerance && 
+                                omega >= w0 -sync_power_tolerance; 
 
-        is_net_synchronized = omega <= w0 + sync_power_tolerance && 
-                              omega >= w0 -sync_power_tolerance; 
-
-        if (is_net_synchronized == false)
-        {
-            desync_counter++;
-            desync_counter_scope = (float32_t)desync_counter;
-            if(desync_counter > 200){
-                desync_counter = 0;
-                sync_counter = 0;
-                mode_asked = IDLEMODE;
-                mode = IDLEMODE;
-                printk("System no longer synchronized \n");
-            }                
+            if (is_net_synchronized == false)
+            {
+                desync_counter++;
+                desync_counter_scope = (float32_t)desync_counter;
+                if(desync_counter > 200){
+                    desync_counter = 0;
+                    sync_counter = 0;
+                    mode_asked = IDLEMODE;
+                    mode = IDLEMODE;
+                    printk("System no longer synchronized \n");
+                }                
+            }
         }
+
 
         inverter.setVBus(V_high_filt);
 
@@ -679,21 +686,24 @@ void loop_critical_task()
         delta_duty_cycle = inverter.calculateDuty();
 
 
-        if(pwm_enable = false)
-        {        
-            duty_cycle_offset = VN_meas/V_high_filt;        
-        } 
-        else
-        {
-            if (duty_cycle_offset < 0.5F) {
-                duty_cycle_offset = rate_limiter(0.5F, duty_cycle_offset, 1.0F); // ramp of 0.1 duty / 100 ms = 0.1/0.1 = 1e-1/1e-1 = 1
-                
-            } else {
-                duty_cycle_offset = 0.5F;
+        if (local_mode == FOLLOWING ){
+            if(pwm_enable = false)
+            {        
+                duty_cycle_offset = VN_meas/V_high_filt;        
+            } 
+            else
+            {
+                if (duty_cycle_offset < 0.5F) {
+                    duty_cycle_offset = rate_limiter(0.5F, duty_cycle_offset, 1.0F); // ramp of 0.1 duty / 100 ms = 0.1/0.1 = 1e-1/1e-1 = 1
+                    
+                } else {
+                    duty_cycle_offset = 0.5F;
+                }
+
             }
-
+        } else {
+            duty_cycle_offset = 0.5F;
         }
-
 
         duty_cycle_1 = delta_duty_cycle + duty_cycle_offset;
         duty_cycle_2 = - delta_duty_cycle + duty_cycle_offset ;
