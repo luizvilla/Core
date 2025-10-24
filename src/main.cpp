@@ -74,18 +74,17 @@ constexpr uint8_t MMC_SM_LAST = MMC_SM10;
 
 /* -------------- BOARD IDENTIFICATION ----------------------- */
 
-constexpr uint32_t UID_MMC_LEAD_BOARD = 0x00330054;
-constexpr uint32_t UID_MMC_SM1_BOARD = 0x0033004B;
-constexpr uint32_t UID_MMC_SM2_BOARD = 0x00330049;
-constexpr uint32_t UID_MMC_SM3_BOARD = 0x0033004C;
-constexpr uint32_t UID_MMC_SM4_BOARD = 0x11116666;
-constexpr uint32_t UID_MMC_SM5_BOARD = 0x11117777;
-constexpr uint32_t UID_MMC_SM6_BOARD = 0x11118888;
+constexpr uint32_t UID_MMC_LEAD_BOARD = 0x002B002A;
+constexpr uint32_t UID_MMC_SM1_BOARD = 0x00330054;
+constexpr uint32_t UID_MMC_SM2_BOARD = 0x0033004B;
+constexpr uint32_t UID_MMC_SM3_BOARD = 0x00330049;
+constexpr uint32_t UID_MMC_SM4_BOARD = 0x0033004C;
+constexpr uint32_t UID_MMC_SM5_BOARD = 0x0031001B;
+constexpr uint32_t UID_MMC_SM6_BOARD = 0x003B004D;
 constexpr uint32_t UID_MMC_SM7_BOARD = 0x11119999;
 constexpr uint32_t UID_MMC_SM8_BOARD = 0x1111AAA0;
 constexpr uint32_t UID_MMC_SM9_BOARD = 0x1111BBB1;
 constexpr uint32_t UID_MMC_SM10_BOARD = 0x1111CCC2;
-
 
 
 static uint32_t read_board_uid()
@@ -482,8 +481,10 @@ void loop_communication_task(); // Code to be executed in the communication task
 static uint32_t control_task_period = 200; // 100 µs
 static float32_t Ts = control_task_period*1.0e-6F;
 
-LowPassFirstOrderFilter i_low_filter(Ts, 400e-6F);
-static float32_t i_lowfilter_value;
+LowPassFirstOrderFilter i_upper_filter(Ts, 400e-6F);
+LowPassFirstOrderFilter i_lower_filter(Ts, 400e-6F);
+static float32_t i_lower_filter_value;
+static float32_t i_upper_filter_value;
 /* [bool] state of the PWM (ctrl task) */
 static bool pwm_enable = false;
 
@@ -767,7 +768,7 @@ void setup_routine()
         scope.connectChannel(MMC_capacitor_voltage[0], "v_c_1");
         scope.connectChannel(MMC_capacitor_voltage[1], "v_c_2");
         scope.connectChannel(MMC_capacitor_voltage[2], "v_c_3");
-        scope.connectChannel(i_lowfilter_value, "I_arm filtred");
+        scope.connectChannel(i_lower_filter_value, "I_arm filtred");
         scope.connectChannel(MMC_arm_current[0],"I_arm");
         scope.set_trigger(&a_trigger);
         scope.set_delay(0.0F);
@@ -912,10 +913,16 @@ void loop_background_task()
 /* Capacitor Voltage Balancing (CVB) algorithm implementation */
 void sorting()
 {
-    modules_indexes_upper_arm[0] = 0;
-    modules_indexes_upper_arm[1] = 1;
+    modules_indexes_upper_arm[0] = 1;
+    modules_indexes_upper_arm[1] = 0;
     modules_indexes_upper_arm[2] = 2;
+
+    modules_indexes_lower_arm[0] = 2;
+    modules_indexes_lower_arm[1] = 0;
+    modules_indexes_lower_arm[2] = 1;
+
     uint8_t counter_loops_sorting = 0;
+
     while(counter_loops_sorting < 10){ // Sorts modules indexes according to capacitor voltage
             for(uint8_t counter = 0; counter < total_number_of_modules_arm-1; counter++)
             {
@@ -924,6 +931,7 @@ void sorting()
                     float32_t temp = modules_capacitor_voltages_upper_arm[counter];
                     modules_capacitor_voltages_upper_arm[counter] = modules_capacitor_voltages_upper_arm[counter + 1];
                     modules_capacitor_voltages_upper_arm[counter + 1] = temp;
+                    
                     float32_t temp2 = modules_indexes_upper_arm[counter];
                     modules_indexes_upper_arm[counter] = modules_indexes_upper_arm[counter + 1];
                     modules_indexes_upper_arm[counter + 1] = temp2;
@@ -934,6 +942,7 @@ void sorting()
                     float32_t temp = modules_capacitor_voltages_lower_arm[counter];
                     modules_capacitor_voltages_lower_arm[counter] = modules_capacitor_voltages_lower_arm[counter + 1];
                     modules_capacitor_voltages_lower_arm[counter + 1] = temp;
+
                     float32_t temp2 = modules_indexes_lower_arm[counter];
                     modules_indexes_lower_arm[counter] = modules_indexes_lower_arm[counter + 1];
                     modules_indexes_lower_arm[counter + 1] = temp2;
@@ -1006,18 +1015,19 @@ void loop_critical_task()
 
             /* Run inverter control to derive an AC reference from measured grid values */
             test_angle = mmc_inverter.getTheta();
-            vgrid_meas = inverter_vab_output.alpha; 
-            mmc_dc_bus_voltage = 30.0F;
+            vgrid_meas = mmc_vdq_ref.d*ot_sin(test_angle); 
+
+            mmc_dc_bus_voltage = 20.0F;
 
             // mmc_idq_ref.d = mmc_vdq_ref.d/20;
             // mmc_idq_ref.d = mmc_vdq_ref.d/20;
 
             mmc_inverter.setVdqRef(mmc_vdq_ref);
-            mmc_inverter.setIdqRef(mmc_idq_ref);
+            // mmc_inverter.setIdqRef(mmc_idq_ref);
             mmc_inverter.setVBus(mmc_dc_bus_voltage);
 
             inverter_vab_output = mmc_inverter.getVabOutput();
-            igrid_meas = inverter_vab_output.alpha/20; 
+            // igrid_meas = inverter_vab_output.alpha/20; 
 
             mmc_inverter.inputProcessing(vgrid_meas, igrid_meas);
             (void)mmc_inverter.calculateDuty();
@@ -1066,10 +1076,17 @@ void loop_critical_task()
             number_of_connected_submodules_lower_arm = round(total_number_of_modules_arm*modulation_signal_lower); // recuperate for scope
 
             memcpy(modules_capacitor_voltages_upper_arm, MMC_capacitor_voltage, 3 * sizeof(float32_t));
+            memcpy(modules_capacitor_voltages_lower_arm, &MMC_capacitor_voltage[3], 3 * sizeof(float32_t));
+
             i_upper_arm = MMC_arm_current[0];
-            i_lowfilter_value = i_low_filter.calculateWithReturn(i_upper_arm); // filtered current value
-            i_upper_arm = i_lowfilter_value;
-            // memcpy(modules_capacitor_voltages_lower_arm, &MMC_capacitor_voltage[3], 3 * sizeof(float32_t));
+            i_upper_filter_value = i_upper_filter.calculateWithReturn(i_upper_arm); // filtered current value
+            i_upper_arm = i_upper_filter_value;
+
+
+
+            i_lower_arm = MMC_arm_current[3];
+            i_lower_filter_value = i_lower_filter.calculateWithReturn(i_lower_arm); // filtered current value
+            i_lower_arm = i_lower_filter_value;
 
             sorting(); // Executes the CVB algorithm, chosing which modules to connect
 
@@ -1082,22 +1099,16 @@ void loop_critical_task()
             g_l_2 = (float)g_l[1];  // recuperate for scope acquisition
             g_l_3 = (float)g_l[2];  // recuperate for scope acquisition
 
-            /* Scope data acquisition */
-            // if (scope_timer == scope_period)
-            // {
-            //     scope.acquire();
-            //     scope_timer = 0;
-            // }
             sw_timer++;
-            // scope_timer++;
 
             dataTX_mmc.sm_insertion.raw = 0U;
             mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM1, g_u[0] != 0U);
             mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM2, g_u[1] != 0U);
             mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM3, g_u[2] != 0U);
-            // mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM1, 2 != 0U);
-            // mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM2, 2 != 0U);
-            // mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM3, 2 != 0U);
+
+            mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM4, g_l[0] != 0U);
+            mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM5, g_l[1] != 0U);
+            mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM6, g_l[2] != 0U);
 
             dataTX_mmc.status.raw = 0U;
 
@@ -1107,6 +1118,7 @@ void loop_critical_task()
             mmc_frame_set_voltage_raw(dataTX_mmc, mmc_encode_voltage(Cap_voltage));
             mmc_frame_set_current_raw(dataTX_mmc, mmc_encode_current(Arm_current));
             memcpy(buffer_tx, &dataTX_mmc, sizeof(dataTX_mmc));
+           
             communication.rs485.startTransmission();
         }
         else
