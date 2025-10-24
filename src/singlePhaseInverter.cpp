@@ -139,12 +139,12 @@ float32_t singlePhaseInverter::calculateDuty() {
 
     if(_mode == FORMING){
         /* This is the outer voltage loop of the grid forming */
-        _Idq_ref_delta.d = _voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
-        _Idq_ref_delta.q = _voltage_q_pi.calculateWithReturn(_Vdq_ref.q, _Vdq.q); 
+        // _Idq_ref_delta.d = _voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
+        // _Idq_ref_delta.q = _voltage_q_pi.calculateWithReturn(_Vdq_ref.q, _Vdq.q); 
 
         /* This is the inner current loop of the grid forming */
-        _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref_delta.d, _Idq.d); 
-        _Vdq_output.q = _current_q_pi.calculateWithReturn(_Idq_ref_delta.q, _Idq.q); 
+        _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref_delta.d + _Idq_ref.d, _Idq.d); 
+        _Vdq_output.q = _current_q_pi.calculateWithReturn(_Idq_ref_delta.q + _Idq_ref.q, _Idq.q); 
 
     }else if(_mode == FOLLOWING){
         /* This is the current control loop of the grid following */
@@ -154,10 +154,8 @@ float32_t singlePhaseInverter::calculateDuty() {
 
 
     if(_mode == FORMING){
-        // _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
-        // _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
-        _Vdq_output.d = _Vdq_ref.d; 
-        _Vdq_output.q = _Vdq_ref.q;
+        _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
+        _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
     }else if(_mode == FOLLOWING){
         _Vdq_output.d = _Vdq_output_pid.d + _Vdq.d; 
         _Vdq_output.q = _Vdq_output_pid.q + _Vdq.q;

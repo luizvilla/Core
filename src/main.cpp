@@ -170,8 +170,9 @@ static const float32_t GRID_FREQUENCY_HZ = 50.0F;
 static const float32_t GRID_W0 = 2.0F * PI * GRID_FREQUENCY_HZ;
 static const float32_t GRID_VPK_DEFAULT = 20.0F;
 static singlePhaseInverter mmc_inverter;
-static inverter_mode mmc_inverter_mode = FOLLOWING;
+static inverter_mode mmc_inverter_mode = FORMING;
 static dqo_t mmc_vdq_ref;
+static dqo_t mmc_idq_ref;
 static const float32_t MMC_VDQ_REF_MAX_D = 30.0F;
 static const float32_t MMC_VDQ_REF_MIN_D = -0.1F;
 
@@ -387,6 +388,7 @@ void setup_routine()
         scope.connectChannel(g_l_3, "g_l_3");
         scope.connectChannel(vab_alpha_command, "Vab_cmd");
         scope.connectChannel(mmc_dc_bus_voltage, "Vdc_est");
+        scope.connectChannel(vgrid_meas, "vgrid_meas");
         scope.set_trigger(&a_trigger);
         scope.set_delay(0.0F);
         scope.start();
@@ -457,9 +459,11 @@ void loop_communication_task()
         break;
     case 'r':
         is_downloading = true;
+        enable_acq = false;
+
         break;
     case 'a':
-        enable_acq = !(enable_acq);
+        enable_acq = true;
         break;
     default:
         break;
@@ -497,11 +501,12 @@ void loop_background_task()
             printk("%u:", g_u_3);
             printk("%7.3f:", (double)vab_alpha_command);
             printk("%7.3f:", (double)mmc_dc_bus_voltage);
+            printk("%7.3f:", (double)mmc_vdq_ref.d);
             printk("\n");
         }
     }
 
-    task.suspendBackgroundMs(2000);
+    task.suspendBackgroundMs(500);
 }
 
 /* Capacitor Voltage Balancing (CVB) algorithm implementation */
@@ -597,7 +602,7 @@ void loop_critical_task()
             /* Run inverter control to derive an AC reference from measured grid values */
             test_angle = mmc_inverter.getTheta();
             vgrid_meas = mmc_vdq_ref.d * ot_sin(test_angle); 
-            igrid_meas = 2.0F * ot_sin(test_angle - PI/2); 
+            igrid_meas = mmc_idq_ref.d * ot_sin(test_angle); 
             mmc_dc_bus_voltage = 30.0F;
 
             mmc_inverter.setVdqRef(mmc_vdq_ref);
