@@ -2,14 +2,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Load the CSV file
-df = pd.read_csv('src/Data_records/2025-10-16_16-52-40-record.csv')
+df = pd.read_csv('src/Data_records/2025-10-24_17-00-59-record.csv')
 
 # Defina os períodos
 scope_period = 1  # exemplo, ajuste conforme o seu caso
-critical_task_period = 1e-6   # exemplo, ajuste conforme o seu caso
+critical_task_period = 2e-4   # exemplo, ajuste conforme o seu caso
 
 # Filtra dados (os quatro gráficos usam a mesma filtragem)
-mask = (df.iloc[:, 0] > 0) & (df.iloc[:, 0] < 1000)
+mask = (df.iloc[:, 0] > 0) & (df.iloc[:, 0] < 200)
 t_filtered = df.iloc[:, 0][mask] * scope_period * critical_task_period  # tempo em segundos
 
 # Dados do primeiro gráfico: m_u e m_l
@@ -24,12 +24,15 @@ N_l_filtered = df['N_l'][mask]
 g_u_1_filtered = df['g_u_1'][mask]
 g_u_2_filtered = df['g_u_2'][mask]
 g_u_3_filtered = df['g_u_3'][mask]
-g_l_1_filtered = df['g_l_1'][mask]
-g_l_2_filtered = df['g_l_2'][mask]
-g_l_3_filtered = df['g_l_3'][mask]
+v_c_1_filtered = df['v_c_1'][mask]
+v_c_2_filtered = df['v_c_2'][mask]
+v_c_3_filtered = df['v_c_3'][mask]
+
+i_arm_filtered = df['I_arm filtred'][mask]
+i_arm= df['I_arm'][mask]
 
 # Cria os subplots
-fig, axs = plt.subplots(4, 1, figsize=(10, 10), sharex=True)
+fig, axs = plt.subplots(6, 1, figsize=(10, 10), sharex=True)
 
 # Subplot 1: N_u e N_l
 axs[0].plot(t_filtered, N_u_filtered, label='Nb of inserted modules N_on_u')
@@ -56,6 +59,21 @@ axs[3].plot(t_filtered, g_u_3_filtered, label='g_u_3 (1 = module ON, 0 = module 
 axs[3].set_ylabel('g [-]')
 axs[3].legend()
 axs[3].grid(True)
+
+# Subplot 2: g_u_1
+axs[4].plot(t_filtered, v_c_1_filtered, label='v_c_1', color='tab:blue')
+axs[4].plot(t_filtered, v_c_2_filtered, label='v_c_2', color='tab:orange')
+axs[4].plot(t_filtered, v_c_3_filtered, label='v_c_3', color='tab:green')
+axs[4].set_ylabel('v_c [V]')
+axs[4].legend()
+axs[4].grid(True)
+
+# Subplot 2: g_u_1
+axs[5].plot(t_filtered, i_arm_filtered, label='i_arm filtered', color='tab:blue')
+axs[5].plot(t_filtered, i_arm, label='i_arm', color='tab:orange')
+axs[5].set_ylabel('i_arm [A]')
+axs[5].legend()
+axs[5].grid(True)
 
 # Ajusta layout
 plt.tight_layout()
