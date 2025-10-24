@@ -610,7 +610,7 @@ static void update_measurements(void)
     if (latest != NO_VALUE)
     {
         I1_low_value = latest;
-        Arm_current = -I1_low_value+0.2;
+        Arm_current = -I1_low_value + 0.2;
     }
 }
 
