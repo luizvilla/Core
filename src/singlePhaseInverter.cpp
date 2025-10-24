@@ -139,8 +139,8 @@ float32_t singlePhaseInverter::calculateDuty() {
 
     if(_mode == FORMING){
         /* This is the outer voltage loop of the grid forming */
-        // _Idq_ref_delta.d = _voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
-        // _Idq_ref_delta.q = _voltage_q_pi.calculateWithReturn(_Vdq_ref.q, _Vdq.q); 
+        _Idq_ref_delta.d = _voltage_d_pi.calculateWithReturn(_Vdq_ref.d, _Vdq.d); 
+        _Idq_ref_delta.q = _voltage_q_pi.calculateWithReturn(_Vdq_ref.q, _Vdq.q); 
 
         /* This is the inner current loop of the grid forming */
         _Vdq_output.d = _current_d_pi.calculateWithReturn(_Idq_ref_delta.d + _Idq_ref.d, _Idq.d); 

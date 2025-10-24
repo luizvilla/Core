@@ -173,6 +173,9 @@ static singlePhaseInverter mmc_inverter;
 static inverter_mode mmc_inverter_mode = FORMING;
 static dqo_t mmc_vdq_ref;
 static dqo_t mmc_idq_ref;
+static clarke_t inverter_vab_output;
+static dqo_t mmc_vdq_out;
+
 static const float32_t MMC_VDQ_REF_MAX_D = 30.0F;
 static const float32_t MMC_VDQ_REF_MIN_D = -0.1F;
 
@@ -185,7 +188,7 @@ static float meas_data;
 /* Scope variables */
 static bool enable_acq; // Sets trigger moment if true
 static const uint16_t NB_DATAS = 1028; // Number of data acquired
-static ScopeMimicry scope(NB_DATAS, 12); // Scope configuration with MMC control channels
+static ScopeMimicry scope(NB_DATAS, 10); // Scope configuration with MMC control channels
 static bool is_downloading; // Records data if true
 
 /* SM switching variables */
@@ -383,12 +386,15 @@ void setup_routine()
         scope.connectChannel(g_u_1, "g_u_1");
         scope.connectChannel(g_u_2, "g_u_2");
         scope.connectChannel(g_u_3, "g_u_3");
-        scope.connectChannel(g_l_1, "g_l_1");
-        scope.connectChannel(g_l_2, "g_l_2");
-        scope.connectChannel(g_l_3, "g_l_3");
+        // scope.connectChannel(g_l_1, "g_l_1");
+        // scope.connectChannel(g_l_2, "g_l_2");
+        // scope.connectChannel(g_l_3, "g_l_3");
         scope.connectChannel(vab_alpha_command, "Vab_cmd");
-        scope.connectChannel(mmc_dc_bus_voltage, "Vdc_est");
+        // scope.connectChannel(mmc_vdq_out.d, "Vdq_out_d");
+        // scope.connectChannel(mmc_vdq_out.q, "Vdq_out_q");
+        // scope.connectChannel(mmc_dc_bus_voltage, "Vdc_est");
         scope.connectChannel(vgrid_meas, "vgrid_meas");
+        scope.connectChannel(igrid_meas, "Igrid_meas");
         scope.set_trigger(&a_trigger);
         scope.set_delay(0.0F);
         scope.start();
@@ -415,19 +421,19 @@ void loop_communication_task()
 
     switch (received_serial_char)
     {
-    case 'h':
-        /*----------SERIAL INTERFACE MENU----------------------- */
-        printk(" ________________________________________ \n"
-               "|     ---- MENU buck voltage mode ----   |\n"
-               "|     press i : idle mode                |\n"
-               "|     press p : power mode               |\n"
-               "|     press u : Vdq_ref.d up by 1 V      |\n"
-               "|     press j : Vdq_ref.d down by 1 V    |\n"
-               "|     press r : record data              |\n"
-               "|     press a : toggle enable_acq var    |\n"
-               "|________________________________________|\n\n");
-        /*------------------------------------------------------ */
-        break;
+    // case 'h':
+    //     /*----------SERIAL INTERFACE MENU----------------------- */
+    //     printk(" ________________________________________ \n"
+    //            "|     ---- MENU buck voltage mode ----   |\n"
+    //            "|     press i : idle mode                |\n"
+    //            "|     press p : power mode               |\n"
+    //            "|     press u : Vdq_ref.d up by 1 V      |\n"
+    //            "|     press j : Vdq_ref.d down by 1 V    |\n"
+    //            "|     press r : record data              |\n"
+    //            "|     press a : toggle enable_acq var    |\n"
+    //            "|________________________________________|\n\n");
+    //     /*------------------------------------------------------ */
+    //     break;
     case 'i':
         printk("idle mode\n");
         mode = IDLEMODE;
@@ -461,6 +467,26 @@ void loop_communication_task()
         is_downloading = true;
         enable_acq = false;
 
+        break;
+    case 'y':
+        if (mmc_inverter_mode == FORMING)
+        {
+            if (mmc_vdq_ref.d < MMC_VDQ_REF_MAX_D)
+            {
+                mmc_idq_ref.d += 0.1F;
+                mmc_inverter.setIdqRef(mmc_idq_ref);
+            }
+        }
+        break;
+    case 'h':
+        if (mmc_inverter_mode == FORMING)
+        {
+            if (mmc_vdq_ref.d > MMC_VDQ_REF_MIN_D)
+            {
+                mmc_idq_ref.d -= 0.1F;
+                mmc_inverter.setIdqRef(mmc_idq_ref);
+            }
+        }
         break;
     case 'a':
         enable_acq = true;
@@ -601,22 +627,30 @@ void loop_critical_task()
 
             /* Run inverter control to derive an AC reference from measured grid values */
             test_angle = mmc_inverter.getTheta();
-            vgrid_meas = mmc_vdq_ref.d * ot_sin(test_angle); 
-            igrid_meas = mmc_idq_ref.d * ot_sin(test_angle); 
+            vgrid_meas = inverter_vab_output.alpha; 
             mmc_dc_bus_voltage = 30.0F;
 
+            // mmc_idq_ref.d = mmc_vdq_ref.d/20;
+            // mmc_idq_ref.d = mmc_vdq_ref.d/20;
+
             mmc_inverter.setVdqRef(mmc_vdq_ref);
+            mmc_inverter.setIdqRef(mmc_idq_ref);
             mmc_inverter.setVBus(mmc_dc_bus_voltage);
+
+            inverter_vab_output = mmc_inverter.getVabOutput();
+            igrid_meas = inverter_vab_output.alpha/20; 
+
             mmc_inverter.inputProcessing(vgrid_meas, igrid_meas);
             (void)mmc_inverter.calculateDuty();
+            mmc_vdq_out = mmc_inverter.getVdqOut();
 
-            clarke_t inverter_vab_output = mmc_inverter.getVabOutput();
+            
             vab_alpha_command = inverter_vab_output.alpha;
 
             float32_t normalized_vab = 0.0F;
             if (mmc_dc_bus_voltage > 0.0F)
             {
-                normalized_vab = vab_alpha_command / mmc_dc_bus_voltage;
+                normalized_vab = vab_alpha_command / (mmc_dc_bus_voltage-5);
             }
 
             if (normalized_vab > 1.0F)
