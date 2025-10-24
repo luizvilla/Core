@@ -69,6 +69,12 @@ static float32_t V_high; // [V]
 static float32_t I_high; // [A]
 static float32_t V_high_filt; // [V]
 
+static float32_t i_duty; // [V]
+static float32_t i_max; // [V]
+static float32_t i_diff_1; // [V]
+static float32_t i_diff_2; // [V]
+
+
 static float32_t I1_current_offset = 0.25; // [A] Current offset found experimentally 21/10/2025
 static float32_t I2_current_offset = 0.25; // [A]
 
@@ -142,6 +148,7 @@ static float32_t Vgrid_amplitude_ref = 20.0F; // [V]
 static float32_t Vgrid_amplitude = 20.0F; // [V]
 static float angle = 0.F; // [rad]
 static float theta = 0.F; // [rad]
+static float32_t sine = 0.F; // [rad]
 
 //------------- PR RESONANT -------------------------------------
 static float32_t Ts = control_task_period * 1.0e-6F;
@@ -257,19 +264,23 @@ float32_t rate_limiter(const float32_t ref, float32_t value, const float32_t rat
 void setup_routine()
 {
     // Setup the hardware first
+    spin.pwm.initFixedFrequency(50000);
+    shield.power.setDeadTime(LEG1,20,20);
+    shield.power.setDeadTime(LEG2,20,20);
     shield.sensors.enableDefaultTwistSensors();
 
     // DISABLE DC LOW CAPACITORS
-    shield.power.disconnectCapacitor(LEG1);
-    shield.power.disconnectCapacitor(LEG2);
+    shield.power.connectCapacitor(LEG1);
+    shield.power.connectCapacitor(LEG2);
     
 
     scope.connectChannel(I1_low_value, "I1_low_value");
+    scope.connectChannel(I2_low_value, "I2_low_value");
     // scope.connectChannel(I_high, "I_High");
     scope.connectChannel(Vgrid_meas, "Vgrid");
     // scope.connectChannel(V1_low_value, "V1_low_value");
     // scope.connectChannel(V2_low_value, "V2_low_value");
-    scope.connectChannel(V_high, "V_high");
+    // scope.connectChannel(V_high, "V_high");
     scope.connectChannel(delta_duty_cycle, "duty_cycle");
     scope.connectChannel(duty_cycle_1, "duty_cycle_1");
     scope.connectChannel(duty_cycle_2, "duty_cycle_2");
@@ -279,13 +290,17 @@ void setup_routine()
     // scope.connectChannel(Vdq_ref.d, "Vd_ref");
     // scope.connectChannel(theta, "theta");
 	// scope.connectChannel(I2_low_value, "I2_low_value");
-	scope.connectChannel(Idq.d, "Id");
-	scope.connectChannel(Idq.q, "Iq");
-	scope.connectChannel(Idq_ref.d, "Id_ref");
+	scope.connectChannel(i_diff_1, "i_diff_1");
+	scope.connectChannel(i_diff_2, "i_diff_2");
+	scope.connectChannel(i_duty, "i_duty");
+	// scope.connectChannel(Idq.d, "Id");
+	// scope.connectChannel(Idq.q, "Iq");
+	// scope.connectChannel(Idq_ref.d, "Id_ref");
 	// scope.connectChannel(Idq_ref_delta.q, "Idelta_q");
     // scope.connectChannel(Idq_ref_delta.d, "Idelta_d");
 	scope.connectChannel(Iab.alpha, "Ialpha");
-	scope.connectChannel(Iab.beta, "Ibeta");
+	// scope.connectChannel(Iab.beta, "Ibeta");
+	scope.connectChannel(sine, "sine");
 
     
 	// scope.connectChannel(VN_meas, "VN_meas");
@@ -654,6 +669,10 @@ void loop_critical_task()
 
     if (mode == POWERMODE)
     {
+        // trigger = true;
+        // theta = ot_modulo_2pi(theta + w0 * Ts);
+        // sine = (1 + 0.1*Vdq_ref.d*ot_sin(theta))/2;
+
         inverter.inputProcessing(Vgrid_meas,Igrid_meas);
         
         if(local_mode == FOLLOWING){
@@ -717,6 +736,26 @@ void loop_critical_task()
             }
         }
 
+        // duty_cycle_1 =   sine;
+        // duty_cycle_2 = 1 - sine ;
+
+        if(duty_cycle_1>0.5){
+            duty_cycle_1 += 0.02;
+        } else {
+            duty_cycle_1 -= 0.02;
+        }
+
+        if(duty_cycle_2>0.5){
+            duty_cycle_2 += 0.02;
+        } else {
+            duty_cycle_2 -= 0.02;
+        }
+
+
+        // i_duty = ((I1_low_value/i_max) + 1.0)/2.0;
+        // i_diff_1 = duty_cycle_1 - i_duty;
+        // i_diff_2 = duty_cycle_2 + i_duty;
+        // if (i_max<I1_low_value) i_max = I1_low_value;
 
 
         shield.power.setDutyCycle(LEG1, duty_cycle_1);
@@ -725,7 +764,7 @@ void loop_critical_task()
     }
 
     /* Retrieve multiple data for debugging */
-    theta = inverter.getTheta();
+    // theta = inverter.getTheta();
     Vdq = inverter.getVdqIn();
     Vq_filtered = VqFilter.calculateWithReturn(Vdq.q);
     Vdq_output = inverter.getVdqOut();
