@@ -154,8 +154,10 @@ float32_t singlePhaseInverter::calculateDuty() {
 
 
     if(_mode == FORMING){
-        _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
-        _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
+        // _Vdq_output.d = _Vdq_output.d + _Vdq_ref.d; 
+        // _Vdq_output.q = _Vdq_output.q + _Vdq_ref.q;
+        _Vdq_output.d =  _Vdq_ref.d; 
+        _Vdq_output.q =  _Vdq_ref.q;
     }else if(_mode == FOLLOWING){
         _Vdq_output.d = _Vdq_output_pid.d + _Vdq.d; 
         _Vdq_output.q = _Vdq_output_pid.q + _Vdq.q;
