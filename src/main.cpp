@@ -41,6 +41,7 @@
 #include "pid.h"
 #include "pr.h"
 #include "arm_math_types.h"
+#include "filters.h"
 #include <ScopeMimicry.h>
 
 /*-- Zephyr includes --*/
@@ -83,6 +84,8 @@ constexpr uint32_t UID_MMC_SM7_BOARD = 0x11119999;
 constexpr uint32_t UID_MMC_SM8_BOARD = 0x1111AAA0;
 constexpr uint32_t UID_MMC_SM9_BOARD = 0x1111BBB1;
 constexpr uint32_t UID_MMC_SM10_BOARD = 0x1111CCC2;
+
+
 
 static uint32_t read_board_uid()
 {
@@ -475,7 +478,11 @@ void loop_communication_task(); // Code to be executed in the communication task
 /* --------------- Firmware CVB variables ------------------*/
 
 /* [us] period of the control task (=critical task) */
-static uint32_t control_task_period = 100; // 100 µs
+static uint32_t control_task_period = 200; // 100 µs
+static float32_t Ts = control_task_period*1.0e-6F;
+
+LowPassFirstOrderFilter i_low_filter(Ts, 400e-6F);
+static float32_t i_lowfilter_value;
 /* [bool] state of the PWM (ctrl task) */
 static bool pwm_enable = false;
 
@@ -497,7 +504,7 @@ static float meas_data;
 /* Scope variables */
 static bool enable_acq; // Sets trigger moment if true
 static const uint16_t NB_DATAS = 1028; // Number of data acquired
-static ScopeMimicry scope(NB_DATAS, 10); // Scope configuration with 5 channels
+static ScopeMimicry scope(NB_DATAS, 12); // Scope configuration with 5 channels
 static bool is_downloading; // Records data if true
 
 /* SM switching variables */
@@ -539,7 +546,6 @@ static float32_t a = 1;
 static float32_t angle;
 static const float f0 = 250.F;
 static const float w0 = 2 * PI * f0;
-static float32_t Ts = control_task_period * 1e-6F;
 static float32_t modulation_signal_upper;
 static float32_t modulation_signal_lower;
 /* --------------SETUP FUNCTIONS------------------------------- */
@@ -604,7 +610,7 @@ static void update_measurements(void)
     if (latest != NO_VALUE)
     {
         I1_low_value = latest;
-        Arm_current = I1_low_value;
+        Arm_current = -I1_low_value+0.2;
     }
 }
 
@@ -716,8 +722,10 @@ void setup_routine()
         scope.connectChannel(g_u_2, "g_u_2");
         scope.connectChannel(g_u_3, "g_u_3");
         scope.connectChannel(MMC_capacitor_voltage[0], "v_c_1");
-        scope.connectChannel(MMC_capacitor_voltage[2], "v_c_2");
+        scope.connectChannel(MMC_capacitor_voltage[1], "v_c_2");
         scope.connectChannel(MMC_capacitor_voltage[2], "v_c_3");
+        scope.connectChannel(i_lowfilter_value, "I_arm filtred");
+        scope.connectChannel(MMC_arm_current[0],"I_arm");
         scope.set_trigger(&a_trigger);
         scope.set_delay(0.0F);
         scope.start();
@@ -794,6 +802,9 @@ void loop_background_task()
 /* Capacitor Voltage Balancing (CVB) algorithm implementation */
 void sorting()
 {
+    modules_indexes_upper_arm[0] = 0;
+    modules_indexes_upper_arm[1] = 1;
+    modules_indexes_upper_arm[2] = 2;
     uint8_t counter_loops_sorting = 0;
     while(counter_loops_sorting < 10){ // Sorts modules indexes according to capacitor voltage
             for(uint8_t counter = 0; counter < total_number_of_modules_arm-1; counter++)
@@ -906,7 +917,9 @@ void loop_critical_task()
             number_of_connected_submodules_lower_arm = round(total_number_of_modules_arm*modulation_signal_lower); // recuperate for scope
 
             memcpy(modules_capacitor_voltages_upper_arm, MMC_capacitor_voltage, 3 * sizeof(float32_t));
-            i_upper_arm, MMC_arm_current[0];
+            i_upper_arm = MMC_arm_current[0];
+            i_lowfilter_value = i_low_filter.calculateWithReturn(i_upper_arm); // filtered current value
+            i_upper_arm = i_lowfilter_value;
             // memcpy(modules_capacitor_voltages_lower_arm, &MMC_capacitor_voltage[3], 3 * sizeof(float32_t));
 
             sorting(); // Executes the CVB algorithm, chosing which modules to connect
@@ -921,18 +934,21 @@ void loop_critical_task()
             g_l_3 = (float)g_l[2];  // recuperate for scope acquisition
 
             /* Scope data acquisition */
-            if (scope_timer == scope_period)
-            {
-                scope.acquire();
-                scope_timer = 0;
-            }
+            // if (scope_timer == scope_period)
+            // {
+            //     scope.acquire();
+            //     scope_timer = 0;
+            // }
             sw_timer++;
-            scope_timer++;
+            // scope_timer++;
 
             dataTX_mmc.sm_insertion.raw = 0U;
             mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM1, g_u[0] != 0U);
             mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM2, g_u[1] != 0U);
             mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM3, g_u[2] != 0U);
+            // mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM1, 2 != 0U);
+            // mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM2, 2 != 0U);
+            // mmc_frame_set_sm_inserted(dataTX_mmc, MMC_SM3, 2 != 0U);
 
             dataTX_mmc.status.raw = 0U;
 
@@ -1014,7 +1030,14 @@ void loop_critical_task()
             send_idle = true; // Set the flag to send idle command
         }
     }
+    /* Scope data acquisition */
+    if (scope_timer == scope_period)
+    {
+        scope.acquire();
+        scope_timer = 0;
+    }
     counter_timer++;
+    scope_timer++;
 }
 
 /**

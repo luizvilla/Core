@@ -2,11 +2,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Load the CSV file
-df = pd.read_csv('src/Data_records/2025-10-24_12-28-22-record.csv')
+df = pd.read_csv('src/Data_records/2025-10-24_17-00-59-record.csv')
 
 # Defina os períodos
 scope_period = 1  # exemplo, ajuste conforme o seu caso
-critical_task_period = 1e-6   # exemplo, ajuste conforme o seu caso
+critical_task_period = 2e-4   # exemplo, ajuste conforme o seu caso
 
 # Filtra dados (os quatro gráficos usam a mesma filtragem)
 mask = (df.iloc[:, 0] > 0) & (df.iloc[:, 0] < 200)
@@ -28,8 +28,11 @@ v_c_1_filtered = df['v_c_1'][mask]
 v_c_2_filtered = df['v_c_2'][mask]
 v_c_3_filtered = df['v_c_3'][mask]
 
+i_arm_filtered = df['I_arm filtred'][mask]
+i_arm= df['I_arm'][mask]
+
 # Cria os subplots
-fig, axs = plt.subplots(5, 1, figsize=(10, 10), sharex=True)
+fig, axs = plt.subplots(6, 1, figsize=(10, 10), sharex=True)
 
 # Subplot 1: N_u e N_l
 axs[0].plot(t_filtered, N_u_filtered, label='Nb of inserted modules N_on_u')
@@ -64,6 +67,13 @@ axs[4].plot(t_filtered, v_c_3_filtered, label='v_c_3', color='tab:green')
 axs[4].set_ylabel('v_c [V]')
 axs[4].legend()
 axs[4].grid(True)
+
+# Subplot 2: g_u_1
+axs[5].plot(t_filtered, i_arm_filtered, label='i_arm filtered', color='tab:blue')
+axs[5].plot(t_filtered, i_arm, label='i_arm', color='tab:orange')
+axs[5].set_ylabel('i_arm [A]')
+axs[5].legend()
+axs[5].grid(True)
 
 # Ajusta layout
 plt.tight_layout()
