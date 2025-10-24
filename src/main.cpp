@@ -42,6 +42,7 @@
 #include "pr.h"
 #include "arm_math_types.h"
 #include <ScopeMimicry.h>
+#include "singlePhaseInverter.h"
 
 /*-- Zephyr includes --*/
 #include "zephyr/console/console.h"
@@ -158,6 +159,22 @@ static float32_t I2_low_value;
 static float32_t I_high;
 static float32_t V_high;
 
+static float32_t vgrid_meas;
+static float32_t igrid_meas;
+static float32_t vab_alpha_command;
+static float32_t mmc_dc_bus_voltage = 30.0F; // default value until RS485 updates arrive
+
+static float32_t test_angle;
+
+static const float32_t GRID_FREQUENCY_HZ = 50.0F;
+static const float32_t GRID_W0 = 2.0F * PI * GRID_FREQUENCY_HZ;
+static const float32_t GRID_VPK_DEFAULT = 20.0F;
+static singlePhaseInverter mmc_inverter;
+static inverter_mode mmc_inverter_mode = FOLLOWING;
+static dqo_t mmc_vdq_ref;
+static const float32_t MMC_VDQ_REF_MAX_D = 30.0F;
+static const float32_t MMC_VDQ_REF_MIN_D = -0.1F;
+
 static float32_t temp_1_value;
 static float32_t temp_2_value;
 
@@ -167,7 +184,7 @@ static float meas_data;
 /* Scope variables */
 static bool enable_acq; // Sets trigger moment if true
 static const uint16_t NB_DATAS = 1028; // Number of data acquired
-static ScopeMimicry scope(NB_DATAS, 10); // Scope configuration with 5 channels
+static ScopeMimicry scope(NB_DATAS, 12); // Scope configuration with MMC control channels
 static bool is_downloading; // Records data if true
 
 /* SM switching variables */
@@ -203,12 +220,6 @@ static float32_t g_l_1;
 static float32_t g_l_2;
 static float32_t g_l_3;
 
-/* NLM */
-static float32_t m = 1;
-static float32_t a = 1;
-static float32_t angle;
-static const float f0 = 50.F;
-static const float w0 = 2 * PI * f0;
 static float32_t Ts = control_task_period * 1e-6F;
 static float32_t modulation_signal_upper;
 static float32_t modulation_signal_lower;
@@ -261,6 +272,27 @@ void dump_scope_datas(ScopeMimicry &scope)
     printk("end record\n");
 }
 
+static void refresh_mmc_dc_bus_voltage_estimate()
+{
+    /* Estimate the DC link from the latest capacitor voltages reported by the arms */
+    float32_t sum = 0.0F;
+    uint8_t count = 0U;
+    const uint8_t capacitor_count = sizeof(MMC_capacitor_voltage) / sizeof(MMC_capacitor_voltage[0]);
+    for (uint8_t idx = 0U; idx < capacitor_count; idx++)
+    {
+        float32_t voltage = MMC_capacitor_voltage[idx];
+        if (voltage > 0.0F)
+        {
+            sum += voltage;
+            count++;
+        }
+    }
+    if (count > 0U)
+    {
+        mmc_dc_bus_voltage = sum / (float32_t)count;
+    }
+}
+
 /* RS-485 reception_function: executed when a message is received */
 void reception_function(void)
 {
@@ -269,6 +301,8 @@ void reception_function(void)
     if (module_ID == MMC_LEAD)
     {
         MMC_capacitor_voltage[dataRX_mmc.ID - 1] = dataRX_mmc.Capacitor_Voltage;
+        refresh_mmc_dc_bus_voltage_estimate();
+        /* TODO: map additional RS485 payload bytes to vgrid_meas and igrid_meas once available. */
     }
 
     else
@@ -351,9 +385,23 @@ void setup_routine()
         scope.connectChannel(g_l_1, "g_l_1");
         scope.connectChannel(g_l_2, "g_l_2");
         scope.connectChannel(g_l_3, "g_l_3");
+        scope.connectChannel(vab_alpha_command, "Vab_cmd");
+        scope.connectChannel(mmc_dc_bus_voltage, "Vdc_est");
         scope.set_trigger(&a_trigger);
         scope.set_delay(0.0F);
         scope.start();
+
+        /* Initialise inverter control used to shape MMC insertion sequence */
+        vgrid_meas = 0.0F;
+        igrid_meas = 0.0F;
+        vab_alpha_command = 0.0F;
+
+        mmc_inverter.init(mmc_inverter_mode, GRID_VPK_DEFAULT, GRID_W0, Ts);
+        mmc_inverter.setVBus(mmc_dc_bus_voltage);
+        dqo_t zero_dqo = {0.0F, 0.0F, 0.0F};
+        mmc_vdq_ref = zero_dqo;
+        mmc_inverter.setVdqRef(mmc_vdq_ref);
+        mmc_inverter.setIdqRef(zero_dqo);
     }
 }
 
@@ -371,6 +419,8 @@ void loop_communication_task()
                "|     ---- MENU buck voltage mode ----   |\n"
                "|     press i : idle mode                |\n"
                "|     press p : power mode               |\n"
+               "|     press u : Vdq_ref.d up by 1 V      |\n"
+               "|     press j : Vdq_ref.d down by 1 V    |\n"
                "|     press r : record data              |\n"
                "|     press a : toggle enable_acq var    |\n"
                "|________________________________________|\n\n");
@@ -384,6 +434,26 @@ void loop_communication_task()
         printk("power mode\n");
         mode = POWERMODE;
         send_idle = false; // Set the flag to send idle command to false 
+        break;
+    case 'u':
+        if (mmc_inverter_mode == FORMING)
+        {
+            if (mmc_vdq_ref.d < MMC_VDQ_REF_MAX_D)
+            {
+                mmc_vdq_ref.d += 1.0F;
+                mmc_inverter.setVdqRef(mmc_vdq_ref);
+            }
+        }
+        break;
+    case 'j':
+        if (mmc_inverter_mode == FORMING)
+        {
+            if (mmc_vdq_ref.d > MMC_VDQ_REF_MIN_D)
+            {
+                mmc_vdq_ref.d -= 1.0F;
+                mmc_inverter.setVdqRef(mmc_vdq_ref);
+            }
+        }
         break;
     case 'r':
         is_downloading = true;
@@ -425,6 +495,8 @@ void loop_background_task()
             printk("%u:", g_u_1);
             printk("%u:", g_u_2);
             printk("%u:", g_u_3);
+            printk("%7.3f:", (double)vab_alpha_command);
+            printk("%7.3f:", (double)mmc_dc_bus_voltage);
             printk("\n");
         }
     }
@@ -520,31 +592,60 @@ void loop_critical_task()
         /* The lead sends commands to the followers */
         if (module_ID == MMC_LEAD)
         {
-            // /* Connection sequence triangular format generation */
-            // if (sw_timer == sw_period)
-            // {
-            //     if (counter_seq >= 6)
-            //     {
-            //         counter_seq = 0;
-            //     }
-            //     number_of_connected_submodules_upper_arm = (float)seq_u[counter_seq]; // recuperate for scope
-            //     number_of_connected_submodules_lower_arm = (float)seq_l[counter_seq]; // recuperate for scope
-            //     counter_seq++;
-            //     sw_timer = 0;
-            // }
-
             /* Connection sequence from NLM */
 
-            angle += w0 * Ts;
-            angle = ot_modulo_2pi(angle);
-            m = 1;
-            modulation_signal_upper = (a + m * ot_sin(angle)) / (2.0);
-            modulation_signal_lower = (a - m * ot_sin(angle)) / (2.0);
+            /* Run inverter control to derive an AC reference from measured grid values */
+            test_angle = mmc_inverter.getTheta();
+            vgrid_meas = mmc_vdq_ref.d * ot_sin(test_angle); 
+            igrid_meas = 2.0F * ot_sin(test_angle - PI/2); 
+            mmc_dc_bus_voltage = 30.0F;
 
-            number_of_connected_submodules_upper_arm = round(total_number_of_modules_arm*modulation_signal_upper); // recuperate for scope
-            number_of_connected_submodules_lower_arm = round(total_number_of_modules_arm*modulation_signal_lower); // recuperate for scope
+            mmc_inverter.setVdqRef(mmc_vdq_ref);
+            mmc_inverter.setVBus(mmc_dc_bus_voltage);
+            mmc_inverter.inputProcessing(vgrid_meas, igrid_meas);
+            (void)mmc_inverter.calculateDuty();
 
-            
+            clarke_t inverter_vab_output = mmc_inverter.getVabOutput();
+            vab_alpha_command = inverter_vab_output.alpha;
+
+            float32_t normalized_vab = 0.0F;
+            if (mmc_dc_bus_voltage > 0.0F)
+            {
+                normalized_vab = vab_alpha_command / mmc_dc_bus_voltage;
+            }
+
+            if (normalized_vab > 1.0F)
+            {
+                normalized_vab = 1.0F;
+            }
+            else if (normalized_vab < -1.0F)
+            {
+                normalized_vab = -1.0F;
+            }
+
+            modulation_signal_upper = 0.5F + 0.5F * normalized_vab;
+            modulation_signal_lower = 0.5F - 0.5F * normalized_vab;
+
+            if (modulation_signal_upper > 1.0F)
+            {
+                modulation_signal_upper = 1.0F;
+            }
+            else if (modulation_signal_upper < 0.0F)
+            {
+                modulation_signal_upper = 0.0F;
+            }
+
+            if (modulation_signal_lower > 1.0F)
+            {
+                modulation_signal_lower = 1.0F;
+            }
+            else if (modulation_signal_lower < 0.0F)
+            {
+                modulation_signal_lower = 0.0F;
+            }
+
+            number_of_connected_submodules_upper_arm = round(total_number_of_modules_arm * modulation_signal_upper); // recuperate for scope
+            number_of_connected_submodules_lower_arm = round(total_number_of_modules_arm * modulation_signal_lower); // recuperate for scope
 
             sorting(); // Executes the CVB algorithm, chosing which modules to connect
 
