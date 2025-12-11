@@ -74,6 +74,7 @@ static float meas_data;
 
 float32_t duty_cycle = 0.5;
 int16_t phase_3 = 0;
+float32_t trigger_level=0.0;
 static bool enable_acq;
 static uint32_t num_trig_ratio_point = 512;
 
@@ -149,12 +150,13 @@ void dump_scope_datas(ScopeMimicry &scope)  {
 void setup_routine()
 {
     /* Setup the hardware first */
-    //shield.power.initBuck(LEG1);
+    shield.power.initBuck(LEG1);
     shield.power.initBuck(LEG2);
     shield.power.initBuck(LEG3);
     //shield.power.disconnectCapacitor(LEG1);
 
     //shield.sensors.enableDefaultTwistSensors();
+    shield.sensors.enableDefaultOwnverterSensors();
 
     pid.init(pid_params);
 
@@ -337,8 +339,15 @@ void loop_critical_task()
     {
         //duty_cycle = pid.calculateWithReturn(voltage_reference, V1_low_value);
         // shield.power.setDutyCycle(LEG1,duty_cycle);
+        shield.power.setDutyCycle(LEG2,0.5);
         shield.power.setDutyCycle(LEG3,duty_cycle);
         shield.power.setPhaseShift(LEG3,phase_3);
+
+        trigger_level +=.001;
+        if (trigger_level>1.0) trigger_level=0;
+
+        shield.power.setTriggerValue(LEG1,trigger_level);
+        shield.power.setTriggerValue(LEG2,trigger_level);
         scope.acquire();
         /* Set POWER ON */
         if (pwm_enable == false)
