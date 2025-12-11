@@ -1,86 +1,77 @@
-# Boost with PID controlled output voltage
+# Scope simple example
 
-A voltage mode boost converter regulates voltage by comparing the output voltage to a reference voltage. It adjusts the duty cycle of its switching signal to keep the output voltage stable. This type of converter efficiently steps up voltage levels, making it useful in various electronic devices such as converting photovoltaic panel voltage.
+The scope is a powerful tool to inspect electric signals is real time. In this example we will visualize a simple step response of `LEG1` PID.
 
-This example will implement a voltage mode boost converter to control the output.
+This example will implement a voltage mode buck converter to control the output.
 
+!!! warning "Are you ready to start ?"
+    Before you can run this example, you must have successfully gone through our [getting started](https://docs.owntech.org/latest/core/docs/environment_setup/).  
 
 ## Hardware setup and requirement
 
-The circuit diagram of the board is shown in the image below.
 
-![circuit diagram](Image/circuit_diagram.png)
+![schema](Image/buck_m.png)
 
+!!! warning Hardware pre-requisites 
+    You will need :
+    - 1 TWIST
+    - A dc power supply (20-60V)
+    - A resistor (or a dc electronic load)
 
-The power flows from `V1Low` to `V_high`. The wiring diagram is shown in the figure below.
+## Software setup
 
+The software should work out of the box. Build and upload it to the board.
 
-![wiring diagram](Image/wiring_diagram.png)
-
-
-You will need :
-- 1 TWIST
-- A dc power supply (**max 10V**)
-- A resistor (or a dc electronic load)
-
-## Software setup and structure
-
-The example is built using the `main.cpp` file and the `control` library.
-
-#### Main code structure
-
-The `main.cpp` structure is shown in the image below.
-
-![Code structure](Image/main_structure.png)
-
-The code structure is as follows:
-- On the top of the code some initialization functions take place.
-- **Setup Routine** - calls functions that set the hardware and software
-- **Communication Task** - Handles the keyboard communication and decides which `MODE` is activated
-- **Application Task** - Handles the `MODE`, activates the LED and prints data on the serial port 
-- **Critical Task** - Handles the `MODE` sets power ON/OFF and track the `V_high` variable with a `PID`
-
-The tasks are executed following the diagram below. 
-
-
-![Timing diagram](Image/timing_diagram.png)
-
-
-- **Communication Task** - Is waken regularly to verify any keyboard activity
-- **Application Task** - This task is woken once its suspend is finished 
-- **Critical Task** - This task is driven by the HRTIM count interrupt, where it counts a number of HRTIM switching frequency periods. In this case 100us, or 20 periods of the TWIST board 200kHz switching frequency set by default.
-
-
-
-#### Control scheme
-
-The control library is imported in platformio.ini via the line :
-
-```
-lib_deps=
-    control_lib = https://github.com/owntech-foundation/control_library.git
-```
-
-We can use this library to initialize a PID control with the function :
+The data to be saved to the scope is structured in the `setup_routine`.
 
 ```cpp
-pid.init(pid_params);
+    scope.connectChannel(I1_low_value, "I1_low");
+    scope.connectChannel(V1_low_value, "V1_low");
+    scope.connectChannel(I2_low_value, "I2_low");
+    scope.connectChannel(V2_low_value, "V2_low");
+    scope.connectChannel(duty_cycle, "duty_cycle");
+    scope.connectChannel(V_high, "V_high");
+    scope.set_trigger(&a_trigger);
+    scope.set_delay(0.2F);
+    scope.start();
+
 ```
-
-The control diagram of the `PID` is shown in the figure below.
-
-![Control diagram](Image/control_diagram.png)
-
+Where the voltages and currents of `LEG1` and `LEG2`, the `duty_cycle` and the `V_HIGH` are going to be saved. The delay to apply the trigger is of 20% of all the measurements. 
 
 ## Expected result
 
-This code will control the output voltage to have 15V, you can control the output voltage with the serial monitor :
+This code will control the output voltage to have 15V, you can control the output voltage with platformio serial monitor. The image below shows your a snippet of the window and the button to press.
 
-- press `u` to increase the voltage reference by 0.5V
-- press `d` to decrease the voltage reference by 0.5V
+![serial monitor button](Image/serial_monitor_button.png)
 
-The following plot shows the expected result. Here the voltage reference was modified and `V_High` can be seen to follow it. 
-Both currents are negative, as the current measurement `I_High` is in the `load` convention and the current measurement `I1_low` is in `source` convention.  
+When opening it for the first time, the serial monitor will give you an initialization message regarding the parameteres of the ADCs as shown below.  
 
-![Expected result](Image/result_plot.png)
+![serial monitor initialization](Image/serial_monitor_initialization.png)
+
+!!! tip Commands keys
+    - press `u` to increase the voltage
+    - press `d` to decrease the voltage
+    - press `a` to increase the voltage step to be applied
+    - press `z` to decrease the voltage step to be applied
+    - press `s` to apply the voltage step and automatically retrieve the data
+    - press `r` to retrieve the data
+    - press `h` to show the help menu
+
+
+!!! note The data that you see
+    When you send `p` the Twist board will send you back a stream of data on the following format: 
+    
+    ```c 
+    I1:V1:I2:V2:IH:VH:VREF:VSTEP
+    ```
+    Where: 
+    - `I1` is the current in `LEG1` of the `LOW` side
+    - `V1` is the voltage in `LEG1` of the `LOW` side
+    - `I2` is the current in `LEG1` of the `LOW` side
+    - `V2` is the voltage in `LEG2` of the `LOW` side
+    - `IH` is the current in `LEG2` of the `LOW` side
+    - `VH` is the voltage on the `HIGH` side
+    - `VREF` is the reference voltage set for `LEG1` and `LEG2`vof the `LOW` side which is applied during `POWER` mode.
+    - `VSTEP` is the size of the voltage step to be applied for the test. 
+
 
