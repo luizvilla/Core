@@ -18,89 +18,241 @@
  */
 
 /**
- * @brief  This example shows how to blink the onboard LED of the Spin board.
+ * @brief  This example shows how to implement a closed loop voltage mode
+ *         boost converter with a Twist power shield.
  *
  * @author Clément Foucher <clement.foucher@laas.fr>
  * @author Luiz Villa <luiz.villa@laas.fr>
  * @author Ayoub Farah Hassan <ayoub.farah-hassan@laas.fr>
  */
 
-/* --------------OWNTECH APIs---------------------------------- */
+/*--------------Zephyr---------------------------------------- */
+#include <zephyr/console/console.h>
+
+/*--------------OWNTECH APIs---------------------------------- */
 #include "SpinAPI.h"
+#include "ShieldAPI.h"
 #include "TaskAPI.h"
 
-/* --------------SETUP FUNCTIONS DECLARATION------------------- */
+/*--------------OWNTECH Libraries----------------------------- */
+#include "pid.h"
 
+/*--------------SETUP FUNCTIONS DECLARATION------------------- */
 /* Setups the hardware and software of the system */
 void setup_routine();
 
-/* --------------LOOP FUNCTIONS DECLARATION-------------------- */
-
+/*--------------LOOP FUNCTIONS DECLARATION-------------------- */
+/* Code to be executed in the slow communication task */
+void loop_communication_task();
 /* Code to be executed in the background task */
-void loop_background_task();
+void loop_application_task();
 /* Code to be executed in real time in the critical task */
 void loop_critical_task();
 
-/* --------------USER VARIABLES DECLARATIONS------------------- */
+/*--------------USER VARIABLES DECLARATIONS------------------- */
 
+/* [us] period of the control task */
+static uint32_t control_task_period = 100;
+/* [bool] state of the PWM (ctrl task) */
+static bool pwm_enable = false;
 
+uint8_t received_serial_char;
 
-/* --------------SETUP FUNCTIONS------------------------------- */
+/* Measure variables */
+static float32_t V1_low_value;
+static float32_t V2_low_value;
+static float32_t I1_low_value;
+static float32_t I2_low_value;
+static float32_t I_high;
+static float32_t V_high;
+static uint16_t pos_dt = 100;
+static uint16_t neg_dt = 100;
+
+/* Temporary storage for measured value (ctrl task) */
+static float meas_data;
+
+float32_t duty_cycle = 0.05;
+
+/* Voltage reference */
+static float32_t voltage_reference = 33;
+
+/* PID coefficient for a 8.6ms step response*/
+static float32_t kp = 0.000215;
+static float32_t Ti = 7.5175e-5;
+static float32_t Td = 0.0;
+static float32_t N = 0.0;
+static float32_t upper_bound = 1.0F;
+static float32_t lower_bound = 0.0F;
+static float32_t Ts = control_task_period * 1.e-6F;
+static PidParams pid_params(Ts, kp, Ti, Td, N, lower_bound, upper_bound);
+static Pid pid;
+
+/*--------------------------------------------------------------- */
+
+/* LIST OF POSSIBLE MODES FOR THE OWNTECH CONVERTER */
+enum serial_interface_menu_mode
+{
+    IDLEMODE = 0,
+    POWERMODE
+};
+
+uint8_t mode = IDLEMODE;
+
+/*--------------SETUP FUNCTIONS------------------------------- */
 
 /**
  * This is the setup routine.
- * It is used to call functions that will initialize your spin, power shields
- * and tasks.
- *
- * In this example, we spawn a background task.
- * An optional critical task can be initialized by uncommenting the two
- * commented lines.
+ * Here the setup :
+ *  - Initializes the power shield in Boost mode
+ *  - Initializes the power shield sensors
+ *  - Initializes the PID controller
+ *  - Spawns three tasks.
  */
 void setup_routine()
 {
-    /* Declare task */
-    uint32_t background_task_number =
-                            task.createBackground(loop_background_task);
+    /* Boost voltage mode */
+    shield.power.initBoost(ALL);
 
-    /* Uncomment following line if you use the critical task */
-    /* task.createCritical(loop_critical_task, 500); */
+    shield.sensors.enableDefaultTwistSensors();
+
+    pid.init(pid_params);
+
+    /* Then declare tasks */
+    uint32_t app_task_number = task.createBackground(loop_application_task);
+    uint32_t com_task_number = task.createBackground(loop_communication_task);
+    task.createCritical(loop_critical_task, 100);
 
     /* Finally, start tasks */
-    task.startBackground(background_task_number);
-    /* Uncomment following line if you use the critical task */
-    /* task.startCritical(); */
+    task.startBackground(app_task_number);
+    task.startBackground(com_task_number);
+    task.startCritical();
 }
 
-/* --------------LOOP FUNCTIONS-------------------------------- */
+/*--------------LOOP FUNCTIONS-------------------------------- */
+
+/**
+ * This tasks implements a minimalistic USB serial interface to control
+ * the boost converter.
+ */
+void loop_communication_task()
+{
+    received_serial_char = console_getchar();
+    switch (received_serial_char)
+    {
+    case 'h':
+        /*----------SERIAL INTERFACE MENU----------------------- */
+        printk(" ________________________________________ \n"
+               "|     --- MENU boost voltage mode ---    |\n"
+               "|     press i : idle mode                |\n"
+               "|     press p : power mode               |\n"
+               "|     press u : voltage reference UP     |\n"
+               "|     press d : voltage reference DOWN   |\n"
+               "|________________________________________|\n\n");
+        /*------------------------------------------------------ */
+        break;
+    case 'i':
+        printk("idle mode\n");
+        mode = IDLEMODE;
+        break;
+    case 'p':
+        printk("power mode\n");
+        mode = POWERMODE;
+        break;
+    case 'u':
+        voltage_reference += 0.5;
+        break;
+    case 'd':
+        voltage_reference -= 0.5;
+        break;
+    case 'f':
+        neg_dt += 5;
+        break;
+    case 'g':
+        neg_dt -= 5;
+        break;
+    case 'r':
+        pos_dt += 5;
+        break;
+    case 't':
+        pos_dt -= 5;
+        break;
+    default:
+        break;
+    }
+}
 
 /**
  * This is the code loop of the background task
- * It runs perpetually. Here a `suspendBackgroundMs` is used to pause during
- * 1000ms between each LED toggles.
- * Hence we expect the LED to blink each second.
+ * This task mostly logs back measurements to the USB serial interface.
  */
-void loop_background_task()
+void loop_application_task()
 {
-    /* Task content */
-    spin.led.toggle();
+    if (mode == IDLEMODE)
+    {
+        spin.led.turnOff();
+        printk("%.3f:", (double)voltage_reference);
+        printk("%d:", pos_dt);
+        printk("%d\n:", neg_dt);
+    }
+    else if (mode == POWERMODE)
+    {
+        spin.led.turnOn();
 
-    /* Pause between two runs of the task */
-    task.suspendBackgroundMs(1000);
+        printk("%.3f:", (double)I1_low_value);
+        printk("%.3f:", (double)V1_low_value);
+        printk("%.3f:", (double)I_high);
+        printk("%.3f:", (double)V_high);
+        printk("%.3f:", (double)voltage_reference);
+        printk("%d:", pos_dt);
+        printk("%d\n:", neg_dt);
+    }
+
+    task.suspendBackgroundMs(200);
 }
 
 /**
- * Uncomment lines in setup_routine() to use critical task.
- *
  * This is the code loop of the critical task
- * It is executed every 500 micro-seconds defined in the setup_software
- * function. You can use it to execute an ultra-fast code with
- * the highest priority which cannot be interrupted by the background tasks.
- *
- * In the critical task, you can implement your control algorithm that will
- * run in Real Time and control your power flow.
+ * This task runs at 10kHz.
+ *  - It retrieves sensor values
+ *  - It runs the PID controller
+ *  - It update the PWM signals
  */
 void loop_critical_task()
 {
+    meas_data = shield.sensors.getLatestValue(I1_LOW);
+    if (meas_data != NO_VALUE) I1_low_value = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(V1_LOW);
+    if (meas_data != NO_VALUE) V1_low_value = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(I_HIGH);
+    if (meas_data != NO_VALUE) I_high = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(V_HIGH);
+    if (meas_data != NO_VALUE) V_high = meas_data;
+
+
+    if (mode == IDLEMODE)
+    {
+        if (pwm_enable == true)
+        {
+            shield.power.stop(LEG1);
+        }
+        pwm_enable = false;
+    }
+    else if (mode == POWERMODE)
+    {
+        shield.power.setDeadTime(LEG1, pos_dt, neg_dt);
+        duty_cycle = pid.calculateWithReturn(voltage_reference, V_high);
+        shield.power.setDutyCycle(LEG1,duty_cycle);
+
+        /* Set POWER ON */
+        if (!pwm_enable)
+        {
+            pwm_enable = true;
+            shield.power.start(LEG1);
+        }
+    }
 
 }
 
