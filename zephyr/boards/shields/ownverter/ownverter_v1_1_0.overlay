@@ -17,8 +17,8 @@
 
 	powershield: power-shield{
         compatible = "power-leg";
-        default-frequency = <200000>;
-        min-frequency = <200000>;
+        default-frequency = <10000>;
+        min-frequency = <10000>;
         leg1: leg1{
             leg-name = "LEG1";
 			pwms = <&pwma 1 0>, <&pwma 2 0>;
@@ -29,7 +29,7 @@
             default-adc-decim = <1>;
             default-edge-trigger = "EdgeTrigger_up";
             default-dead-time = <100 100>;
-            default-modulation = "UpDwn";
+            default-modulation = "Lft_aligned";
             default-phase-shift = <0>;
 			status = "okay";
         };
@@ -44,7 +44,7 @@
             default-adc-decim = <1>;
             default-edge-trigger = "EdgeTrigger_up";
             default-dead-time = <100 100>;
-            default-modulation = "UpDwn";
+            default-modulation = "Lft_aligned";
             default-phase-shift = <0>;
 			status = "okay";
         };
@@ -59,7 +59,7 @@
             default-adc-decim = <1>;
             default-edge-trigger = "EdgeTrigger_up";
             default-dead-time = <100 100>;
-            default-modulation = "UpDwn";
+            default-modulation = "Lft_aligned";
             default-phase-shift = <0>;
 			status = "okay";
         };
