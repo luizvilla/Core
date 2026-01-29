@@ -61,13 +61,13 @@ static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 uint8_t received_serial_char;
 
 /* Measure variables */
-static float32_t V1_low_value; // [V]
-static float32_t V2_low_value; // [V]
-static float32_t I1_low_value; // [A]
-static float32_t I2_low_value; // [A]
-static float32_t V_high; // [V]
-static float32_t I_high; // [A]
-static float32_t V_high_filt; // [V]
+static float32_t Vlow_value; // [V]
+static float32_t Vac_value; // [V]
+static float32_t Ilow1_value; // [A]
+static float32_t Ilow2_value; // [A]
+static float32_t Vdc_bus; // [V]
+static float32_t Iac_value; // [A]
+static float32_t Vdc_bus_filt; // [V]
 
 static float32_t I1_current_offset = 0.25; // [A] Current offset found experimentally 21/10/2025
 static float32_t I2_current_offset = 0.25; // [A]
@@ -244,6 +244,29 @@ float32_t rate_limiter(const float32_t ref, float32_t value, const float32_t rat
     return value;
 }
 
+static void enableUSolarVerterSensors()
+{
+    spin.data.configureTriggerSource(ADC_1, hrtim_ev1);
+    spin.data.configureTriggerSource(ADC_2, hrtim_ev3);
+    spin.data.configureTriggerSource(ADC_3, software);
+    spin.data.configureTriggerSource(ADC_4, software);
+    spin.data.configureTriggerSource(ADC_5, software);
+
+    spin.data.configureDiscontinuousMode(ADC_1, 1);
+    spin.data.configureDiscontinuousMode(ADC_2, 1);
+
+    shield.sensors.enableSensor(ILow1, ADC_1);
+    shield.sensors.enableSensor(VLow, ADC_1);
+    shield.sensors.enableSensor(VDCBus, ADC_1);
+
+    shield.sensors.enableSensor(ILow2, ADC_2);
+    shield.sensors.enableSensor(VAC, ADC_2);
+    shield.sensors.enableSensor(IAC, ADC_2);
+
+    shield.sensors.enableSensor(TEMP_SENSOR_1, ADC_4);
+    shield.sensors.enableSensor(TEMP_SENSOR_2, ADC_3);
+}
+
 //--------------SETUP FUNCTIONS-------------------------------
 
 /**
@@ -257,19 +280,19 @@ float32_t rate_limiter(const float32_t ref, float32_t value, const float32_t rat
 void setup_routine()
 {
     // Setup the hardware first
-    shield.sensors.enableDefaultTwistSensors();
+    enableUSolarVerterSensors();
 
     // DISABLE DC LOW CAPACITORS
-    shield.power.disconnectCapacitor(LEG1);
-    shield.power.disconnectCapacitor(LEG2);
+    shield.power.disconnectCapacitor(LEG1_HIGH);
+    shield.power.disconnectCapacitor(LEG2_HIGH);
     
 
-    scope.connectChannel(I1_low_value, "I1_low_value");
-    scope.connectChannel(I_high, "I_High");
+    scope.connectChannel(Ilow1_value, "Ilow1_value");
+    scope.connectChannel(Iac_value, "Iac_value");
     scope.connectChannel(Vgrid_meas, "Vgrid");
-    // scope.connectChannel(V1_low_value, "V1_low_value");
-    // scope.connectChannel(V2_low_value, "V2_low_value");
-    scope.connectChannel(V_high, "V_high");
+    // scope.connectChannel(Vlow_value, "Vlow_value");
+    // scope.connectChannel(Vac_value, "Vac_value");
+    scope.connectChannel(Vdc_bus, "Vdc_bus");
     // scope.connectChannel(delta_duty_cycle, "duty_cycle");
     scope.connectChannel(duty_cycle_1, "duty_cycle_1");
     scope.connectChannel(duty_cycle_2, "duty_cycle_2");
@@ -278,7 +301,7 @@ void setup_routine()
     // scope.connectChannel(power.q, "power_q");
     // scope.connectChannel(Vdq_ref.d, "Vd_ref");
     // scope.connectChannel(theta, "theta");
-	// scope.connectChannel(I2_low_value, "I2_low_value");
+	// scope.connectChannel(Ilow2_value, "Ilow2_value");
 	scope.connectChannel(Idq.d, "Id");
 	scope.connectChannel(Idq.q, "Iq");
 	scope.connectChannel(Idq_ref.d, "Id_ref");
@@ -346,8 +369,8 @@ void setup_routine()
 	is_net_synchronized = false;
 
     /* buck voltage mode */
-    shield.power.initBuck(LEG1);
-    shield.power.initBuck(LEG2);
+    shield.power.initBuck(LEG1_HIGH);
+    shield.power.initBuck(LEG2_HIGH);
 
     // Then declare tasks
     uint32_t app_task_number = task.createBackground(loop_application_task);
@@ -476,11 +499,11 @@ switch (mode) {
         case IDLEMODE:
 
             if (local_mode == FORMING){
-                if (mode_asked == POWERMODE && V_high_filt >= UDC_STARTUP) {
+                if (mode_asked == POWERMODE && Vdc_bus_filt >= UDC_STARTUP) {
                     mode = STARTUPMODE;
                 } 
             }else{
-                if (mode_asked == POWERMODE && Vgrid_meas >= 10 && V_high_filt >= UDC_STARTUP) {
+                if (mode_asked == POWERMODE && Vgrid_meas >= 10 && Vdc_bus_filt >= UDC_STARTUP) {
                     mode = STARTUPMODE;
                 }
             }
@@ -515,9 +538,9 @@ switch (mode) {
         if (!is_downloading) {
             printk("%d:", mode);
             printk("% 7.3f:", (double)Vgrid_amplitude_ref);
-            printk("% 7.3f:", (double)I1_low_value);
-            printk("% 7.3f:", (double)I2_low_value);
-            printk("% 7.3f:", (double)V1_low_value);
+            printk("% 7.3f:", (double)Ilow1_value);
+            printk("% 7.3f:", (double)Ilow2_value);
+            printk("% 7.3f:", (double)Vlow_value);
             printk("%7.3f:", (double)power.d);
             printk("%7.3f:", (double)power.q);
 			printk("%7.3f:", (double)Idq_ref.d);
@@ -533,7 +556,7 @@ switch (mode) {
 	    printk("Mode %d:", mode);
 	    printk("W %.0f:", omega);
             printk("% 7.3f:", (double)Vgrid_amplitude_ref);
-	    printk("V1 % 6.2f:", (double)V1_low_value);
+	    printk("VLow % 6.2f:", (double)Vlow_value);
 
 		printk("Vd_ref %7.3f:", (double)Vdq_ref.d);
 		printk("Vd_in %7.3f:", (double)Vdq.d);
@@ -547,7 +570,7 @@ switch (mode) {
 		printk("Id_delta %7.3f:", (double)Idq_ref_delta.d);
 		printk("Id_in  %7.3f:", (double)Idq.d);
 		printk("Id_ref %7.3f|", (double)Idq_ref.d);
-        printk("Vdc %7.2f:", (double)V_high_filt);
+        printk("Vdc %7.2f:", (double)Vdc_bus_filt);
         printk("\n");
     }
     task.suspendBackgroundMs(100);
@@ -564,36 +587,36 @@ void loop_critical_task()
     critical_task_counter++;
 
     // RETRIEVE MEASUREMENTS
-    meas_data = shield.sensors.getLatestValue(I1_LOW);
-    if (meas_data != NO_VALUE) I1_low_value = meas_data - I1_current_offset;
+    meas_data = shield.sensors.getLatestValue(ILow1);
+    if (meas_data != NO_VALUE) Ilow1_value = meas_data - I1_current_offset;
 
-    meas_data = shield.sensors.getLatestValue(V1_LOW);
-    if (meas_data != NO_VALUE) V1_low_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(VLow);
+    if (meas_data != NO_VALUE) Vlow_value = meas_data;
 
-    meas_data = shield.sensors.getLatestValue(V2_LOW);
-    if (meas_data != NO_VALUE) V2_low_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(VAC);
+    if (meas_data != NO_VALUE) Vac_value = meas_data;
 
-    meas_data = shield.sensors.getLatestValue(I2_LOW);
-    if (meas_data != NO_VALUE) I2_low_value = meas_data - I2_current_offset;
+    meas_data = shield.sensors.getLatestValue(ILow2);
+    if (meas_data != NO_VALUE) Ilow2_value = meas_data - I2_current_offset;
 
-    meas_data = shield.sensors.getLatestValue(V_HIGH);
-    if (meas_data != NO_VALUE) V_high = meas_data;
+    meas_data = shield.sensors.getLatestValue(VDCBus);
+    if (meas_data != NO_VALUE) Vdc_bus = meas_data;
 
-    meas_data = shield.sensors.getLatestValue(I_HIGH);
-    if (meas_data != NO_VALUE) I_high = meas_data;
+    meas_data = shield.sensors.getLatestValue(IAC);
+    if (meas_data != NO_VALUE) Iac_value = meas_data;
 
-    V_high_filt = vHighFilter.calculateWithReturn(V_high);
+    Vdc_bus_filt = vHighFilter.calculateWithReturn(Vdc_bus);
 
-    Vgrid_meas = V1_low_value-V2_low_value;
-    VN_meas = (V1_low_value+V2_low_value)/2;
-    Igrid_meas = I1_low_value;
-    // Igrid_meas = I1_low_value;
+    Vgrid_meas = Vlow_value - Vac_value;
+    VN_meas = (Vlow_value + Vac_value) / 2;
+    Igrid_meas = Ilow1_value;
+    // Igrid_meas = Ilow1_value;
 
     // MANAGE OVERCURRENT
-    if (I1_low_value > MAX_CURRENT
-        || I1_low_value < -MAX_CURRENT
-        || I2_low_value > MAX_CURRENT
-        || I2_low_value < -MAX_CURRENT)
+    if (Ilow1_value > MAX_CURRENT
+        || Ilow1_value < -MAX_CURRENT
+        || Ilow2_value > MAX_CURRENT
+        || Ilow2_value < -MAX_CURRENT)
     {
         mode = ERRORMODE;
     }
@@ -619,8 +642,8 @@ void loop_critical_task()
             if (delta_duty_cycle > 0.5F) {
                 delta_duty_cycle = 0.5F;
             }
-            shield.power.setDutyCycle(LEG2, 1-delta_duty_cycle);
-            shield.power.setDutyCycle(LEG1, delta_duty_cycle);
+            shield.power.setDutyCycle(LEG2_HIGH, 1 - delta_duty_cycle);
+            shield.power.setDutyCycle(LEG1_HIGH, delta_duty_cycle);
             // WE START THE PWM
             if (!pwm_enable)
             {
@@ -668,7 +691,7 @@ void loop_critical_task()
             }                
         }
 
-        inverter.setVBus(V_high_filt);
+        inverter.setVBus(Vdc_bus_filt);
 
         if (local_mode == FORMING ){
             inverter.setVdqRef(Vdq_ref);
@@ -681,7 +704,7 @@ void loop_critical_task()
 
         if(pwm_enable = false)
         {        
-            duty_cycle_offset = VN_meas/V_high_filt;        
+            duty_cycle_offset = VN_meas/Vdc_bus_filt;        
         } 
         else
         {
@@ -709,8 +732,8 @@ void loop_critical_task()
 
 
 
-        shield.power.setDutyCycle(LEG1, duty_cycle_1);
-        shield.power.setDutyCycle(LEG2, duty_cycle_2);
+        shield.power.setDutyCycle(LEG1_HIGH, duty_cycle_1);
+        shield.power.setDutyCycle(LEG2_HIGH, duty_cycle_2);
 
     }
 
