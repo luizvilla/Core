@@ -42,6 +42,9 @@
 #include "zephyr/console/console.h"
 #include "singlePhaseInverter.h"
 #include "sogi.h"
+#include "user_data_objects.h"
+
+
 
 #define DUTY_MIN 0.1F
 #define DUTY_MAX 0.9F
@@ -61,21 +64,21 @@ static bool pwm_enable = false;            //[bool] state of the PWM (ctrl task)
 uint8_t received_serial_char;
 
 /* Measure variables */
-static float32_t Vlow_value; // [V]
-static float32_t Vac_value; // [V]
-static float32_t Ilow1_value; // [A]
-static float32_t Ilow2_value; // [A]
-static float32_t Vdc_bus; // [V]
-static float32_t Iac_value; // [A]
-static float32_t Vdc_bus_filt; // [V]
+float32_t Vlow_value; // [V]
+float32_t Vac_value; // [V]
+float32_t Ilow1_value; // [A]
+float32_t Ilow2_value; // [A]
+float32_t Vdc_bus; // [V]
+float32_t Iac_value; // [A]
+float32_t Vdc_bus_filt; // [V]
 
 static float32_t I1_current_offset = 0.25; // [A] Current offset found experimentally 21/10/2025
 static float32_t I2_current_offset = 0.25; // [A]
 
 
-static float32_t Vgrid_meas; // [V]
-static float32_t VN_meas; // [V]
-static float32_t Igrid_meas; // [V]
+float32_t Vgrid_meas; // [V]
+float32_t VN_meas; // [V]
+float32_t Igrid_meas; // [V]
 
 
 static float meas_data; // temp storage meas value (ctrl task)
@@ -91,13 +94,13 @@ static dqo_t power;
 
 static dqo_t Vdq; // Vdq measure (in)
 static dqo_t Vdq_output; // Inverter output
-static dqo_t Vdq_ref;
+ dqo_t Vdq_ref;
 static dqo_t Vdq_ref_max;
 static dqo_t Vdq_ref_min; 
 static float32_t Valpha_in_out;
 
 static dqo_t Idq;
-static dqo_t Idq_ref;
+ dqo_t Idq_ref;
 static dqo_t Idq_ref_max;
 static dqo_t Idq_ref_min;
 static dqo_t Idq_ref_delta;
@@ -131,6 +134,12 @@ static float32_t delta_duty_cycle;// [No unit]
 static float32_t duty_cycle_1;// [No unit]
 static float32_t duty_cycle_2;// [No unit]
 static float32_t duty_cycle_offset;// [No unit]
+static float32_t boost_duty_cycle = 0.05F;
+static uint16_t boost_pos_dt = 100;
+static uint16_t boost_neg_dt = 100;
+float32_t boost_voltage_reference = 33.0F;
+bool boost_pwm_enable = false;
+bool inverter_on = false;
 
 static float32_t Udc = 63.0F; // dc voltage supply assumed [V]
 static const float f0 = 50.0F; // fundamental frequency [Hz]
@@ -161,6 +170,14 @@ static Pid pi_current_q = controlLibFactory.pid(Ts, kp, Ti, Td, N, lower_bound, 
 static Pid pi_voltage_d = controlLibFactory.pid(Ts, 0.01, 0.003, Td, N, lower_bound, upper_bound);
 static Pid pi_voltage_q = controlLibFactory.pid(Ts, 0.01, 0.003, Td, N, lower_bound, upper_bound);
 
+static float32_t boost_kp = 0.000215F;
+static float32_t boost_Ti = 7.5175e-5F;
+static float32_t boost_Td = 0.0F;
+static float32_t boost_N = 0.0F;
+static float32_t boost_upper_bound = 1.0F;
+static float32_t boost_lower_bound = 0.0F;
+static Pid boost_pid = controlLibFactory.pid(Ts, boost_kp, boost_Ti, boost_Td, boost_N,
+                                             boost_lower_bound, boost_upper_bound);
 Sogi sogi_i;
 Sogi sogi_v;
 
@@ -263,8 +280,8 @@ static void enableUSolarVerterSensors()
     shield.sensors.enableSensor(VAC, ADC_2);
     shield.sensors.enableSensor(IAC, ADC_2);
 
-    shield.sensors.enableSensor(TEMP_SENSOR_1, ADC_4);
-    shield.sensors.enableSensor(TEMP_SENSOR_2, ADC_3);
+    // shield.sensors.enableSensor(TEMP_SENSOR_1, ADC_4);
+    // shield.sensors.enableSensor(TEMP_SENSOR_2, ADC_3);
 }
 
 //--------------SETUP FUNCTIONS-------------------------------
@@ -282,9 +299,13 @@ void setup_routine()
     // Setup the hardware first
     enableUSolarVerterSensors();
 
+    // Boost control on low legs (parallel boost)
+    shield.power.initBoost(LEG1_LOW);
+    shield.power.initBoost(LEG2_LOW);
+
     // DISABLE DC LOW CAPACITORS
-    shield.power.disconnectCapacitor(LEG1_HIGH);
-    shield.power.disconnectCapacitor(LEG2_HIGH);
+    // shield.power.disconnectCapacitor(LEG1_HIGH);
+    // shield.power.disconnectCapacitor(LEG2_HIGH);
     
 
     scope.connectChannel(Ilow1_value, "Ilow1_value");
@@ -404,6 +425,7 @@ void loop_communication_task()
             printk("|     press c : vdref down by 5V         |\n");
             printk("|     press u : vdref up by 1V           |\n");
             printk("|     press j : vdref down by 1V         |\n");
+            printk("|     press o : toggle inverter on/off  |\n");
             printk("|________________________________________|\n\n");
             //------------------------------------------------------
             break;
@@ -417,6 +439,10 @@ void loop_communication_task()
                     scope.start();
                     mode_asked = POWERMODE;
                 }
+            break;
+        case 'o':
+            inverter_on = !inverter_on;
+            printk("inverter_on: %s\n", inverter_on ? "true" : "false");
             break;
         case 'u':
                 if(local_mode == FORMING){
@@ -498,18 +524,15 @@ void loop_application_task()
 switch (mode) {
         case IDLEMODE:
 
-            if (local_mode == FORMING){
-                if (mode_asked == POWERMODE && Vdc_bus_filt >= UDC_STARTUP) {
-                    mode = STARTUPMODE;
-                } 
-            }else{
-                if (mode_asked == POWERMODE && Vgrid_meas >= 10 && Vdc_bus_filt >= UDC_STARTUP) {
-                    mode = STARTUPMODE;
-                }
+            if (mode_asked == POWERMODE) {
+                mode = POWERMODE;
             }
             spin.led.turnOn();
         break;
         case STARTUPMODE:
+            if (!inverter_on) {
+                mode = POWERMODE;
+            }
             if (local_mode == FORMING && delta_duty_cycle > 0.49F )
             {
                 mode = POWERMODE;
@@ -525,7 +548,18 @@ switch (mode) {
             if (mode_asked == IDLEMODE) {
                 mode = IDLEMODE;
             }
-            if (is_net_synchronized) spin.led.toggle();
+            if (inverter_on) {
+                if (local_mode == FORMING){
+                    if (Vdc_bus_filt >= UDC_STARTUP) {
+                        mode = STARTUPMODE;
+                    } 
+                }else{
+                    if (Vgrid_meas >= 10 && Vdc_bus_filt >= UDC_STARTUP) {
+                        mode = STARTUPMODE;
+                    }
+                }
+                if (is_net_synchronized) spin.led.toggle();
+            }
         break;
         case ERRORMODE:
         break;
@@ -631,10 +665,39 @@ void loop_critical_task()
             spin.led.turnOff();
             pwm_enable = false;
         }
+        if (boost_pwm_enable == true)
+        {
+            shield.power.stop(LEG1_LOW);
+            shield.power.stop(LEG2_LOW);
+            boost_pwm_enable = false;
+        }
         // duty_cycle = DUTY_MIN;
     }
 
-    if (mode == STARTUPMODE) { // ramp up the common voltage to Udc/2
+    if (mode == STARTUPMODE || mode == POWERMODE) {
+        boost_duty_cycle = boost_pid.calculateWithReturn(boost_voltage_reference, Vdc_bus_filt);
+        shield.power.setDeadTime(LEG1_LOW, boost_pos_dt, boost_neg_dt);
+        shield.power.setDeadTime(LEG2_LOW, boost_pos_dt, boost_neg_dt);
+        shield.power.setDutyCycle(LEG1_LOW, boost_duty_cycle);
+        shield.power.setDutyCycle(LEG2_LOW, boost_duty_cycle);
+        if (!boost_pwm_enable)
+        {
+            shield.power.start(LEG1_LOW);
+            shield.power.start(LEG2_LOW);
+            boost_pwm_enable = true;
+        }
+    }
+
+    if (!inverter_on) {
+        if (pwm_enable == true)
+        {
+            shield.power.stop(LEG1_HIGH);
+            shield.power.stop(LEG2_HIGH);
+            pwm_enable = false;
+        }
+    }
+
+    if (mode == STARTUPMODE && inverter_on) { // ramp up the common voltage to Udc/2
 
         if(local_mode == FORMING){
 
@@ -671,7 +734,7 @@ void loop_critical_task()
         }
     }
 
-    if (mode == POWERMODE)
+    if (mode == POWERMODE && inverter_on)
     {
         inverter.inputProcessing(Vgrid_meas,Igrid_meas);             
 

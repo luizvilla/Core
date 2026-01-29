@@ -86,7 +86,7 @@ list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 # board_shield_version is concatenated to board_shield. 
 
 set(BOARD spin@1_2_0)
-set(SHIELD twist_v1_4_1)
+set(SHIELD uSolarVerter_v0_9_0)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "")
 # Configure Zephyr
