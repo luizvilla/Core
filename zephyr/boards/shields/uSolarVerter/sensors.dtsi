@@ -1,0 +1,118 @@
+/*
+ * Copyright (c) 2022-2024 OwnTech.
+ *
+ * SPDX-License-Identifier: LGPL-2.1
+ */
+
+/ {
+	shield-sensors {
+
+		/* Voltage sensors */
+
+		vlow: v-low {
+			compatible = "shield-sensors";
+			sensor-name = "VLow";
+			default-gain = <0x3d3851ec>;
+			default-offset = <0xc2b867f0>;
+			v-low-adc1 {
+				io-channels = <&adc1 1>;
+				spin-pin = <29>;
+			};
+			v-low-adc2 {
+				io-channels = <&adc2 1>;
+				spin-pin = <29>;
+			};
+		};
+
+		vac: v-ac {
+			compatible = "shield-sensors";
+			sensor-name = "VAC";
+			default-gain = <0x3d3851ec>;
+			default-offset = <0xc2b867f0>;
+			v-ac-adc1 {
+				io-channels = <&adc1 6>;
+				spin-pin = <24>;
+			};
+			v-ac-adc2 {
+				io-channels = <&adc2 6>;
+				spin-pin = <24>;
+			};
+		};
+
+		vdcbus: v-dc-bus {
+			compatible = "shield-sensors";
+			sensor-name = "VDCBus";
+			default-gain = <0x3cf57710>;
+			default-offset = <0x00000000>;
+			v-dc-bus-adc1 {
+				io-channels = <&adc1 9>;
+				spin-pin = <27>;
+			};
+			v-dc-bus-adc2 {
+				io-channels = <&adc2 9>;
+				spin-pin = <27>;
+			};
+		};
+
+		/* Current sensors */
+
+		ilow1: i-low-1 {
+			compatible = "shield-sensors";
+			sensor-name = "ILow1";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			i-low-1-adc1 {
+				io-channels = <&adc1 2>;
+				spin-pin = <30>;
+			};
+			i-low-1-adc2 {
+				io-channels = <&adc2 2>;
+				spin-pin = <30>;
+			};
+		};
+
+		ilow2: i-low-2 {
+			compatible = "shield-sensors";
+			sensor-name = "ILow2";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			i-low-2-adc1 {
+				io-channels = <&adc1 7>;
+				spin-pin = <25>;
+			};
+			i-low-2-adc2 {
+				io-channels = <&adc2 7>;
+				spin-pin = <25>;
+			};
+		};
+
+		iac: i-ac {
+			compatible = "shield-sensors";
+			sensor-name = "IAC";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			i-ac-adc1 {
+				io-channels = <&adc1 8>;
+				spin-pin = <26>;
+			};
+			i-ac-adc2 {
+				io-channels = <&adc2 8>;
+				spin-pin = <26>;
+			};
+		};
+
+		/* Other sensors */
+
+		temp: temp-sensor {
+			compatible = "shield-sensors";
+			sensor-name = "TEMP_SENSOR";
+			default-gain = <0x3f800000>;
+			default-offset = <0x00000000>;
+			temp-sensor-adc3 {
+				io-channels = <&adc3 12>;
+				spin-pin = <31>;
+			};
+		};
+
+	};
+};

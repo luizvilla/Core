@@ -1,0 +1,13 @@
+# Copyright (c) 2023 OwnTech
+# SPDX-License-Identifier: LGPL-2.1
+
+config SHIELD_USOLARVERTER
+	def_bool $(shields_list_contains,uSolarVerter_v_0_9) || \
+			 $(shields_list_contains,uSolarVerter)
+
+config SHIELD_USOLARVERTER_V_0_9
+	def_bool $(shields_list_contains,uSolarVerter_v_0_9)
+
+config HAS_POWER_SHIELD
+	default y
+	bool "uSolarVerter is a Power Shield"

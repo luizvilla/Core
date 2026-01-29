@@ -1,0 +1,297 @@
+/*
+ * Copyright (c) 2023-2024 OwnTech.
+ *
+ * SPDX-License-Identifier: LGPL-2.1
+ */
+
+/ {
+	choosen{
+		zephyr,can-primary = &fdcan2;
+	};
+
+	powershield: power-shield{
+        compatible = "power-leg";
+        default-frequency = <200000>;
+        leg1_low: leg1-low{
+            leg-name = "LEG1_LOW";
+			pwms = <&pwma 1 0>, <&pwma 2 0>;
+            pwm-pin-num = <12 14>;
+            driver-pin-num = <19>;
+            current-pin-num = <30>;
+            default-adc-trigger = "ADCTRIG_1";
+            default-adc-decim = <1>;
+            default-edge-trigger = "EdgeTrigger_up";
+            default-dead-time = <100 100>;
+            default-modulation = "UpDwn";
+            default-phase-shift = <0>;
+			status = "okay";
+        };
+
+        leg2_low: leg2-low{
+            leg-name = "LEG2_LOW";
+			pwms = <&pwmc 1 0>, <&pwmc 2 0>;
+            pwm-pin-num = <2 4>;
+            driver-pin-num = <22>;
+            current-pin-num = <25>;
+            default-adc-trigger = "ADCTRIG_3";
+            default-adc-decim = <1>;
+            default-edge-trigger = "EdgeTrigger_up";
+            default-dead-time = <100 100>;
+            default-modulation = "UpDwn";
+            default-phase-shift = <0>;
+			status = "okay";
+        };
+
+        leg1_high: leg1-high{
+            leg-name = "LEG1_HIGH";
+			pwms = <&pwmd 1 0>, <&pwmd 2 0>;
+            pwm-pin-num = <5 6>;
+            driver-pin-num = <19>;
+            current-pin-num = <30>;
+            default-adc-trigger = "ADCTRIG_1";
+            default-adc-decim = <1>;
+            default-edge-trigger = "EdgeTrigger_up";
+            default-dead-time = <100 100>;
+            default-modulation = "UpDwn";
+            default-phase-shift = <0>;
+			status = "okay";
+        };
+
+        leg2_high: leg2-high{
+            leg-name = "LEG2_HIGH";
+			pwms = <&pwme 1 0>, <&pwme 2 0>;
+            pwm-pin-num = <10 11>;
+            driver-pin-num = <22>;
+            current-pin-num = <25>;
+            default-adc-trigger = "ADCTRIG_3";
+            default-adc-decim = <1>;
+            default-edge-trigger = "EdgeTrigger_up";
+            default-dead-time = <100 100>;
+            default-modulation = "UpDwn";
+            default-phase-shift = <0>;
+			status = "okay";
+        };
+    };
+
+	shield-sensors {
+		/* Voltage channels */
+		vlow: v-low {
+			compatible = "shield-sensors";
+			sensor-name = "VLow";
+			default-gain = <0x3d3851ec>;
+			default-offset = <0xc2b867f0>;
+			sensor-conv-type = "LINEAR";
+			v-low-adc1 {
+				io-channels = <&adc1 1>;
+				spin-pin = <29>;
+			};
+			v-low-adc2 {
+				io-channels = <&adc2 1>;
+				spin-pin = <29>;
+			};
+			status = "okay";
+		};
+
+		vac: v-ac {
+			compatible = "shield-sensors";
+			sensor-name = "VAC";
+			default-gain = <0x3d3851ec>;
+			default-offset = <0xc2b867f0>;
+			sensor-conv-type = "LINEAR";
+			v-ac-adc1 {
+				io-channels = <&adc1 6>;
+				spin-pin = <24>;
+			};
+			v-ac-adc2 {
+				io-channels = <&adc2 6>;
+				spin-pin = <24>;
+			};
+			status = "okay";
+		};
+
+		vdcbus: v-dc-bus {
+			compatible = "shield-sensors";
+			sensor-name = "VDCBus";
+			default-gain = <0x3cf57710>;
+			default-offset = <0x00000000>;
+			sensor-conv-type = "LINEAR";
+			v-dc-bus-adc1 {
+				io-channels = <&adc1 9>;
+				spin-pin = <27>;
+			};
+			v-dc-bus-adc2 {
+				io-channels = <&adc2 9>;
+				spin-pin = <27>;
+			};
+			status = "okay";
+		};
+
+		/* Current channels */
+
+		ilow1: i-low-1 {
+			compatible = "shield-sensors";
+			sensor-name = "ILow1";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			sensor-conv-type = "LINEAR";
+			i-low-1-adc1 {
+				io-channels = <&adc1 2>;
+				spin-pin = <30>;
+			};
+			i-low-1-adc2 {
+				io-channels = <&adc2 2>;
+				spin-pin = <30>;
+			};
+			status = "okay";
+		};
+
+		ilow2: i-low-2 {
+			compatible = "shield-sensors";
+			sensor-name = "ILow2";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			sensor-conv-type = "LINEAR";
+			i-low-2-adc1 {
+				io-channels = <&adc1 7>;
+				spin-pin = <25>;
+			};
+			i-low-2-adc2 {
+				io-channels = <&adc2 7>;
+				spin-pin = <25>;
+			};
+			status = "okay";
+		};
+
+		iac: i-ac {
+			compatible = "shield-sensors";
+			sensor-name = "IAC";
+			default-gain = <0x3ba3d70a>;
+			default-offset = <0xc1200000>;
+			sensor-conv-type = "LINEAR";
+			i-ac-adc1 {
+				io-channels = <&adc1 8>;
+				spin-pin = <26>;
+			};
+			i-ac-adc2 {
+				io-channels = <&adc2 8>;
+				spin-pin = <26>;
+			};
+			status = "okay";
+		};
+
+		/* Other channels */
+
+	};
+
+	shield-safety-thresholds {
+
+		/* Voltage thresholds */
+
+		vlowtd: v-low-td {
+			compatible = "safety-thresholds";
+			sensor-name = "VLow";
+			threshold-name = "VLow_TD";
+			threshold-high = <0x428c0000>; /* 70.0 */
+			threshold-low = <0xc1200000>; /* -10.0 */
+			status = "okay";
+		};
+
+		vactd: v-ac-td {
+			compatible = "safety-thresholds";
+			sensor-name = "VAC";
+			threshold-name = "VAC_TD";
+			threshold-high = <0x428c0000>; /* 70.0 */
+			threshold-low = <0xc1200000>; /* -10.0 */
+			status = "okay";
+		};
+
+		vdcbustd: v-dc-bus-td {
+			compatible = "safety-thresholds";
+			sensor-name = "VDCBus";
+			threshold-name = "VDCBus_TD";
+			threshold-high = <0x42c80000>; /* 100.0 */
+			threshold-low = <0x41200000>; /* 10.0 */
+			status = "okay";
+		};
+
+		/* Current thresholds */
+
+		ilow1td: i-low-1-td {
+			compatible = "safety-thresholds";
+			sensor-name = "ILow1";
+			threshold-name = "ILow1_TD";
+			threshold-high = <0x40e00000>; /* 7.0 */
+			threshold-low = <0xc0e00000>; /* -7.0 */
+			status = "okay";
+		};
+
+		ilow2td: i-low-2-td {
+			compatible = "safety-thresholds";
+			sensor-name = "ILow2";
+			threshold-name = "ILow2_TD";
+			threshold-high = <0x40e00000>; /* 7.0 */
+			threshold-low = <0xc0e00000>; /* -7.0 */
+			status = "okay";
+		};
+
+		iactd: i-ac-td {
+			compatible = "safety-thresholds";
+			sensor-name = "IAC";
+			threshold-name = "IAC_TD";
+			threshold-high = <0x40e00000>; /* 7.0 */
+			threshold-low = <0xc0e00000>; /* -7.0 */
+			status = "okay";
+		};
+
+	};
+};
+
+// UART / RS485 transceiver
+
+&usart3 {
+	pinctrl-0 = < &usart3_tx_pc10 &usart3_rx_pc11 >;
+	pinctrl-names = "default";
+	current-speed = <10625000>;
+	status = "okay";
+};
+
+// CAN
+
+&fdcan2 {
+	pinctrl-0 = <&fdcan2_rx_pb5 &fdcan2_tx_pb6>;
+	pinctrl-names = "default";
+	bus-speed = <500000>;
+	sample-point = <875>;
+	bus-speed-data = <2000000>;
+	sample-point-data = <875>;
+	status = "okay";
+};
+
+&pwma {
+	status = "okay";
+};
+
+&pwmc {
+	status = "okay";
+};
+
+&pwmd {
+	status = "okay";
+};
+
+&pwme {
+	status = "okay";
+};
+
+&pwmf {
+	status = "disabled";
+};
+
+&hrtim1 {
+	scin: scin {
+		pinctrl-0 = <&hrtim1_scin_pb2>;
+	};
+	scout: scout {
+		pinctrl-0 = <&hrtim1_scout_pb1>;
+	};
+};
