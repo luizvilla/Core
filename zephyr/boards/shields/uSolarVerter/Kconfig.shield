@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: LGPL-2.1
 
 config SHIELD_USOLARVERTER
-	def_bool $(shields_list_contains,uSolarVerter_v_0_9) || \
+	def_bool $(shields_list_contains,uSolarVerter_v0_9_0) || \
 			 $(shields_list_contains,uSolarVerter)
 
-config SHIELD_USOLARVERTER_V_0_9
-	def_bool $(shields_list_contains,uSolarVerter_v_0_9)
+config SHIELD_USOLARVERTER_V0_9_0
+	def_bool $(shields_list_contains,uSolarVerter_v0_9_0)
 
 config HAS_POWER_SHIELD
 	default y
