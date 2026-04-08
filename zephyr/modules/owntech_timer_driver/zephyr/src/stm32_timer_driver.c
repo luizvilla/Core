@@ -341,7 +341,7 @@ uint32_t timer_stm32_get_count(const struct device* dev)
 	 LL_TIM_InitTypeDef TIM_InitStruct = {0};
 	 TIM_InitStruct.Prescaler = 0;
 	 TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
-	 TIM_InitStruct.Autoreload = 65535;
+	 TIM_InitStruct.Autoreload = 4000;
 	 TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
  
 	 LL_TIM_Init(TIM3, &TIM_InitStruct);
@@ -370,7 +370,7 @@ uint32_t timer_stm32_get_count(const struct device* dev)
  
 	 LL_TIM_ConfigIDX(
 		 TIM3,
-		 LL_TIM_INDEX_ALL|LL_TIM_INDEX_POSITION_DOWN_DOWN|LL_TIM_INDEX_UP_DOWN
+		 LL_TIM_INDEX_POSITION_UP_UP|LL_TIM_INDEX_UP_DOWN|LL_TIM_INDEX_FIRST_ONLY
 	 );
  
 	 LL_TIM_EnableEncoderIndex(TIM3);

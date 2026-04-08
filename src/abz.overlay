@@ -1,0 +1,15 @@
+/ {
+	chosen {
+		owntech,position-sensor = &abz;
+	};
+};
+
+&default_motor {
+	pole-pairs = <4>;
+};
+
+&abz {
+	counts-per-revolution = <4096>;
+	direction-sign = <1>;
+	electrical-offset = <0x00000000>;
+};

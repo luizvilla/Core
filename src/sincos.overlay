@@ -1,0 +1,14 @@
+/ {
+	chosen {
+		owntech,position-sensor = &sincos;
+	};
+};
+
+&default_motor {
+	pole-pairs = <4>;
+};
+
+&sincos {
+	direction-sign = <1>;
+	electrical-offset = <0x00000000>;
+};
