@@ -76,7 +76,7 @@ static float meas_data;
 float32_t duty_cycle = 0.1;
 float32_t duty_cycle2 = 0.1;
 float32_t duty_cycle_min = 0.1;
-float32_t VPV_min = 9.0F;
+float32_t VPV_min = 1.0F;
 
 /*--------------------------------------------------------------- */
 
@@ -196,6 +196,7 @@ void loop_application_task()
     printk("%.3f:", (double)V2_low_value);
     printk("%.3f:", (double)duty_cycle);
     printk("%.3f:", (double)duty_cycle2);
+    printk("%.3f:", (double)V_high);
     printk("\n");
 
     task.suspendBackgroundMs(100);
