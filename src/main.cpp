@@ -36,6 +36,7 @@
 #include "ShieldAPI.h"
 #include "arm_math_types.h"
 #include "control_factory.h"
+#include "motor_control.h"
 #include "transform.h"
 #include "trigo.h"
 #include "zephyr/console/console.h"
@@ -48,6 +49,7 @@ void adjust_electrical_offset(float32_t delta);
 void toggle_open_loop_mode();
 void adjust_speed_loop_kp(float32_t delta);
 void adjust_speed_loop_ki(float32_t delta);
+void init_motor_control();
 
 /* --------------LOOP FUNCTIONS DECLARATION-------------------- */
 
@@ -114,6 +116,7 @@ static three_phase_t Iabc;
 static dqo_t Vdq;
 static dqo_t Idq;
 static dqo_t Idq_ref;
+static MotorControlOutput motor_output;
 static float32_t angle_4_control;
 
 /* Variables mirrored to ScopeMimicry for logging and tuning. */
@@ -152,30 +155,11 @@ static LowPassFirstOrderFilter w_mes_filter =
 						controlLibFactory.lowpassfilter(Ts, 5.0e-3F);
 
 static float32_t V_high_filtered;
-static float32_t inverse_Vhigh;
-
-/* Inner current regulators and outer speed regulator. */
-static float32_t Kp = 30 * 0.035;
-static float32_t Ti = 0.002029;
-static float32_t Td = 0.0F;
-static float32_t N = 1.0;
-
-
-/* Coefficient 0.4 comes from Va_max =  (α_max - 0.5) * Udc     */
-static float32_t lower_bound = -MIN_DC_VOLTAGE * 0.4;
-static float32_t upper_bound = MIN_DC_VOLTAGE * 0.4;
-static Pid pi_d = controlLibFactory.pid(Ts, Kp, Ti, Td, N,
-										lower_bound, upper_bound);
-
-static Pid pi_q = controlLibFactory.pid(Ts, Kp, Ti, Td, N,
-										lower_bound, upper_bound);
-
 static float32_t speed_Kp = 0.01F;
 static float32_t speed_Ti = 0.1F;
 static float32_t speed_Ki = 0.1F;
-static Pid pi_speed = controlLibFactory.pid(Ts_speed, speed_Kp, speed_Ti, 0.0F, 1.0F,
-											-IQ_REF_MAX, IQ_REF_MAX);
 static uint8_t speed_decimation = 10;
+static MotorControl motor_control;
 
 
 /* Scope decimation only affects logging, not control execution. */
@@ -239,9 +223,7 @@ void dump_scope_datas(ScopeMimicry &scope) {
 void init_filt_and_reg(void)
 {
 	vHigh_filter.reset(V_HIGH_MIN);
-	pi_d.reset();
-	pi_q.reset();
-	pi_speed.reset();
+	motor_control.reset();
 	error_counter = 0;
 }
 
@@ -396,44 +378,32 @@ inline void restart_offset_calibration()
 }
 
 /**
- * Run cascaded control:
- * - the speed PI executes every `speed_loop_decimation` current-loop ticks
- * - the current PIs execute every critical-task period
+ * Run the calculation library in closed-loop current mode.
  */
 inline void control_speed()
 {
-	// theta_ol = ot_modulo_2pi(theta_ol + omega_ol * Ts);
-	// angle_4_control = theta_ol;
-
-
-	angle_4_control = angle_filtered;
-	/* Hold the previous q-axis current reference between speed-loop updates. */
-	// if ((counter_time % speed_loop_decimation) == 0U) {
-	// 	iq_ref_from_speed = pi_speed.calculateWithReturn(speed_ref, w_meas);
-	// }
-
-
-    // Idq_ref.q = iq_ref_from_speed;
-
-	/* Saturation */
-	if (Idq_ref.q > Iq_max) {
-		Idq_ref.q = Iq_max;
-	}
-	if (Idq_ref.q < -Iq_max) {
-		Idq_ref.q = -Iq_max;
-	}
-
 	Idq_ref.d = 0.0F;
-	Iabc.a = I1_low_value;
-	Iabc.b = I2_low_value;
-	Iabc.c = -(Iabc.a + Iabc.b);
+	motor_control.setMode(MotorControlMode::Current);
+	motor_control.setCurrentReference(Idq_ref);
+	motor_control.setSpeedReference(speed_ref);
 
-	Idq = Transform::to_dqo(Iabc, angle_4_control);
-	Vdq.d = pi_d.calculateWithReturn(Idq_ref.d, Idq.d);
-	Vdq.q = pi_q.calculateWithReturn(Idq_ref.q, Idq.q);
-	Vdq.o = 0.0F;
+	MotorControlInput input;
+	input.ia = I1_low_value;
+	input.ib = I2_low_value;
+	input.vbus = V_high_filtered;
+	input.theta_elec = angle_filtered;
+	input.omega_elec = w_meas;
+	input.position_valid = position_data_valid;
 
-	Vabc = Transform::to_threephase(Vdq, angle_4_control);
+	motor_output = motor_control.step(input);
+	angle_4_control = motor_output.theta_control;
+	Iabc = motor_output.iabc;
+	Idq = motor_output.idq;
+	Idq_ref = motor_output.idq_ref;
+	Vdq = motor_output.vdq;
+	Vabc = motor_output.vabc;
+	duty_abc = motor_output.duty_abc;
+	iq_ref_from_speed = motor_output.idq_ref.q;
 }
 
 /**
@@ -442,21 +412,28 @@ inline void control_speed()
  */
 inline void control_open_loop()
 {
-	theta_ol = ot_modulo_2pi(theta_ol + omega_ol * Ts);
-	angle_4_control = theta_ol;
+	motor_control.setMode(MotorControlMode::OpenLoop);
+	motor_control.setOpenLoopSpeed(omega_ol);
+	motor_control.setOpenLoopVoltageQ(vq_ol);
 
-	Iabc.a = I1_low_value;
-	Iabc.b = I2_low_value;
-	Iabc.c = -(Iabc.a + Iabc.b);
-	Idq = Transform::to_dqo(Iabc, angle_4_control);
+	MotorControlInput input;
+	input.ia = I1_low_value;
+	input.ib = I2_low_value;
+	input.vbus = V_high_filtered;
+	input.theta_elec = angle_filtered;
+	input.omega_elec = w_meas;
+	input.position_valid = position_data_valid;
 
-	Idq_ref.d = 0.0F;
-	Idq_ref.q = 0.0F;
-	Vdq.d = 0.0F;
-	Vdq.q = vq_ol;
-	Vdq.o = 0.0F;
-
-	Vabc = Transform::to_threephase(Vdq, angle_4_control);
+	motor_output = motor_control.step(input);
+	theta_ol = motor_output.theta_control;
+	angle_4_control = motor_output.theta_control;
+	Iabc = motor_output.iabc;
+	Idq = motor_output.idq;
+	Idq_ref = motor_output.idq_ref;
+	Vdq = motor_output.vdq;
+	Vabc = motor_output.vabc;
+	duty_abc = motor_output.duty_abc;
+	iq_ref_from_speed = 0.0F;
 }
 
 /**
@@ -464,10 +441,7 @@ inline void control_open_loop()
  */
 inline void compute_duties()
 {
-	inverse_Vhigh = 1.0 / MIN_DC_VOLTAGE;
-	duty_abc.a = (Vabc.a * inverse_Vhigh + 0.5);
-	duty_abc.b = (Vabc.b * inverse_Vhigh + 0.5);
-	duty_abc.c = (Vabc.c * inverse_Vhigh + 0.5);
+	/* Duties are already computed by the motor_control library. */
 }
 
 /**
@@ -515,6 +489,9 @@ void init_variables()
 	/* We begin to measure the current offset before all */
 	control_state = IDLE_ST;
 	Iq_max = IQ_REF_MAX;
+	Idq_ref.d = 0.0F;
+	Idq_ref.q = 0.0F;
+	Idq_ref.o = 0.0F;
 	speed_ref = 0.0F;
 	speed_ref_print = 0.0F;
 	speed_meas_print = 0.0F;
@@ -535,7 +512,32 @@ void init_variables()
 	encoder_mech_speed = 0.0F;
 	encoder_elec_speed = 0.0F;
 	position_data_valid = false;
+	motor_control.setMode(MotorControlMode::Current);
+	motor_control.setCurrentReference(Idq_ref);
+	motor_control.setSpeedReference(speed_ref);
+	motor_control.setOpenLoopSpeed(omega_ol);
+	motor_control.setOpenLoopVoltageQ(vq_ol);
 	restart_offset_calibration();
+}
+
+void init_motor_control()
+{
+	MotorControlConfig config;
+	config.Ts = Ts;
+	config.Ts_speed = Ts_speed;
+	config.min_bus_voltage = MIN_DC_VOLTAGE;
+	config.current_limit_q = IQ_REF_MAX;
+	config.current_pi_kp = 30.0F * 0.035F;
+	config.current_pi_ti = 0.002029F;
+	config.speed_pi_kp = speed_Kp;
+	config.speed_pi_ti = speed_Ti;
+	config.speed_loop_decimation = speed_loop_decimation;
+
+	(void)motor_control.init(config);
+	motor_control.setCurrentReference(Idq_ref);
+	motor_control.setSpeedReference(speed_ref);
+	motor_control.setOpenLoopSpeed(omega_ol);
+	motor_control.setOpenLoopVoltageQ(vq_ol);
 }
 /* --------------SETUP FUNCTIONS------------------------------- */
 
@@ -586,6 +588,7 @@ void setup_routine()
 	scope.start();
 
 	/* Initialize values */
+	init_motor_control();
 	init_filt_and_reg();
 	init_variables();
 	spin.led.turnOn();
@@ -759,6 +762,9 @@ void toggle_open_loop_mode()
 {
 	open_loop_mode = !open_loop_mode;
 	theta_ol = encoder_elec_angle;
+	motor_control.setOpenLoopAngle(theta_ol);
+	motor_control.setMode(open_loop_mode ? MotorControlMode::OpenLoop
+										 : MotorControlMode::Current);
 	init_filt_and_reg();
 
 	printk("open-loop mode %s, theta_ol = %.4f rad, omega_ol = %.2f rad/s, vq_ol = %.2f V\n",
@@ -774,10 +780,12 @@ void adjust_speed_loop_kp(float32_t delta)
 	if (speed_Kp < 1.0e-6F) {
 		speed_Kp = 1.0e-6F;
 	}
-	pi_speed.setKp(speed_Kp);
-	pi_speed.setKi(speed_Ki);
-	pi_speed.reset();
-	speed_Ti = pi_speed.getTi();
+	motor_control.setSpeedLoopKp(speed_Kp);
+	motor_control.setSpeedLoopKi(speed_Ki);
+	motor_control.reset();
+	speed_Kp = motor_control.getSpeedLoopKp();
+	speed_Ki = motor_control.getSpeedLoopKi();
+	speed_Ti = motor_control.getSpeedLoopTi();
 	printk("speed-loop Kp = %.4f, Ki = %.4f, Ti = %.4f\n",
 		   (double)speed_Kp,
 		   (double)speed_Ki,
@@ -790,9 +798,11 @@ void adjust_speed_loop_ki(float32_t delta)
 	if (speed_Ki < 1.0e-6F) {
 		speed_Ki = 1.0e-6F;
 	}
-	pi_speed.setKi(speed_Ki);
-	pi_speed.reset();
-	speed_Ti = pi_speed.getTi();
+	motor_control.setSpeedLoopKi(speed_Ki);
+	motor_control.reset();
+	speed_Kp = motor_control.getSpeedLoopKp();
+	speed_Ki = motor_control.getSpeedLoopKi();
+	speed_Ti = motor_control.getSpeedLoopTi();
 	printk("speed-loop Kp = %.4f, Ki = %.4f, Ti = %.4f\n",
 		   (double)speed_Kp,
 		   (double)speed_Ki,
@@ -805,45 +815,45 @@ void adjust_speed_loop_ki(float32_t delta)
 void application_task()
 {
 	if (!memory_print) {
-		printk("%7.2f:", V_high);									/* A */
-		printk("%7.2f:", Iq_max);									/* B */
-		printk("%7.2f:", speed_ref);								/* C */
-		printk("%7.2f:", w_meas);									/* D */
-		printk("%7.2f:", I1_offset);								/* E */
+		printk("%7.2f:", (double)V_high);							/* A */
+		printk("%7.2f:", (double)Iq_max);							/* B */
+		printk("%7.2f:", (double)speed_ref);						/* C */
+		printk("%7.2f:", (double)w_meas);							/* D */
+		printk("%7.2f:", (double)I1_offset);						/* E */
 		printk("%7d:", control_state);								/* F */
 		printk("%7u:", encoder_count);								/* G */
 		printk("%7ld:", (long)encoder_delta_count);					/* H */
-		printk("%7.2f:", shield.position.getElectricalOffset());	/* I */
-		printk("%7.2f:", shield.position.getDirectionSign());		/* J */
-		printk("%7.0f:", open_loop_mode ? 1.0 : 0.0);				/* K */
-		printk("%7.2f:", angle_filtered);							/* L */		
-		printk("%7.2f:", theta_ol);									/* M */		
-		printk("%7.2f:", omega_ol);									/* N */
-		printk("%7.2f:", Idq_ref.q);								/* O */	
-		printk("%7.2f\n", vq_ol);									/* P */
+		printk("%7.2f:", (double)shield.position.getElectricalOffset()); /* I */
+		printk("%7d:", shield.position.getDirectionSign());			/* J */
+		printk("%7d:", open_loop_mode ? 1 : 0);						/* K */
+		printk("%7.2f:", (double)angle_filtered);					/* L */		
+		printk("%7.2f:", (double)theta_ol);							/* M */		
+		printk("%7.2f:", (double)omega_ol);							/* N */
+		printk("%7.2f:", (double)Idq_ref.q);						/* O */	
+		printk("%7.2f\n", (double)vq_ol);							/* P */
 	} else {
 		/* Replay the scope buffer continuously over serial for live plotting tools.
 		 */
 		k_app_idx = (k_app_idx + 1) % SCOPE_SIZE;
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 0));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 1));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 2));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 3));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 4));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 5));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 6));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 7));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 8));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 9));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 10));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 11));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 12));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 13));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 14));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 15));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 16));
-		printk("%.2f:", scope.get_channel_value(k_app_idx, 17));
-		printk("%.2f", scope.get_channel_value(k_app_idx, 18));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 0));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 1));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 2));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 3));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 4));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 5));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 6));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 7));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 8));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 9));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 10));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 11));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 12));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 13));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 14));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 15));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 16));
+		printk("%.2f:", (double)scope.get_channel_value(k_app_idx, 17));
+		printk("%.2f", (double)scope.get_channel_value(k_app_idx, 18));
 		printk("\n");
 	}
 

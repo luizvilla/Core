@@ -10,6 +10,7 @@
 
 &abz {
 	counts-per-revolution = <4000>;
-	direction-sign = <-1>;
-	electrical-offset = <0x3db2b8c2>;
+	direction-sign = <1>;
+	electrical-offset = <0x0000000>;
+	// electrical-offset = <0x3db2b8c2>;
 };

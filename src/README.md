@@ -63,6 +63,10 @@ Before running the motor, verify these values in the chosen overlay:
 
 If position feedback becomes invalid while running, the control falls back to `ERROR_ST` instead of continuing with stale rotor angle data.
 
+The runtime state machine and protections stay in `main.cpp`, while the FOC
+math path is now delegated to the calculation-only `motor_control` library
+under `owntech/lib/USB/motor_control`.
+
 ## Control Flow
 
 ```mermaid
@@ -161,3 +165,4 @@ This maps raw Hall states `001` to `110` to electrical sectors. If your motor ph
 | Phase A          | PWMA | LEG1 |
 | Phase B          | PWMC | LEG2 |
 | Phase C          | PWME | LEG3 |
+
