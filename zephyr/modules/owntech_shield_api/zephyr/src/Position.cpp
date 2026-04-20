@@ -33,6 +33,7 @@
 #define POSITION_DEFAULT_ELECTRICAL_OFFSET_RAW 0x00000000U
 #define POSITION_DEFAULT_HALL_INTERPOLATION HALL_INTERPOLATION_NONE
 #define POSITION_DEFAULT_HALL_SECTOR_TABLE {5U, 1U, 0U, 3U, 4U, 2U}
+#define POSITION_ABZ_SPEED_DECIMATION 1000U
 
 #define POSITION_GPIO_PORT(node_id, prop) \
 	(DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(node_id, prop, 0), DT_NODELABEL(gpioa)) ? PA : \
@@ -217,6 +218,9 @@ typedef struct
 	float32_t hall_pll_sampling_period;
 	uint32_t  incremental_encoder_count;
 	uint32_t  incremental_encoder_count_previous;
+	int32_t   incremental_encoder_delta_accumulator;
+	float32_t incremental_encoder_sampling_period_accumulator;
+	uint16_t   incremental_encoder_speed_decimation_counter;
 	float32_t signed_sincos_angle;
 	float32_t signed_sincos_angle_previous;
 	float32_t mechanical_angle;
@@ -226,6 +230,7 @@ typedef struct
 } position_runtime_state_t;
 
 static position_runtime_state_t runtime_state = {};
+static uint16_t incremental_encoder_speed_decimation = POSITION_ABZ_SPEED_DECIMATION;
 
 static int8_t normalize_hall_delta(uint8_t current_sector, uint8_t previous_sector)
 {
@@ -482,6 +487,11 @@ bool PositionAPI::update(float32_t sampling_period)
 				runtime_state.incremental_encoder_count_previous,
 				encoder_config->counts_per_revolution);
 
+			runtime_state.incremental_encoder_delta_accumulator += delta_count;
+			runtime_state.incremental_encoder_sampling_period_accumulator +=
+				sampling_period;
+			runtime_state.incremental_encoder_speed_decimation_counter++;
+
 			runtime_state.incremental_encoder_count = current_count;
 			runtime_state.incremental_encoder_count_previous = current_count;
 
@@ -491,11 +501,29 @@ bool PositionAPI::update(float32_t sampling_period)
 				 (float32_t)encoder_config->counts_per_revolution);
 
 			runtime_state.mechanical_angle = ot_modulo_2pi(signed_mechanical_angle);
-			runtime_state.mechanical_speed =
-				(float32_t)direction_sign *
-				(2.0F * PI * (float32_t)delta_count) /
-				((float32_t)encoder_config->counts_per_revolution *
-				 sampling_period);
+			
+			if (runtime_state.incremental_encoder_speed_decimation_counter >=
+				incremental_encoder_speed_decimation)
+			{
+				if (runtime_state.incremental_encoder_sampling_period_accumulator >
+					0.0F)
+				{
+					runtime_state.mechanical_speed =
+						(float32_t)direction_sign *
+						(2.0F * PI *
+						 (float32_t)runtime_state.incremental_encoder_delta_accumulator) /
+						((float32_t)encoder_config->counts_per_revolution *
+						 runtime_state.incremental_encoder_sampling_period_accumulator);
+				}
+				else
+				{
+					runtime_state.mechanical_speed = 0.0F;
+				}
+
+				runtime_state.incremental_encoder_delta_accumulator = 0;
+				runtime_state.incremental_encoder_sampling_period_accumulator = 0.0F;
+				runtime_state.incremental_encoder_speed_decimation_counter = 0U;
+			}
 
 			runtime_state.electrical_angle =
 				ot_modulo_2pi((float32_t)pole_pairs *
@@ -540,13 +568,17 @@ bool PositionAPI::update(float32_t sampling_period)
 
 			runtime_state.signed_sincos_angle = signed_mechanical_angle;
 			runtime_state.signed_sincos_angle_previous = signed_mechanical_angle;
+			
 			runtime_state.mechanical_angle =
 				ot_modulo_2pi(signed_mechanical_angle);
+			
 			runtime_state.mechanical_speed = delta_angle / sampling_period;
+			
 			runtime_state.electrical_angle =
 				ot_modulo_2pi((float32_t)pole_pairs *
 							  runtime_state.mechanical_angle +
 							  electrical_offset);
+
 			runtime_state.electrical_speed =
 				(float32_t)pole_pairs * runtime_state.mechanical_speed;
 
@@ -739,6 +771,18 @@ bool PositionAPI::setCountsPerRevolution(uint32_t counts_per_revolution)
 	return true;
 }
 
+bool PositionAPI::setAbzSpeedDecimation(uint8_t decimation)
+{
+	if ((getIncrementalEncoderConfig() == nullptr) || (decimation == 0U))
+	{
+		return false;
+	}
+
+	incremental_encoder_speed_decimation = decimation;
+	resetRuntimeState();
+	return true;
+}
+
 bool PositionAPI::setHallSectorTable(const uint8_t hall_sector_table[6])
 {
 	hall_position_sensor_config_t* hall_config =
@@ -785,6 +829,11 @@ uint32_t PositionAPI::getCountsPerRevolution()
 	}
 
 	return incremental_encoder_config->counts_per_revolution;
+}
+
+uint8_t PositionAPI::getAbzSpeedDecimation()
+{
+	return incremental_encoder_speed_decimation;
 }
 
 int8_t PositionAPI::getDirectionSign()

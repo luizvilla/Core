@@ -140,10 +140,12 @@ public:
 	void setPolePairs(uint8_t pole_pairs);
 	void setElectricalOffset(float32_t electrical_offset);
 	bool setCountsPerRevolution(uint32_t counts_per_revolution);
+	bool setAbzSpeedDecimation(uint8_t decimation);
 	bool setHallSectorTable(const uint8_t hall_sector_table[6]);
 	bool setHallInterpolation(hall_interpolation_t hall_interpolation);
 
 	uint32_t getCountsPerRevolution();
+	uint8_t getAbzSpeedDecimation();
 	int8_t getDirectionSign();
 	uint8_t getPolePairs();
 	float32_t getElectricalOffset();
