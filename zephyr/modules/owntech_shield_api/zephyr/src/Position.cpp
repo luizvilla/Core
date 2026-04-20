@@ -34,6 +34,7 @@
 #define POSITION_DEFAULT_HALL_INTERPOLATION HALL_INTERPOLATION_NONE
 #define POSITION_DEFAULT_HALL_SECTOR_TABLE {5U, 1U, 0U, 3U, 4U, 2U}
 #define POSITION_ABZ_SPEED_DECIMATION 1000U
+#define POSITION_DEFAULT_ABZ_INDEX_PRESENT 1
 
 #define POSITION_HALL_A(node_id) \
 	DT_GPIO_PIN_BY_IDX(node_id, hall_a_gpios, 0)
@@ -84,6 +85,52 @@
 	DT_PROP_OR(node_id, counts_per_revolution, \
 			   POSITION_DEFAULT_COUNTS_PER_REVOLUTION)
 
+#define POSITION_DEFAULT_ABZ_INDEX_POLARITY(node_id) \
+	(POSITION_TIMER(node_id) == TIMER3 ? encoder_index_polarity_inverted : \
+	 encoder_index_polarity_noninverted)
+
+#define POSITION_DEFAULT_ABZ_INDEX_CONFIGURATION(node_id) \
+	(POSITION_TIMER(node_id) == TIMER3 ? \
+	 encoder_index_configuration_a_high_b_high : \
+	 encoder_index_configuration_a_low_b_low)
+
+#define POSITION_ABZ_INDEX_POLARITY_NONINVERTED \
+	encoder_index_polarity_noninverted
+
+#define POSITION_ABZ_INDEX_POLARITY_INVERTED \
+	encoder_index_polarity_inverted
+
+#define POSITION_ABZ_INDEX_POLARITY_TOKEN(token) \
+	DT_CAT(POSITION_ABZ_INDEX_POLARITY_, token)
+
+#define SENSOR_ABZ_INDEX_POLARITY(node_id) \
+	COND_CODE_1(DT_NODE_HAS_PROP(node_id, index_polarity), \
+		(POSITION_ABZ_INDEX_POLARITY_TOKEN(DT_STRING_TOKEN(node_id, index_polarity))), \
+		(POSITION_DEFAULT_ABZ_INDEX_POLARITY(node_id)))
+
+#define POSITION_ABZ_INDEX_CONFIGURATION_A_LOW_B_LOW \
+	encoder_index_configuration_a_low_b_low
+
+#define POSITION_ABZ_INDEX_CONFIGURATION_A_LOW_B_HIGH \
+	encoder_index_configuration_a_low_b_high
+
+#define POSITION_ABZ_INDEX_CONFIGURATION_A_HIGH_B_LOW \
+	encoder_index_configuration_a_high_b_low
+
+#define POSITION_ABZ_INDEX_CONFIGURATION_A_HIGH_B_HIGH \
+	encoder_index_configuration_a_high_b_high
+
+#define POSITION_ABZ_INDEX_CONFIGURATION_TOKEN(token) \
+	DT_CAT(POSITION_ABZ_INDEX_CONFIGURATION_, token)
+
+#define SENSOR_ABZ_INDEX_CONFIGURATION(node_id) \
+	COND_CODE_1(DT_NODE_HAS_PROP(node_id, index_configuration), \
+		(POSITION_ABZ_INDEX_CONFIGURATION_TOKEN(DT_STRING_TOKEN(node_id, index_configuration))), \
+		(POSITION_DEFAULT_ABZ_INDEX_CONFIGURATION(node_id)))
+
+#define SENSOR_ABZ_INDEX_PRESENT(node_id) \
+	DT_PROP_OR(node_id, index_present, POSITION_DEFAULT_ABZ_INDEX_PRESENT)
+
 #define SENSOR_DIRECTION_SIGN(node_id) \
 	DT_PROP_OR(node_id, direction_sign, \
 			   POSITION_DEFAULT_DIRECTION_SIGN)
@@ -118,6 +165,9 @@
 	.has_pole_pairs = MOTOR_HAS_PROP(node_id, pole_pairs),                        \
 	.has_electrical_offset = DT_NODE_HAS_PROP(node_id, electrical_offset),        \
 	.has_counts_per_revolution = DT_NODE_HAS_PROP(node_id, counts_per_revolution),\
+	.has_abz_index_present = DT_NODE_HAS_PROP(node_id, index_present),            \
+	.has_abz_index_polarity = DT_NODE_HAS_PROP(node_id, index_polarity),          \
+	.has_abz_index_configuration = DT_NODE_HAS_PROP(node_id, index_configuration),\
 	.has_hall_sector_table = DT_NODE_HAS_PROP(node_id, hall_sector_table),        \
 	.has_hall_interpolation = DT_NODE_HAS_PROP(node_id, hall_interpolation),      \
 	.motor =                                                                      \
@@ -152,6 +202,9 @@
 			{                                                                     \
 				.timer = POSITION_TIMER(node_id),                                 \
 				.counts_per_revolution = SENSOR_COUNTS_PER_REVOLUTION(node_id),   \
+				.index_present = SENSOR_ABZ_INDEX_PRESENT(node_id),               \
+				.index_polarity = SENSOR_ABZ_INDEX_POLARITY(node_id),             \
+				.index_configuration = SENSOR_ABZ_INDEX_CONFIGURATION(node_id),   \
 			}                                                                     \
 		}                                                                         \
 	},
@@ -260,6 +313,40 @@ static bool is_valid_hall_sector_table(const uint8_t hall_sector_table[6])
 	}
 
 	return true;
+}
+
+static const char* get_abz_index_polarity_string(
+	encoder_index_polarity_t polarity)
+{
+	switch (polarity)
+	{
+		case encoder_index_polarity_inverted:
+			return "INVERTED";
+
+		case encoder_index_polarity_noninverted:
+		default:
+			return "NONINVERTED";
+	}
+}
+
+static const char* get_abz_index_configuration_string(
+	encoder_index_configuration_t configuration)
+{
+	switch (configuration)
+	{
+		case encoder_index_configuration_a_low_b_high:
+			return "A_LOW_B_HIGH";
+
+		case encoder_index_configuration_a_high_b_low:
+			return "A_HIGH_B_LOW";
+
+		case encoder_index_configuration_a_high_b_high:
+			return "A_HIGH_B_HIGH";
+
+		case encoder_index_configuration_a_low_b_low:
+		default:
+			return "A_LOW_B_LOW";
+	}
 }
 
 static int32_t normalize_encoder_delta(uint32_t current_count,
@@ -940,6 +1027,31 @@ void PositionAPI::warnIfUsingDefaultConfiguration(
 	{
 		printk("WARNING: position sensor %s is missing counts-per-revolution; using default value 1024.\n",
 			   sensor_prop->name_string);
+	}
+
+	if (sensor_prop->type == ABZ_TYPE)
+	{
+		if (sensor_prop->has_abz_index_present == false)
+		{
+			printk("WARNING: position sensor %s is missing index-present; using default value 1.\n",
+				   sensor_prop->name_string);
+		}
+
+		if (sensor_prop->has_abz_index_polarity == false)
+		{
+			printk("WARNING: position sensor %s is missing index-polarity; using default value %s.\n",
+				   sensor_prop->name_string,
+				   get_abz_index_polarity_string(
+					   sensor_prop->configuration.incremental_encoder.index_polarity));
+		}
+
+		if (sensor_prop->has_abz_index_configuration == false)
+		{
+			printk("WARNING: position sensor %s is missing index-configuration; using default value %s.\n",
+				   sensor_prop->name_string,
+				   get_abz_index_configuration_string(
+					   sensor_prop->configuration.incremental_encoder.index_configuration));
+		}
 	}
 
 	if (sensor_prop->type == HALL_TYPE)

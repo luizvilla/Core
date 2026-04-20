@@ -32,3 +32,26 @@ properties:
     type: int
     required: false
     description: Counts per revolution of this incremental encoder.
+
+  index-present:
+    type: int
+    required: false
+    description: Set to 1 when the encoder index signal is wired and should reset the counter, or 0 to keep AB quadrature without index reset.
+
+  index-polarity:
+    type: string
+    required: false
+    enum:
+      - "NONINVERTED"
+      - "INVERTED"
+    description: Active polarity of the encoder index input.
+
+  index-configuration:
+    type: string
+    required: false
+    enum:
+      - "A_LOW_B_LOW"
+      - "A_LOW_B_HIGH"
+      - "A_HIGH_B_LOW"
+      - "A_HIGH_B_HIGH"
+    description: AB phase state required for the index signal to reset the counter.

@@ -12,4 +12,7 @@
 	counts-per-revolution = <4096>;
 	direction-sign = <1>;
 	electrical-offset = <0x00000000>;
+	index-present = <1>;
+	index-polarity = "INVERTED";
+	index-configuration = "A_HIGH_B_HIGH";
 };
