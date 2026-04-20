@@ -1122,9 +1122,25 @@ bool PositionAPI::configureSelectedSensorHardware(
 			return true;
 
 		case ABZ_TYPE:
+		{
+			incremental_encoder_timer_config_t encoder_timer_config =
+			{
+				.pin_mode = pull_up,
+				.index_enable =
+					sensor_prop->configuration.incremental_encoder.index_present ?
+					encoder_index_enabled :
+					encoder_index_disabled,
+				.index_polarity =
+					sensor_prop->configuration.incremental_encoder.index_polarity,
+				.index_configuration =
+					sensor_prop->configuration.incremental_encoder.index_configuration
+			};
+
 			spin.timer.startLogIncrementalEncoder(
-				sensor_prop->configuration.incremental_encoder.timer);
+				sensor_prop->configuration.incremental_encoder.timer,
+				&encoder_timer_config);
 			return true;
+		}
 
 		case SINCOS_TYPE:
 		{
