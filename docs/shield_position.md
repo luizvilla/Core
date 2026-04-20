@@ -4,7 +4,7 @@
 
 ## Validation Status
 
-- Hall: validated on hardware
+- Hall: validated on hardware 
 - ABZ incremental encoder: validated on hardware
 - Sin/Cos: API available, but still experimental and not yet hardware-validated
 
@@ -64,9 +64,9 @@ These values are expected to live in shield or application overlays:
 - Hall GPIO wiring
 - Sin/Cos sensor names and analog pin mapping
 - ABZ timer selection
-- ABZ index presence
-- ABZ index polarity
-- ABZ index configuration
+  - ABZ index presence
+  - ABZ index polarity
+  - ABZ index configuration
 - per-sensor default direction sign
 - per-sensor default electrical offset
 - per-sensor default counts per revolution
@@ -79,13 +79,16 @@ The application can still tune:
 - `setDirectionSign(...)`
 - `setPolePairs(...)`
 - `setElectricalOffset(...)`
-- `setCountsPerRevolution(...)` for ABZ
-- `setAbzSpeedDecimation(...)` for ABZ
-- `setHallSectorTable(...)` for Hall
-- `setHallInterpolation(...)` for Hall
+- for ABZ
+  - `setCountsPerRevolution(...)` for ABZ
+  - `setAbzSpeedDecimation(...)` for ABZ
+- for Hall
+  - `setHallSectorTable(...)` for Hall
+  - `setHallInterpolation(...)` for Hall
 
-The ABZ index properties are intentionally read-only at runtime. They are treated as hardware configuration and should be declared in devicetree.
+The ABZ index properties are intentionally read-only at runtime. They are treated as hardware configuration and should be declared in devicetree or application overlay.
 
+--- 
 ## Hall Effect Sensor
 
 Use Hall mode when the motor provides three digital Hall channels.
@@ -118,6 +121,7 @@ The raw Hall state remains available through:
 uint8_t hall_state = shield.position.getHallState();
 ```
 
+---
 ## Incremental Encoder
 
 Use ABZ mode when the motor provides a quadrature encoder and the timer peripheral is wired in encoder mode.
@@ -149,6 +153,7 @@ Supported `index-configuration` values are:
 - `"A_HIGH_B_LOW"`
 - `"A_HIGH_B_HIGH"`
 
+---
 ### Devicetree example
 
 ```dts
@@ -171,7 +176,7 @@ Supported `index-configuration` values are:
     index-configuration = "A_HIGH_B_HIGH";
 };
 ```
-
+---
 ### Runtime example
 
 ```cpp
@@ -196,15 +201,15 @@ The raw encoder count remains available through:
 uint32_t encoder_count = shield.position.getIncrementalEncoderValue();
 ```
 
+---
 ## Sin/Cos Encoder
 
 Use Sin/Cos mode when the position sensor provides two analog channels: one sine and one cosine.
 
 !!! warning
     `shield.position.init(SINCOS)` enables the semantic shield sensors, but converted Sin/Cos samples are only available once the ADC acquisition path has been started. Do not rely on `shield.position.update(...)` until the acquisition path is running.
-
-Sin/Cos is still experimental in this upstreaming pass.
-
+    
+    **Sin/Cos is still experimental in this upstreaming pass.**
 Typical parameters:
 
 - `direction-sign`
@@ -229,6 +234,7 @@ float32_t sin_value = shield.position.getSinValue();
 float32_t cos_value = shield.position.getCosValue();
 ```
 
+---
 ## Default Sensor Selection
 
 If the application always uses the same sensor, define it in `src/app.overlay`:
