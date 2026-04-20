@@ -8,6 +8,7 @@
 #include "trigo.h"
 
 struct AppSetup {
+	/* Setup-time configuration chosen before the control loop starts. */
 	float32_t ac_current_limit = 4.0F;
 	float32_t dc_current_limit = 4.0F;
 	float32_t min_dc_voltage = 30.0F;
@@ -29,6 +30,7 @@ struct AppSetup {
 };
 
 struct AppRuntime {
+	/* Values updated by setup helpers, task handlers, or the control loop. */
 	float32_t angle_filtered = 0.0F;
 	float32_t w_meas = 0.0F;
 

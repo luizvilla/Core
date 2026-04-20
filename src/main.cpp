@@ -30,8 +30,6 @@
 
 #include "app.h"
 
-#include "ScopeMimicry.h"
-#include "ShieldAPI.h"
 #include "SpinAPI.h"
 #include "TaskAPI.h"
 #include "transform.h"

@@ -14,6 +14,17 @@ The sensor selection is done entirely from the devicetree overlay. `src/main.cpp
 - `src/abz.overlay`: turnkey ABZ configuration
 - `src/sincos.overlay`: turnkey Sin/Cos configuration
 - `src/app.overlay`: active overlay used by the build
+- `src/main.cpp`: state machine, task entry points, and runtime sequencing
+- `src/app.h`: helper declarations plus the shared `AppContext`
+- `src/app.cpp`: helper implementations used by `main.cpp`
+
+`AppContext` is intentionally split into:
+
+- `AppSetup`: values chosen for configuration and initialization
+- `AppRuntime`: values updated while the application is running
+
+This keeps the state machine readable because setup-oriented variables are not
+mixed with measurements, loop counters, and live control data.
 
 ## How To Select The Sensor
 
@@ -165,4 +176,3 @@ This maps raw Hall states `001` to `110` to electrical sectors. If your motor ph
 | Phase A          | PWMA | LEG1 |
 | Phase B          | PWMC | LEG2 |
 | Phase C          | PWME | LEG3 |
-
