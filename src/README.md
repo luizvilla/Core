@@ -1,4 +1,4 @@
-# I-V Tracer
+# I-V Tracer and MPPT tracker
 
 In photovoltaics, it is often useful to have a clear view of the I-V curve of a given panel. These curves are usually given by the manufacturer and look something like the one below given for a [Trina Vertex Solar module](https://www.trinasolar.com/sites/default/files/600WVertex.pdf). 
 
@@ -7,7 +7,7 @@ In photovoltaics, it is often useful to have a clear view of the I-V curve of a 
 _Figure 1 - Vertex solar module I-V curve_
 
 
-In this example, we will use a Twist board to trace this I-V curve for a given PV module. 
+In this example, we will use a Twist board to trace the I-V curve for a given PV module and then track its maximum power point (MPPT). 
 
 We will build from the Basic example, expanding on its core ideas and providing the foundations for a later MPPT example. 
 
@@ -47,6 +47,10 @@ The PV module will be connected to `VLow2` and a resistor to  `VLow1`. `VHigh` w
 The circuit diagram of the board is shown in the image below.
 
 ![circuit diagram](Image/circuit_diagram.drawio.png)
+
+This setup mixes a step-up and step-down implementation as seen in the image below.
+
+
 
 --- 
 

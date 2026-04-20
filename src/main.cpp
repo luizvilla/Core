@@ -33,6 +33,8 @@
 #include "SpinAPI.h"
 #include "ShieldAPI.h"
 #include "TaskAPI.h"
+#include "filters.h"
+#include "ScopeMimicry.h"
 
 /*--------------OWNTECH Libraries----------------------------- */
 #include "pid.h"
@@ -56,6 +58,7 @@ static uint32_t control_task_period = 100;
 /* [bool] state of the PWM (ctrl task) */
 static bool pwm_enable = false;
 static bool trace = false;
+static bool mppt = false;
 
 uint8_t received_serial_char;
 
@@ -68,6 +71,15 @@ static float32_t I2_low_value;
 static float32_t I_high;
 static float32_t V_high;
 
+static float32_t V2_filt;
+static float32_t I2_filt;
+
+static float32_t power_now;
+static float32_t power_old;
+static float32_t max_power;
+static float32_t max_power_old;
+
+
 static float32_t V_high_max = 60.0F;
 
 /* Temporary storage fore measured value (ctrl task) */
@@ -75,8 +87,45 @@ static float meas_data;
 
 float32_t duty_cycle = 0.1;
 float32_t duty_cycle2 = 0.1;
+float32_t duty_cycle_step = 0.01;
+float32_t duty_cycle_resolution = 0.001;
+float32_t mppt_sign = 1.0F;
+float32_t duty_cycle_max = 0.9;
 float32_t duty_cycle_min = 0.1;
-float32_t VPV_min = 1.0F;
+float32_t VPV_min = 6.0F;
+uint8_t count = 0;
+
+static float32_t Ts = control_task_period * 1.0e-6F;
+
+LowPassFirstOrderFilter v2_filter(Ts, 1);
+LowPassFirstOrderFilter i2_filter(Ts, 1);
+
+static ScopeMimicry scope(1024, 2); // scope with 1024 points and 2 channels
+static bool is_downloading;
+static bool trigger = false;
+
+bool a_trigger() {
+    return trigger;
+}
+
+
+/**
+ * @brief print recorded data of the ScopeMimicry instance to console
+ * we use this function in coordination with a miniterm python filter on the host side.
+ * `filter_recorded_data.py` to save the data in a file and format them in float.
+ *
+ * @param scope
+ */
+void dump_scope_datas(ScopeMimicry &scope)  {
+	scope.reset_dump();
+    printk("begin record\n");
+	while(scope.get_dump_state() != finished) {
+		printk("%s", scope.dump_datas());
+		task.suspendBackgroundUs(100);
+	}
+    printk("end record\n");
+}
+
 
 /*--------------------------------------------------------------- */
 
@@ -106,6 +155,14 @@ void setup_routine()
     shield.power.initBoost(LEG2);
 
     shield.sensors.enableDefaultTwistSensors();
+
+	scope.connectChannel(V2_low_value, "V2");
+	scope.connectChannel(I2_low_value, "I2");
+    scope.set_delay(0.0F);
+    scope.set_trigger(a_trigger);
+    scope.start();
+
+
 
     /* Then declare tasks */
     uint32_t app_task_number = task.createBackground(loop_application_task);
@@ -151,14 +208,37 @@ void loop_communication_task()
     case 't':
         trace = true;
         break;
+    case 'm':
+        mppt = !mppt;		
+        break;
     case 'u':
-        duty_cycle += 0.01;
-        duty_cycle2 += 0.01;
+        duty_cycle += duty_cycle_step;
+        duty_cycle2 += duty_cycle_step;
         break;
     case 'd':
-        duty_cycle -= 0.01;
-        duty_cycle2 -= 0.01;
+        duty_cycle -= duty_cycle_step;
+        duty_cycle2 -= duty_cycle_step;
         break;
+    case 'q':
+        duty_cycle_step -= duty_cycle_resolution;
+        break;
+    case 'w':
+        duty_cycle_step += duty_cycle_resolution;
+        break;
+    case 'a':
+        V_high_max -= 1.0F;
+        break;
+    case 's':
+        V_high_max += 1.0F;
+        break;
+    case 'r':
+        is_downloading = true;
+        trigger = false;
+        break;
+    case 'e':
+        trigger = true;
+        scope.start();
+    break;
     default:
         break;
     }
@@ -178,10 +258,20 @@ void loop_application_task()
     {
         spin.led.turnOff();
 
-        if(trace){
+        if(trace == true && mppt == false){
             spin.led.toggle();
-            duty_cycle += 0.01;
-            duty_cycle2 += 0.01;
+			//resets the maximum power at the beginning of the trace
+			if(duty_cycle == duty_cycle_min) max_power_old = 0.0F; 
+            
+            duty_cycle += duty_cycle_step;
+            duty_cycle2 += duty_cycle_step;
+			max_power = V2_low_value * -I2_low_value;
+
+			// Finds the maximum power reached during the trace
+			if(max_power>max_power_old){
+				max_power_old = max_power;
+			}
+			
             if (V2_low_value<VPV_min){
                  duty_cycle = duty_cycle_min;
                  duty_cycle2 = duty_cycle_min;
@@ -189,15 +279,58 @@ void loop_application_task()
             }
         }
 
+		if(mppt == true && trace == false){
+			count++;
+			if (count==3)
+			{
+            	spin.led.toggle();
+				count=0;
+			}
+			//current convention is negative for power flow from PV to resistor
+			power_now = V2_filt * -I2_filt; 
+
+			if(power_now<power_old){
+				mppt_sign = -mppt_sign;	
+			} 
+
+			duty_cycle += mppt_sign * duty_cycle_step;
+			duty_cycle2 += mppt_sign * duty_cycle_step;
+
+			if(duty_cycle>duty_cycle_max) {
+				duty_cycle = duty_cycle_max;
+				duty_cycle2 = duty_cycle_max;
+			}
+			if(duty_cycle<duty_cycle_min) {
+				duty_cycle = duty_cycle_min;
+				duty_cycle2 = duty_cycle_min;
+			}
+
+			power_old = power_now;
+		}
+
+
     }
 
-    /* Prints the data */
-    printk("%.3f:", (double)I2_low_value);
-    printk("%.3f:", (double)V2_low_value);
-    printk("%.3f:", (double)duty_cycle);
-    printk("%.3f:", (double)duty_cycle2);
-    printk("%.3f:", (double)V_high);
-    printk("\n");
+    if (!is_downloading) {
+        /* Prints the data */
+        printk("%.3f:", (double)I2_low_value);	/* Prints I2 */
+        printk("%.3f:", (double)V2_low_value);  /* Prints V2 */
+        printk("%.3f:", (double)duty_cycle);    /* Prints duty cycle */
+        printk("%.3f:", (double)duty_cycle2);	/* Prints duty cycle 2 */	
+        printk("%.3f:", (double)V_high);        /* Prints V_high */
+        printk("%.3f:", (double)power_now);		/* Prints power */
+        printk("%.3f:", (double)power_old);		/* Prints old power */
+        printk("%.3f:", (double)max_power_old);	/* Prints maximum power reached during the trace */
+        printk("%.3f:", (double)mppt);			/* Prints if MPPT is active or not */
+        printk("%.3f:", (double)trace);			/* Prints if trace is active or not */
+        printk("%.3f:", (double)duty_cycle_step);			/* Prints duty cycle step */
+        printk("%.3f:", (double)V_high_max);        /* Prints maximum V_high */
+        printk("\n");
+    } else {
+        dump_scope_datas(scope);
+        is_downloading = false;
+    }
+
 
     task.suspendBackgroundMs(100);
 }
@@ -229,7 +362,13 @@ void loop_critical_task()
     meas_data = shield.sensors.getLatestValue(V_HIGH);
     if (meas_data != NO_VALUE) V_high = meas_data;
 
-    if(V_high>V_high_max) mode = IDLEMODE;
+    V2_filt = v2_filter.calculateWithReturn(V2_low_value);
+    I2_filt = i2_filter.calculateWithReturn(I2_low_value);
+
+
+    if(V_high>V_high_max) {
+        mode = IDLEMODE;
+    }
 
     if (mode == IDLEMODE)
     {
@@ -239,6 +378,10 @@ void loop_critical_task()
             shield.power.stop(LEG2);
         }
         pwm_enable = false;
+        duty_cycle = duty_cycle_min;
+        duty_cycle2 = duty_cycle_min;
+        trace = false;
+        mppt = false;
     }
     else if (mode == POWERMODE)
     {
@@ -253,6 +396,9 @@ void loop_critical_task()
             shield.power.start(LEG2);
         }
     }
+
+    scope.acquire();
+
 
 }
 
