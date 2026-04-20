@@ -87,6 +87,58 @@ typedef enum
 } pin_mode_t;
 
 /**
+ * @brief Encoder index enablement.
+ *
+ * - `encoder_index_disabled` leaves the timer encoder interface running
+ *   without any index reset signal.
+ * - `encoder_index_enabled` enables the timer index input and lets the
+ *   hardware reset the counter according to the selected polarity and
+ *   configuration.
+ */
+typedef enum
+{
+	encoder_index_disabled = 0,
+	encoder_index_enabled
+} encoder_index_enable_t;
+
+/**
+ * @brief Encoder index polarity.
+ *
+ * - `encoder_index_polarity_noninverted` treats the index input as active
+ *   high or rising edge.
+ * - `encoder_index_polarity_inverted` treats the index input as active
+ *   low or falling edge.
+ */
+typedef enum
+{
+	encoder_index_polarity_noninverted = 0,
+	encoder_index_polarity_inverted
+} encoder_index_polarity_t;
+
+/**
+ * @brief AB phase state that qualifies the encoder index reset.
+ *
+ * - `encoder_index_configuration_a_low_b_low` resets the counter when
+ *   index is active and AB = 00.
+ * - `encoder_index_configuration_a_low_b_high` resets the counter when
+ *   index is active and AB = 01.
+ * - `encoder_index_configuration_a_high_b_low` resets the counter when
+ *   index is active and AB = 10.
+ * - `encoder_index_configuration_a_high_b_high` resets the counter when
+ *   index is active and AB = 11.
+ *
+ * The timer driver applies the selected AB condition while keeping the
+ * direction qualifier active for both up-counting and down-counting.
+ */
+typedef enum
+{
+	encoder_index_configuration_a_low_b_low = 0,
+	encoder_index_configuration_a_low_b_high,
+	encoder_index_configuration_a_high_b_low,
+	encoder_index_configuration_a_high_b_high
+} encoder_index_configuration_t;
+
+/**
  * @brief Timer_enable_irq    : set to 1 to enable interrupt on timer overflow.
  * timer_enable_encoder: set to 1 for timer to act as an incremental coder counter.
  *
@@ -102,9 +154,13 @@ typedef enum
  *
  * *** Incremental encoder mode (ignored if timer_enable_encoder=0) ***
  * - timer_pin_mode : Pin mode for incremental coder interface.
+ * - timer_encoder_index_enable: enable or disable the encoder index input.
+ * - timer_encoder_index_polarity: active polarity of the encoder index input.
+ * - timer_encoder_index_configuration: AB phase state required for the index
+ *   input to reset the counter.
  *
  * @note At this time, only irq mode is supported on TIM6/TIM7, and
- * only incremental coder mode is supported on TIM4.
+ * only incremental coder mode is supported on TIM3/TIM4.
  * 
  * This limitation makes this configuration structure almost pointless 
  * (except for callback definition).
@@ -122,6 +178,9 @@ struct timer_config_t
 	uint32_t         timer_use_zero_latency : 1;
 	/* Incremental encoder option */
 	pin_mode_t       timer_enc_pin_mode;
+	encoder_index_enable_t timer_encoder_index_enable;
+	encoder_index_polarity_t timer_encoder_index_polarity;
+	encoder_index_configuration_t timer_encoder_index_configuration;
 };
 
 /**
