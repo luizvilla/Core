@@ -42,6 +42,14 @@ typedef enum
      TIMER4
 } timernumber_t;
 
+typedef struct
+{
+	pin_mode_t                    pin_mode;
+	encoder_index_enable_t       index_enable;
+	encoder_index_polarity_t     index_polarity;
+	encoder_index_configuration_t index_configuration;
+} incremental_encoder_timer_config_t;
+
 
 /**
  * @brief  Handles timer 4 for the SPIN board
@@ -56,7 +64,9 @@ public:
 	/**
 	 * @brief Launches the timer4 which is adapted for reading an encoder.
 	 */
-	void startLogIncrementalEncoder(timernumber_t timer_number);
+	void startLogIncrementalEncoder(
+		timernumber_t timer_number,
+		const incremental_encoder_timer_config_t* encoder_config = nullptr);
 
 	/**
 	 * @brief Gets the encoder step value.
@@ -72,7 +82,9 @@ private:
 	/**
 	 * @brief Initializes timer 4.
 	 */
-	void Initialize(timernumber_t timer_number);
+	void Initialize(
+		timernumber_t timer_number,
+		const incremental_encoder_timer_config_t* encoder_config = nullptr);
 
 	/* Variables */
 	static bool timer4init;

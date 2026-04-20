@@ -36,9 +36,40 @@ bool TimerHAL::timer4started = false;
 bool TimerHAL::timer3init    = false;
 bool TimerHAL::timer3started = false;
 
-
-void TimerHAL::Initialize(timernumber_t timer_number)
+static incremental_encoder_timer_config_t
+timer_hal_get_default_incremental_encoder_config(timernumber_t timer_number)
 {
+	incremental_encoder_timer_config_t encoder_config =
+	{
+		.pin_mode = pull_up,
+		.index_enable = encoder_index_enabled,
+		.index_polarity = encoder_index_polarity_noninverted,
+		.index_configuration = encoder_index_configuration_a_low_b_low
+	};
+
+	if (timer_number == TIMER3)
+	{
+		encoder_config.index_polarity = encoder_index_polarity_inverted;
+		encoder_config.index_configuration =
+			encoder_index_configuration_a_high_b_high;
+	}
+
+	return encoder_config;
+}
+
+
+void TimerHAL::Initialize(
+	timernumber_t timer_number,
+	const incremental_encoder_timer_config_t* encoder_config)
+{
+	incremental_encoder_timer_config_t effective_encoder_config =
+		timer_hal_get_default_incremental_encoder_config(timer_number);
+
+	if (encoder_config != nullptr)
+	{
+		effective_encoder_config = *encoder_config;
+	}
+
 	if (timer_number == TIMER4){
 		if (device_is_ready(timer4) == true)
 		{
@@ -47,7 +78,11 @@ void TimerHAL::Initialize(timernumber_t timer_number)
 			{
 				.timer_enable_irq = 0,
 				.timer_enable_encoder = 1,
-				.timer_enc_pin_mode = pull_up
+				.timer_enc_pin_mode = effective_encoder_config.pin_mode,
+				.timer_encoder_index_enable = effective_encoder_config.index_enable,
+				.timer_encoder_index_polarity = effective_encoder_config.index_polarity,
+				.timer_encoder_index_configuration =
+					effective_encoder_config.index_configuration
 
 			};
 			timer_config(timer4, &timer_cfg);
@@ -61,7 +96,11 @@ void TimerHAL::Initialize(timernumber_t timer_number)
 			{
 				.timer_enable_irq = 0,
 				.timer_enable_encoder = 1,
-				.timer_enc_pin_mode = pull_up
+				.timer_enc_pin_mode = effective_encoder_config.pin_mode,
+				.timer_encoder_index_enable = effective_encoder_config.index_enable,
+				.timer_encoder_index_polarity = effective_encoder_config.index_polarity,
+				.timer_encoder_index_configuration =
+					effective_encoder_config.index_configuration
 
 			};
 			timer_config(timer3, &timer_cfg);
@@ -71,12 +110,14 @@ void TimerHAL::Initialize(timernumber_t timer_number)
 	}
 }
 
-void TimerHAL::startLogIncrementalEncoder(timernumber_t timer_number)
+void TimerHAL::startLogIncrementalEncoder(
+	timernumber_t timer_number,
+	const incremental_encoder_timer_config_t* encoder_config)
 {
 	if(timer_number == TIMER4){
 		if (timer4init == false)
 		{
-			Initialize(TIMER4);
+			Initialize(TIMER4, encoder_config);
 		}
 
 		if (timer4started == false)
@@ -90,7 +131,7 @@ void TimerHAL::startLogIncrementalEncoder(timernumber_t timer_number)
 	}else{
 		if (timer3init == false)
 		{
-			Initialize(TIMER3);
+			Initialize(TIMER3, encoder_config);
 		}
 
 		if (timer3started == false)
