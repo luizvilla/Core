@@ -73,6 +73,12 @@ typedef struct
 	hall_interpolation_t hall_interpolation;
 } hall_position_sensor_config_t;
 
+/**
+ * @brief Default ABZ hardware configuration loaded from devicetree.
+ *
+ * The index fields describe whether the index input is used and, if enabled,
+ * which polarity and AB phase state qualify the hardware counter reset.
+ */
 typedef struct
 {
 	timernumber_t timer;
@@ -134,6 +140,12 @@ public:
 
 	const position_motor_config_t* getMotorConfig();
 	const hall_position_sensor_config_t* getHallConfig();
+	/**
+	 * @brief Return the active ABZ sensor configuration.
+	 *
+	 * The returned configuration includes timer selection, counts per
+	 * revolution, and the index defaults loaded from devicetree.
+	 */
 	const incremental_encoder_position_sensor_config_t* getIncrementalEncoderConfig();
 	const sincos_position_sensor_config_t* getSinCosConfig();
 

@@ -169,8 +169,9 @@ void timer_stm32_clear(const struct device* dev);
  * @brief Initialize `TIM3` in incremental encoder mode.
  *
  * This function configures TIM3 as a quadrature encoder interface using
- * STM32 LL (Low Layer) drivers. It sets up input capture channels, filters,
- * polarity, encoder mode, and index signal behavior.
+ * STM32 LL (Low Layer) drivers. It sets up the timer base and AB channels.
+ * Encoder index behavior is applied later by `timer_stm32_config()` from the
+ * public `timer_config_t`.
  *
  * - Enables the peripheral clock for `TIM3`.
  *
@@ -183,10 +184,6 @@ void timer_stm32_clear(const struct device* dev);
  *
  * - Disables master/slave mode and trigger output.
  *
- * - Configures the external trigger and index signal parameters.
- *
- * - Enables the encoder index feature.
- *
  */
 void init_timer_3();
 
@@ -195,8 +192,9 @@ void init_timer_3();
  * @brief Initialize `TIM4` in incremental encoder mode.
  *
  * This function configures TIM4 as a quadrature encoder interface using
- * STM32 LL (Low Layer) drivers. It sets up input capture channels, filters,
- * polarity, encoder mode, and index signal behavior.
+ * STM32 LL (Low Layer) drivers. It sets up the timer base and AB channels.
+ * Encoder index behavior is applied later by `timer_stm32_config()` from the
+ * public `timer_config_t`.
  *
  * - Enables the peripheral clock for `TIM4`.
  *
@@ -208,10 +206,6 @@ void init_timer_3();
  *   filter settings, and direct input mapping.
  *
  * - Disables master/slave mode and trigger output.
- *
- * - Configures the external trigger and index signal parameters.
- *
- * - Enables the encoder index feature.
  *
  */
 void init_timer_4();
