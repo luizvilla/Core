@@ -175,6 +175,7 @@ static float32_t speed_Ti = 0.1F;
 static float32_t speed_Ki = 0.1F;
 static Pid pi_speed = controlLibFactory.pid(Ts_speed, speed_Kp, speed_Ti, 0.0F, 1.0F,
 											-IQ_REF_MAX, IQ_REF_MAX);
+static uint8_t speed_decimation = 10;
 
 
 /* Scope decimation only affects logging, not control execution. */
@@ -401,6 +402,10 @@ inline void restart_offset_calibration()
  */
 inline void control_speed()
 {
+	// theta_ol = ot_modulo_2pi(theta_ol + omega_ol * Ts);
+	// angle_4_control = theta_ol;
+
+
 	angle_4_control = angle_filtered;
 	/* Hold the previous q-axis current reference between speed-loop updates. */
 	// if ((counter_time % speed_loop_decimation) == 0U) {
@@ -585,6 +590,7 @@ void setup_routine()
 	init_variables();
 	spin.led.turnOn();
 
+
 	/* Declare tasks */
 	uint32_t background_task_number =
 					task.createBackground(loop_background_task);
@@ -649,9 +655,11 @@ void loop_background_task()
 		break;
 	case '[':
 		adjust_electrical_offset(-ELECTRICAL_OFFSET_STEP);
+		scope.start();
 		break;
 	case ']':
 		adjust_electrical_offset(ELECTRICAL_OFFSET_STEP);
+		scope.start();
 		break;
 	case 'z':
 		Idq_ref.q -= 0.1F;
@@ -714,7 +722,22 @@ void loop_background_task()
 		/* To print scope datas in ownplot as soon as possible */
 		memory_print = !memory_print;
 		break;
-	case 'q':
+	case 'c':
+	case 'C':
+		shield.position.setAbzSpeedDecimation(speed_decimation + 1);
+		break;
+	case 'v':
+	case 'V':
+		shield.position.setAbzSpeedDecimation(speed_decimation - 1);
+		break;
+	case 's':
+	case 'S':
+		/* invert direction sign */
+		shield.position.setDirectionSign(-shield.position.getDirectionSign());
+		break;		
+
+
+		case 'q':
 		/* Relaunch scope acquisition */
 		scope.start();
 		break;
@@ -782,20 +805,22 @@ void adjust_speed_loop_ki(float32_t delta)
 void application_task()
 {
 	if (!memory_print) {
-		printk("%7.2f", V_high);
-		printk("%7.2f:", Iq_max);
-		printk("%7.2f:", speed_ref);
-		printk("%7.2f:", w_meas);
-		printk("%7.2f:", I1_offset);
-		printk("%7d:", control_state);
-		printk("%7u:", encoder_count);
-		printk("%7ld:", (long)encoder_delta_count);
-		printk("%7.2f:", shield.position.getElectricalOffset());
-		printk("%7.0f:", open_loop_mode ? 1.0 : 0.0);
-		printk("%7.2f:", theta_ol);
-		printk("%7.2f:", omega_ol);
-		printk("%7.2f:", Idq_ref.q);
-		printk("%7.2f\n", vq_ol);
+		printk("%7.2f:", V_high);									/* A */
+		printk("%7.2f:", Iq_max);									/* B */
+		printk("%7.2f:", speed_ref);								/* C */
+		printk("%7.2f:", w_meas);									/* D */
+		printk("%7.2f:", I1_offset);								/* E */
+		printk("%7d:", control_state);								/* F */
+		printk("%7u:", encoder_count);								/* G */
+		printk("%7ld:", (long)encoder_delta_count);					/* H */
+		printk("%7.2f:", shield.position.getElectricalOffset());	/* I */
+		printk("%7.2f:", shield.position.getDirectionSign());		/* J */
+		printk("%7.0f:", open_loop_mode ? 1.0 : 0.0);				/* K */
+		printk("%7.2f:", angle_filtered);							/* L */		
+		printk("%7.2f:", theta_ol);									/* M */		
+		printk("%7.2f:", omega_ol);									/* N */
+		printk("%7.2f:", Idq_ref.q);								/* O */	
+		printk("%7.2f\n", vq_ol);									/* P */
 	} else {
 		/* Replay the scope buffer continuously over serial for live plotting tools.
 		 */
@@ -844,12 +869,14 @@ void application_task()
 			(V_high_filtered > V_HIGH_MIN)) {
 			control_state = POWER_ST;
 		}
+		spin.led.turnOn();
 		break;
 
 	case POWER_ST:
 		if (asked_mode == IDLEMODE) {
 			control_state = IDLE_ST;
 		}
+		spin.led.turnOff();
 		break;
 
 	case ERROR_ST:
