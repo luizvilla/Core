@@ -313,6 +313,9 @@
 			electrical-offset = <0x00000000>;
 			timer = <&timers3>;
 			counts-per-revolution = <1024>;
+			index-present = <1>;
+			index-polarity = "INVERTED";
+			index-configuration = "A_HIGH_B_HIGH";
 			status = "okay";
 		};
 

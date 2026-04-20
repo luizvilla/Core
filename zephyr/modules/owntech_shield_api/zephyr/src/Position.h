@@ -77,6 +77,9 @@ typedef struct
 {
 	timernumber_t timer;
 	uint32_t      counts_per_revolution;
+	bool          index_present;
+	encoder_index_polarity_t index_polarity;
+	encoder_index_configuration_t index_configuration;
 } incremental_encoder_position_sensor_config_t;
 
 typedef struct
@@ -106,6 +109,9 @@ private:
 		bool                   has_pole_pairs;
 		bool                   has_electrical_offset;
 		bool                   has_counts_per_revolution;
+		bool                   has_abz_index_present;
+		bool                   has_abz_index_polarity;
+		bool                   has_abz_index_configuration;
 		bool                   has_hall_sector_table;
 		bool                   has_hall_interpolation;
 		position_motor_config_t motor;
