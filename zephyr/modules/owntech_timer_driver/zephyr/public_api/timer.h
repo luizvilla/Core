@@ -178,6 +178,7 @@ struct timer_config_t
 	uint32_t         timer_use_zero_latency : 1;
 	/* Incremental encoder option */
 	pin_mode_t       timer_enc_pin_mode;
+	/* Encoder index option */
 	encoder_index_enable_t timer_encoder_index_enable;
 	encoder_index_polarity_t timer_encoder_index_polarity;
 	encoder_index_configuration_t timer_encoder_index_configuration;

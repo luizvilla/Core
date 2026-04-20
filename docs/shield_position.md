@@ -1,15 +1,14 @@
 !!! note ""
     Shield Position is the unified position-feedback API exposed as `shield.position`.
-    It currently supports three sensor families connected through a shield:
-    Hall effect sensors, incremental encoders (ABZ), and Sin/Cos encoders.
+    It supports Hall effect sensors, incremental encoders, and Sin/Cos encoders connected through a shield.
 
-## Upstream Status
+## Validation Status
 
 - Hall: validated on hardware
 - ABZ incremental encoder: validated on hardware
-- Sin/Cos: API implemented, but not yet validated on hardware
+- Sin/Cos: API available, but still experimental and not yet hardware-validated
 
-For upstreaming, Hall and ABZ should be treated as validated paths. Sin/Cos should remain documented as experimental until the validation work is complete.
+For upstreaming, Hall and ABZ are the validated sensor paths. Sin/Cos stays documented so the public API is complete, but it should not be presented as validation-backed yet.
 
 ## Include
 
@@ -17,12 +16,12 @@ For upstreaming, Hall and ABZ should be treated as validated paths. Sin/Cos shou
 #include <ShieldAPI.h>
 ```
 
-## Initialization Flow
+## Initialization Contract
 
-The recommended sequence is the same for all sensor types:
+The intended flow is the same for every sensor type:
 
 1. Select the sensor with `shield.position.init(...)` or `shield.position.initDefault()`
-2. Override runtime-tunable parameters if needed
+2. Adjust runtime-owned parameters if needed
 3. Call `shield.position.update(sample_time)` periodically
 4. Read angle and speed outputs
 
@@ -37,9 +36,11 @@ float32_t electrical_angle = shield.position.getElectricalAngle();
 float32_t electrical_speed = shield.position.getElectricalSpeed();
 ```
 
+`shield.position.update(...)` returns `false` when the active sensor is not initialized correctly or when the current sample cannot be used.
+
 ## Common Outputs
 
-Once initialized, all supported sensor types provide the same estimated outputs:
+Once initialized, every supported sensor type provides:
 
 - `shield.position.getMechanicalAngle()`
 - `shield.position.getElectricalAngle()`
@@ -50,12 +51,30 @@ Once initialized, all supported sensor types provide the same estimated outputs:
 
 ## Configuration Ownership
 
-The current API splits configuration between:
+Position configuration is split between:
 
-- devicetree defaults stored by the shield description
-- runtime setters applied by the application after `init()`
+- devicetree-owned defaults describing the shield wiring and default sensor behavior
+- runtime-owned parameters that applications may override after `init()`
 
-Today, the runtime setters are:
+### Devicetree-owned defaults
+
+These values are expected to live in shield or application overlays:
+
+- sensor selection through `chosen`
+- Hall GPIO wiring
+- Sin/Cos sensor names and analog pin mapping
+- ABZ timer selection
+- ABZ index presence
+- ABZ index polarity
+- ABZ index configuration
+- per-sensor default direction sign
+- per-sensor default electrical offset
+- per-sensor default counts per revolution
+- motor default pole pairs
+
+### Runtime-owned overrides
+
+The application can still tune:
 
 - `setDirectionSign(...)`
 - `setPolePairs(...)`
@@ -65,11 +84,11 @@ Today, the runtime setters are:
 - `setHallSectorTable(...)` for Hall
 - `setHallInterpolation(...)` for Hall
 
-The corresponding getters allow the application to inspect the active values after initialization.
+The ABZ index properties are intentionally read-only at runtime. They are treated as hardware configuration and should be declared in devicetree.
 
 ## Hall Effect Sensor
 
-Use the Hall mode when the motor exposes three digital Hall signals.
+Use Hall mode when the motor provides three digital Hall channels.
 
 Typical parameters:
 
@@ -101,25 +120,74 @@ uint8_t hall_state = shield.position.getHallState();
 
 ## Incremental Encoder
 
-Use the ABZ mode when the motor exposes an incremental encoder and the timer peripheral is wired in encoder mode.
+Use ABZ mode when the motor provides a quadrature encoder and the timer peripheral is wired in encoder mode.
 
-Typical parameters:
+### ABZ properties
 
+The default ABZ sensor configuration includes:
+
+- `timer`
 - `counts-per-revolution`
 - `direction-sign`
-- `pole-pairs`
 - `electrical-offset`
+- `index-present`
+- `index-polarity`
+- `index-configuration`
 
-Minimal sequence:
+Meaning of the index-specific fields:
+
+- `index-present = <1>` enables the timer index input
+- `index-present = <0>` keeps AB quadrature active without index reset
+- `index-polarity = "NONINVERTED"` treats the index input as active high or rising edge
+- `index-polarity = "INVERTED"` treats the index input as active low or falling edge
+- `index-configuration` selects the AB phase state required for the active index pulse to reset the counter
+
+Supported `index-configuration` values are:
+
+- `"A_LOW_B_LOW"`
+- `"A_LOW_B_HIGH"`
+- `"A_HIGH_B_LOW"`
+- `"A_HIGH_B_HIGH"`
+
+### Devicetree example
+
+```dts
+/ {
+    chosen {
+        owntech,position-sensor = &abz;
+    };
+};
+
+&default_motor {
+    pole-pairs = <4>;
+};
+
+&abz {
+    counts-per-revolution = <4096>;
+    direction-sign = <1>;
+    electrical-offset = <0x00000000>;
+    index-present = <1>;
+    index-polarity = "INVERTED";
+    index-configuration = "A_HIGH_B_HIGH";
+};
+```
+
+### Runtime example
 
 ```cpp
 shield.position.init(ABZ);
+
 shield.position.setCountsPerRevolution(4096);
 shield.position.setDirectionSign(1);
 shield.position.setPolePairs(4);
 shield.position.setElectricalOffset(0.0F);
+shield.position.setAbzSpeedDecimation(100);
 
 shield.position.update(100e-6F);
+
+float32_t mechanical_angle = shield.position.getMechanicalAngle();
+float32_t electrical_angle = shield.position.getElectricalAngle();
+float32_t mechanical_speed = shield.position.getMechanicalSpeed();
 ```
 
 The raw encoder count remains available through:
@@ -128,24 +196,14 @@ The raw encoder count remains available through:
 uint32_t encoder_count = shield.position.getIncrementalEncoderValue();
 ```
 
-### Current upstream gap
-
-The current ABZ implementation already relies on timer index behavior in the STM32 timer driver, but those index settings are not yet exposed through the Position API configuration surface.
-
-The missing ABZ settings that should be surfaced in follow-up commits are:
-
-- index presence
-- index polarity
-- index reset configuration
-
 ## Sin/Cos Encoder
 
-Use the Sin/Cos mode when the position sensor provides two analog channels: one sine and one cosine.
+Use Sin/Cos mode when the position sensor provides two analog channels: one sine and one cosine.
 
 !!! warning
-    `shield.position.init(SINCOS)` enables the semantic shield sensors, but converted Sin/Cos samples are only available once the ADC acquisition path has been started. Do not rely on `shield.position.update(...)` until the data acquisition path is running.
+    `shield.position.init(SINCOS)` enables the semantic shield sensors, but converted Sin/Cos samples are only available once the ADC acquisition path has been started. Do not rely on `shield.position.update(...)` until the acquisition path is running.
 
-Sin/Cos is part of the API surface, but it is not yet validation-backed for upstreaming.
+Sin/Cos is still experimental in this upstreaming pass.
 
 Typical parameters:
 
@@ -173,7 +231,7 @@ float32_t cos_value = shield.position.getCosValue();
 
 ## Default Sensor Selection
 
-If the application always uses the same position sensor, it can be selected in `src/app.overlay`:
+If the application always uses the same sensor, define it in `src/app.overlay`:
 
 ```dts
 / {
@@ -187,50 +245,4 @@ Then initialize it with:
 
 ```cpp
 shield.position.initDefault();
-```
-
-## Current Devicetree Defaults
-
-Applications can override the shield defaults from `src/app.overlay`.
-
-Hall example:
-
-```dts
-&default_motor {
-    pole-pairs = <4>;
-};
-
-&hall {
-    direction-sign = <1>;
-    electrical-offset = <0x00000000>;
-    hall-sector-table = <5 1 0 3 4 2>;
-    hall-interpolation = "LINEAR";
-};
-```
-
-ABZ example:
-
-```dts
-&default_motor {
-    pole-pairs = <4>;
-};
-
-&abz {
-    counts-per-revolution = <4096>;
-    direction-sign = <1>;
-    electrical-offset = <0x00000000>;
-};
-```
-
-Sin/Cos example:
-
-```dts
-&default_motor {
-    pole-pairs = <4>;
-};
-
-&sincos {
-    direction-sign = <1>;
-    electrical-offset = <0x3dcccccd>;
-};
 ```
