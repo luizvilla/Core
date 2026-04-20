@@ -21,7 +21,7 @@ The sensor selection is done entirely from the devicetree overlay. `src/main.cpp
 `AppContext` is intentionally split into:
 
 - `AppSetup`: values chosen for configuration and initialization
-- `AppRuntime`: values updated while the application is running
+- `AppVariable`: values updated while the application is running
 
 This keeps the state machine readable because setup-oriented variables are not
 mixed with measurements, loop counters, and live control data.

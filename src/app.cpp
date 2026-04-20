@@ -1,6 +1,7 @@
 #include "app.h"
 
 #include "TaskAPI.h"
+#include "transform.h"
 #include "trigo.h"
 
 static int32_t normalize_encoder_delta(uint32_t current_count,
@@ -33,75 +34,75 @@ void dump_scope_datas(ScopeMimicry &scope)
 	printk("end record\n");
 }
 
-void initialize_runtime_defaults(AppContext &app)
+void initialize_variable_defaults(AppContext &app)
 {
-	app.runtime.vHigh_filter =
+	app.variable.vHigh_filter =
 		controlLibFactory.lowpassfilter(app.setup.Ts, 5.0e-3F);
-	app.runtime.w_mes_filter =
+	app.variable.w_mes_filter =
 		controlLibFactory.lowpassfilter(app.setup.Ts, 5.0e-3F);
-	app.runtime.angle_filtered = 0.0F;
-	app.runtime.w_meas = 0.0F;
-	app.runtime.meas_data = 0.0F;
-	app.runtime.I1_low_value = 0.0F;
-	app.runtime.I2_low_value = 0.0F;
-	app.runtime.I1_offset = 0.0F;
-	app.runtime.I2_offset = 0.0F;
-	app.runtime.tmpI1_offset = 0.0F;
-	app.runtime.tmpI2_offset = 0.0F;
-	app.runtime.V1_low_value = 0.0F;
-	app.runtime.V2_low_value = 0.0F;
-	app.runtime.V12_value = 0.0F;
-	app.runtime.I_high = 0.0F;
-	app.runtime.V_high = 0.0F;
-	app.runtime.encoder_count = 0U;
-	app.runtime.encoder_count_prev = 0U;
-	app.runtime.encoder_delta_count = 0;
-	app.runtime.encoder_mech_angle = 0.0F;
-	app.runtime.encoder_elec_angle = 0.0F;
-	app.runtime.encoder_mech_speed = 0.0F;
-	app.runtime.encoder_elec_speed = 0.0F;
-	app.runtime.active_position_type = POSITION_SENSOR_TYPE_UNDEFINED;
-	app.runtime.position_sensor_initialized = false;
-	app.runtime.position_data_valid = false;
-	app.runtime.Vabc = {};
-	app.runtime.duty_abc = {};
-	app.runtime.Iabc = {};
-	app.runtime.Vdq = {};
-	app.runtime.Idq = {};
-	app.runtime.Iq_max = app.setup.iq_ref_max;
-	app.runtime.Vd = 0.0F;
-	app.runtime.Vq = 0.0F;
-	app.runtime.speed_ref = 0.0F;
-	app.runtime.speed_ref_print = 0.0F;
-	app.runtime.speed_meas_print = 0.0F;
-	app.runtime.electrical_offset_print = 0.0F;
-	app.runtime.open_loop_mode_print = 0.0F;
-	app.runtime.theta_ol_print = 0.0F;
-	app.runtime.omega_ol_print = 10.0F;
-	app.runtime.vq_ol_print = 0.5F;
-	app.runtime.iq_ref_from_speed = 0.0F;
-	app.runtime.encoder_count_f = 0.0F;
-	app.runtime.encoder_delta_count_f = 0.0F;
-	app.runtime.V_high_filtered = 0.0F;
-	app.runtime.speed_Kp = 0.01F;
-	app.runtime.speed_Ti = 0.1F;
-	app.runtime.speed_Ki = 0.1F;
-	app.runtime.speed_decimation = (uint8_t)app.setup.speed_loop_decimation;
-	app.runtime.counter_time = 0U;
-	app.runtime.counter_time_f = 0.0F;
-	app.runtime.received_serial_char = 0U;
-	app.runtime.error_counter = 0U;
-	app.runtime.pwm_enable = false;
-	app.runtime.open_loop_mode = false;
-	app.runtime.theta_ol = 0.0F;
-	app.runtime.omega_ol = 10.0F;
-	app.runtime.vq_ol = 0.5F;
-	app.runtime.k_app_idx = 0U;
-	app.runtime.is_downloading = false;
-	app.runtime.memory_print = false;
-	app.runtime.Idq_ref.d = 0.0F;
-	app.runtime.Idq_ref.q = 0.0F;
-	app.runtime.Idq_ref.o = 0.0F;
+	app.variable.angle_filtered = 0.0F;
+	app.variable.w_meas = 0.0F;
+	app.variable.meas_data = 0.0F;
+	app.variable.I1_low_value = 0.0F;
+	app.variable.I2_low_value = 0.0F;
+	app.variable.I1_offset = 0.0F;
+	app.variable.I2_offset = 0.0F;
+	app.variable.tmpI1_offset = 0.0F;
+	app.variable.tmpI2_offset = 0.0F;
+	app.variable.V1_low_value = 0.0F;
+	app.variable.V2_low_value = 0.0F;
+	app.variable.V12_value = 0.0F;
+	app.variable.I_high = 0.0F;
+	app.variable.V_high = 0.0F;
+	app.variable.encoder_count = 0U;
+	app.variable.encoder_count_prev = 0U;
+	app.variable.encoder_delta_count = 0;
+	app.variable.encoder_mech_angle = 0.0F;
+	app.variable.encoder_elec_angle = 0.0F;
+	app.variable.encoder_mech_speed = 0.0F;
+	app.variable.encoder_elec_speed = 0.0F;
+	app.variable.active_position_type = POSITION_SENSOR_TYPE_UNDEFINED;
+	app.variable.position_sensor_initialized = false;
+	app.variable.position_data_valid = false;
+	app.variable.Vabc = {};
+	app.variable.duty_abc = {};
+	app.variable.Iabc = {};
+	app.variable.Vdq = {};
+	app.variable.Idq = {};
+	app.variable.Iq_max = app.setup.iq_ref_max;
+	app.variable.Vd = 0.0F;
+	app.variable.Vq = 0.0F;
+	app.variable.speed_ref = 0.0F;
+	app.variable.speed_ref_print = 0.0F;
+	app.variable.speed_meas_print = 0.0F;
+	app.variable.electrical_offset_print = 0.0F;
+	app.variable.open_loop_mode_print = 0.0F;
+	app.variable.theta_ol_print = 0.0F;
+	app.variable.omega_ol_print = 10.0F;
+	app.variable.vq_ol_print = 0.5F;
+	app.variable.iq_ref_from_speed = 0.0F;
+	app.variable.encoder_count_f = 0.0F;
+	app.variable.encoder_delta_count_f = 0.0F;
+	app.variable.V_high_filtered = 0.0F;
+	app.variable.speed_Kp = 0.01F;
+	app.variable.speed_Ti = 0.1F;
+	app.variable.speed_Ki = 0.1F;
+	app.variable.speed_decimation = (uint8_t)app.setup.speed_loop_decimation;
+	app.variable.counter_time = 0U;
+	app.variable.counter_time_f = 0.0F;
+	app.variable.received_serial_char = 0U;
+	app.variable.error_counter = 0U;
+	app.variable.pwm_enable = false;
+	app.variable.open_loop_mode = false;
+	app.variable.theta_ol = 0.0F;
+	app.variable.omega_ol = 10.0F;
+	app.variable.vq_ol = 0.5F;
+	app.variable.k_app_idx = 0U;
+	app.variable.is_downloading = false;
+	app.variable.memory_print = false;
+	app.variable.Idq_ref.d = 0.0F;
+	app.variable.Idq_ref.q = 0.0F;
+	app.variable.Idq_ref.o = 0.0F;
 }
 
 void init_motor_control(AppContext &app)
@@ -113,74 +114,90 @@ void init_motor_control(AppContext &app)
 	config.current_limit_q = app.setup.iq_ref_max;
 	config.current_pi_kp = 30.0F * 0.035F;
 	config.current_pi_ti = 0.002029F;
-	config.speed_pi_kp = app.runtime.speed_Kp;
-	config.speed_pi_ti = app.runtime.speed_Ti;
+	config.speed_pi_kp = app.variable.speed_Kp;
+	config.speed_pi_ti = app.variable.speed_Ti;
 	config.speed_loop_decimation = app.setup.speed_loop_decimation;
 
-	(void)app.runtime.motor_control.init(config);
-	app.runtime.motor_control.setCurrentReference(app.runtime.Idq_ref);
-	app.runtime.motor_control.setSpeedReference(app.runtime.speed_ref);
-	app.runtime.motor_control.setOpenLoopSpeed(app.runtime.omega_ol);
-	app.runtime.motor_control.setOpenLoopVoltageQ(app.runtime.vq_ol);
+	(void)app.variable.motor_control.init(config);
+	app.variable.motor_control.setCurrentReference(app.variable.Idq_ref);
+	app.variable.motor_control.setSpeedReference(app.variable.speed_ref);
+	app.variable.motor_control.setOpenLoopSpeed(app.variable.omega_ol);
+	app.variable.motor_control.setOpenLoopVoltageQ(app.variable.vq_ol);
 }
 
 void init_filters_and_regulators(AppContext &app)
 {
-	app.runtime.vHigh_filter.reset(app.setup.v_high_min);
-	app.runtime.motor_control.reset();
-	app.runtime.error_counter = 0U;
+	app.variable.vHigh_filter.reset(app.setup.v_high_min);
+	app.variable.motor_control.reset();
+	app.variable.error_counter = 0U;
+}
+
+void restart_offset_calibration(AppContext &app,
+								uint8_t &asked_mode,
+								uint8_t idle_mode,
+								control_state_mode &control_state)
+{
+	stop_pwm_and_reset_states_if_needed(app);
+	app.variable.counter_time = 0U;
+	app.variable.encoder_count_prev = 0U;
+	app.variable.I1_offset = 0.0F;
+	app.variable.I2_offset = 0.0F;
+	app.variable.tmpI1_offset = 0.0F;
+	app.variable.tmpI2_offset = 0.0F;
+	asked_mode = idle_mode;
+	control_state = OFFSET_ST;
 }
 
 void retrieve_analog_data(AppContext &app, bool offset_calibration_active)
 {
-	app.runtime.meas_data = shield.sensors.getLatestValue(I1_LOW);
-	if (app.runtime.meas_data != NO_VALUE) {
-		app.runtime.I1_low_value =
-			app.runtime.meas_data + app.runtime.I1_offset;
+	app.variable.meas_data = shield.sensors.getLatestValue(I1_LOW);
+	if (app.variable.meas_data != NO_VALUE) {
+		app.variable.I1_low_value =
+			app.variable.meas_data + app.variable.I1_offset;
 	}
 
-	app.runtime.meas_data = shield.sensors.getLatestValue(I2_LOW);
-	if (app.runtime.meas_data != NO_VALUE) {
-		app.runtime.I2_low_value =
-			app.runtime.meas_data + app.runtime.I2_offset;
+	app.variable.meas_data = shield.sensors.getLatestValue(I2_LOW);
+	if (app.variable.meas_data != NO_VALUE) {
+		app.variable.I2_low_value =
+			app.variable.meas_data + app.variable.I2_offset;
 	}
 
 	if (offset_calibration_active &&
-		app.runtime.counter_time < (uint32_t)app.setup.nb_offset) {
-		app.runtime.tmpI1_offset += app.runtime.I1_low_value;
-		app.runtime.tmpI2_offset += app.runtime.I2_low_value;
+		app.variable.counter_time < (uint32_t)app.setup.nb_offset) {
+		app.variable.tmpI1_offset += app.variable.I1_low_value;
+		app.variable.tmpI2_offset += app.variable.I2_low_value;
 	}
 
-	app.runtime.meas_data = shield.sensors.getLatestValue(V_HIGH);
-	if (app.runtime.meas_data != NO_VALUE) {
-		app.runtime.V_high = app.runtime.meas_data;
+	app.variable.meas_data = shield.sensors.getLatestValue(V_HIGH);
+	if (app.variable.meas_data != NO_VALUE) {
+		app.variable.V_high = app.variable.meas_data;
 	}
 
-	app.runtime.meas_data = shield.sensors.getLatestValue(I_HIGH);
-	if (app.runtime.meas_data != NO_VALUE) {
-		app.runtime.I_high = -app.runtime.meas_data;
+	app.variable.meas_data = shield.sensors.getLatestValue(I_HIGH);
+	if (app.variable.meas_data != NO_VALUE) {
+		app.variable.I_high = -app.variable.meas_data;
 	}
 
-	app.runtime.meas_data = shield.sensors.getLatestValue(V1_LOW);
-	if (app.runtime.meas_data != NO_VALUE) {
-		app.runtime.V1_low_value = app.runtime.meas_data;
+	app.variable.meas_data = shield.sensors.getLatestValue(V1_LOW);
+	if (app.variable.meas_data != NO_VALUE) {
+		app.variable.V1_low_value = app.variable.meas_data;
 	}
 
-	app.runtime.meas_data = shield.sensors.getLatestValue(V2_LOW);
-	if (app.runtime.meas_data != NO_VALUE) {
-		app.runtime.V2_low_value = app.runtime.meas_data;
+	app.variable.meas_data = shield.sensors.getLatestValue(V2_LOW);
+	if (app.variable.meas_data != NO_VALUE) {
+		app.variable.V2_low_value = app.variable.meas_data;
 	}
 
-	app.runtime.V_high_filtered =
-		app.runtime.vHigh_filter.calculateWithReturn(app.runtime.V_high);
-	app.runtime.V12_value =
-		app.runtime.V1_low_value - app.runtime.V2_low_value;
+	app.variable.V_high_filtered =
+		app.variable.vHigh_filter.calculateWithReturn(app.variable.V_high);
+	app.variable.V12_value =
+		app.variable.V1_low_value - app.variable.V2_low_value;
 }
 
 void update_position_and_speed(AppContext &app)
 {
-	app.runtime.position_data_valid = false;
-	if (!app.runtime.position_sensor_initialized) {
+	app.variable.position_data_valid = false;
+	if (!app.variable.position_sensor_initialized) {
 		return;
 	}
 
@@ -188,105 +205,134 @@ void update_position_and_speed(AppContext &app)
 		return;
 	}
 
-	if (app.runtime.active_position_type == ABZ_TYPE) {
+	if (app.variable.active_position_type == ABZ_TYPE) {
 		uint32_t counts_per_revolution =
 			shield.position.getCountsPerRevolution();
-		app.runtime.encoder_count =
+		app.variable.encoder_count =
 			shield.position.getIncrementalEncoderValue();
-		app.runtime.encoder_delta_count = normalize_encoder_delta(
-			app.runtime.encoder_count,
-			app.runtime.encoder_count_prev,
+		app.variable.encoder_delta_count = normalize_encoder_delta(
+			app.variable.encoder_count,
+			app.variable.encoder_count_prev,
 			counts_per_revolution);
-		app.runtime.encoder_count_prev = app.runtime.encoder_count;
+		app.variable.encoder_count_prev = app.variable.encoder_count;
 	} else {
-		app.runtime.encoder_count = 0U;
-		app.runtime.encoder_delta_count = 0;
+		app.variable.encoder_count = 0U;
+		app.variable.encoder_delta_count = 0;
 	}
 
-	app.runtime.encoder_mech_angle = shield.position.getMechanicalAngle();
-	app.runtime.encoder_elec_angle = shield.position.getElectricalAngle();
-	app.runtime.encoder_mech_speed = shield.position.getMechanicalSpeed();
-	app.runtime.encoder_elec_speed = shield.position.getElectricalSpeed();
-	app.runtime.angle_filtered = app.runtime.encoder_elec_angle;
-	app.runtime.w_meas = app.runtime.w_mes_filter.calculateWithReturn(
-		app.runtime.encoder_elec_speed);
-	app.runtime.position_data_valid = true;
+	app.variable.encoder_mech_angle = shield.position.getMechanicalAngle();
+	app.variable.encoder_elec_angle = shield.position.getElectricalAngle();
+	app.variable.encoder_mech_speed = shield.position.getMechanicalSpeed();
+	app.variable.encoder_elec_speed = shield.position.getElectricalSpeed();
+	app.variable.angle_filtered = app.variable.encoder_elec_angle;
+	app.variable.w_meas = app.variable.w_mes_filter.calculateWithReturn(
+		app.variable.encoder_elec_speed);
+	app.variable.position_data_valid = true;
 }
 
 bool update_overcurrent_error(AppContext &app)
 {
-	if (app.runtime.I1_low_value > app.setup.ac_current_limit ||
-		app.runtime.I1_low_value < -app.setup.ac_current_limit ||
-		app.runtime.I2_low_value > app.setup.ac_current_limit ||
-		app.runtime.I2_low_value < -app.setup.ac_current_limit ||
-		app.runtime.I_high > app.setup.dc_current_limit) {
-		app.runtime.error_counter++;
+	if (app.variable.I1_low_value > app.setup.ac_current_limit ||
+		app.variable.I1_low_value < -app.setup.ac_current_limit ||
+		app.variable.I2_low_value > app.setup.ac_current_limit ||
+		app.variable.I2_low_value < -app.setup.ac_current_limit ||
+		app.variable.I_high > app.setup.dc_current_limit) {
+		app.variable.error_counter++;
 	}
 
-	return app.runtime.error_counter > 1000U;
+	return app.variable.error_counter > 1000U;
 }
 
 void stop_pwm_and_reset_states_if_needed(AppContext &app)
 {
-	if (app.runtime.pwm_enable) {
+	if (app.variable.pwm_enable) {
 		shield.power.stop(ALL);
 		init_filters_and_regulators(app);
-		app.runtime.pwm_enable = false;
+		app.variable.pwm_enable = false;
 	}
 
-	app.runtime.theta_ol = 0.0F;
+	app.variable.theta_ol = 0.0F;
+}
+
+void update_scope_mirrors(AppContext &app,
+						  control_state_mode control_state,
+						  float32_t &control_state_f)
+{
+	app.variable.encoder_count_f = (float32_t)app.variable.encoder_count;
+	app.variable.encoder_delta_count_f = (float32_t)app.variable.encoder_delta_count;
+	app.variable.Va = app.variable.Vabc.a;
+	app.variable.duty_a = app.variable.duty_abc.a;
+	app.variable.duty_b = app.variable.duty_abc.b;
+	app.variable.Iq_ref = app.variable.Idq_ref.q;
+	app.variable.Id_ref = app.variable.Idq_ref.d;
+	app.variable.Iq_meas = app.variable.Idq.q;
+	app.variable.Vd = app.variable.Vdq.d;
+	app.variable.Vq = app.variable.Vdq.q;
+	app.variable.speed_ref_print = app.variable.speed_ref;
+	app.variable.speed_meas_print = app.variable.w_meas;
+	app.variable.electrical_offset_print = shield.position.getElectricalOffset();
+	app.variable.open_loop_mode_print = app.variable.open_loop_mode ? 1.0F : 0.0F;
+	app.variable.theta_ol_print = app.variable.theta_ol;
+	app.variable.omega_ol_print = app.variable.omega_ol;
+	app.variable.vq_ol_print = app.variable.vq_ol;
+	app.variable.Iabc_ref =
+		Transform::to_threephase(app.variable.Idq_ref, app.variable.angle_4_control);
+	app.variable.Ia_ref = app.variable.Iabc_ref.a;
+	app.variable.Ib_ref = app.variable.Iabc_ref.b;
+	app.variable.counter_time_f = (float32_t)app.variable.counter_time;
+	control_state_f = (float32_t)control_state;
 }
 
 void control_speed(AppContext &app)
 {
-	app.runtime.Idq_ref.d = 0.0F;
-	app.runtime.motor_control.setMode(MotorControlMode::Current);
-	app.runtime.motor_control.setCurrentReference(app.runtime.Idq_ref);
-	app.runtime.motor_control.setSpeedReference(app.runtime.speed_ref);
+	app.variable.Idq_ref.d = 0.0F;
+	app.variable.motor_control.setMode(MotorControlMode::Current);
+	app.variable.motor_control.setCurrentReference(app.variable.Idq_ref);
+	app.variable.motor_control.setSpeedReference(app.variable.speed_ref);
 
 	MotorControlInput input;
-	input.ia = app.runtime.I1_low_value;
-	input.ib = app.runtime.I2_low_value;
-	input.vbus = app.runtime.V_high_filtered;
-	input.theta_elec = app.runtime.angle_filtered;
-	input.omega_elec = app.runtime.w_meas;
-	input.position_valid = app.runtime.position_data_valid;
+	input.ia = app.variable.I1_low_value;
+	input.ib = app.variable.I2_low_value;
+	input.vbus = app.variable.V_high_filtered;
+	input.theta_elec = app.variable.angle_filtered;
+	input.omega_elec = app.variable.w_meas;
+	input.position_valid = app.variable.position_data_valid;
 
-	app.runtime.motor_output = app.runtime.motor_control.step(input);
-	app.runtime.angle_4_control = app.runtime.motor_output.theta_control;
-	app.runtime.Iabc = app.runtime.motor_output.iabc;
-	app.runtime.Idq = app.runtime.motor_output.idq;
-	app.runtime.Idq_ref = app.runtime.motor_output.idq_ref;
-	app.runtime.Vdq = app.runtime.motor_output.vdq;
-	app.runtime.Vabc = app.runtime.motor_output.vabc;
-	app.runtime.duty_abc = app.runtime.motor_output.duty_abc;
-	app.runtime.iq_ref_from_speed = app.runtime.motor_output.idq_ref.q;
+	app.variable.motor_output = app.variable.motor_control.step(input);
+	app.variable.angle_4_control = app.variable.motor_output.theta_control;
+	app.variable.Iabc = app.variable.motor_output.iabc;
+	app.variable.Idq = app.variable.motor_output.idq;
+	app.variable.Idq_ref = app.variable.motor_output.idq_ref;
+	app.variable.Vdq = app.variable.motor_output.vdq;
+	app.variable.Vabc = app.variable.motor_output.vabc;
+	app.variable.duty_abc = app.variable.motor_output.duty_abc;
+	app.variable.iq_ref_from_speed = app.variable.motor_output.idq_ref.q;
 }
 
 void control_open_loop(AppContext &app)
 {
-	app.runtime.motor_control.setMode(MotorControlMode::OpenLoop);
-	app.runtime.motor_control.setOpenLoopSpeed(app.runtime.omega_ol);
-	app.runtime.motor_control.setOpenLoopVoltageQ(app.runtime.vq_ol);
+	app.variable.motor_control.setMode(MotorControlMode::OpenLoop);
+	app.variable.motor_control.setOpenLoopSpeed(app.variable.omega_ol);
+	app.variable.motor_control.setOpenLoopVoltageQ(app.variable.vq_ol);
 
 	MotorControlInput input;
-	input.ia = app.runtime.I1_low_value;
-	input.ib = app.runtime.I2_low_value;
-	input.vbus = app.runtime.V_high_filtered;
-	input.theta_elec = app.runtime.angle_filtered;
-	input.omega_elec = app.runtime.w_meas;
-	input.position_valid = app.runtime.position_data_valid;
+	input.ia = app.variable.I1_low_value;
+	input.ib = app.variable.I2_low_value;
+	input.vbus = app.variable.V_high_filtered;
+	input.theta_elec = app.variable.angle_filtered;
+	input.omega_elec = app.variable.w_meas;
+	input.position_valid = app.variable.position_data_valid;
 
-	app.runtime.motor_output = app.runtime.motor_control.step(input);
-	app.runtime.theta_ol = app.runtime.motor_output.theta_control;
-	app.runtime.angle_4_control = app.runtime.motor_output.theta_control;
-	app.runtime.Iabc = app.runtime.motor_output.iabc;
-	app.runtime.Idq = app.runtime.motor_output.idq;
-	app.runtime.Idq_ref = app.runtime.motor_output.idq_ref;
-	app.runtime.Vdq = app.runtime.motor_output.vdq;
-	app.runtime.Vabc = app.runtime.motor_output.vabc;
-	app.runtime.duty_abc = app.runtime.motor_output.duty_abc;
-	app.runtime.iq_ref_from_speed = 0.0F;
+	app.variable.motor_output = app.variable.motor_control.step(input);
+	app.variable.theta_ol = app.variable.motor_output.theta_control;
+	app.variable.angle_4_control = app.variable.motor_output.theta_control;
+	app.variable.Iabc = app.variable.motor_output.iabc;
+	app.variable.Idq = app.variable.motor_output.idq;
+	app.variable.Idq_ref = app.variable.motor_output.idq_ref;
+	app.variable.Vdq = app.variable.motor_output.vdq;
+	app.variable.Vabc = app.variable.motor_output.vabc;
+	app.variable.duty_abc = app.variable.motor_output.duty_abc;
+	app.variable.iq_ref_from_speed = 0.0F;
 }
 
 void compute_duties(AppContext &app)
@@ -296,15 +342,15 @@ void compute_duties(AppContext &app)
 
 void apply_duties(const AppContext &app)
 {
-	shield.power.setDutyCycle(LEG1, app.runtime.duty_abc.a);
-	shield.power.setDutyCycle(LEG2, app.runtime.duty_abc.b);
-	shield.power.setDutyCycle(LEG3, app.runtime.duty_abc.c);
+	shield.power.setDutyCycle(LEG1, app.variable.duty_abc.a);
+	shield.power.setDutyCycle(LEG2, app.variable.duty_abc.b);
+	shield.power.setDutyCycle(LEG3, app.variable.duty_abc.c);
 }
 
 void start_pwms_if_needed(AppContext &app)
 {
-	if (!app.runtime.pwm_enable) {
-		app.runtime.pwm_enable = true;
+	if (!app.variable.pwm_enable) {
+		app.variable.pwm_enable = true;
 		shield.power.start(ALL);
 	}
 }
@@ -323,52 +369,52 @@ void adjust_electrical_offset(AppContext &app, float32_t delta)
 
 void toggle_open_loop_mode(AppContext &app)
 {
-	app.runtime.open_loop_mode = !app.runtime.open_loop_mode;
-	app.runtime.theta_ol = app.runtime.encoder_elec_angle;
-	app.runtime.motor_control.setOpenLoopAngle(app.runtime.theta_ol);
-	app.runtime.motor_control.setMode(app.runtime.open_loop_mode
+	app.variable.open_loop_mode = !app.variable.open_loop_mode;
+	app.variable.theta_ol = app.variable.encoder_elec_angle;
+	app.variable.motor_control.setOpenLoopAngle(app.variable.theta_ol);
+	app.variable.motor_control.setMode(app.variable.open_loop_mode
 										 ? MotorControlMode::OpenLoop
 										 : MotorControlMode::Current);
 	init_filters_and_regulators(app);
 
 	printk("open-loop mode %s, theta_ol = %.4f rad, omega_ol = %.2f rad/s, vq_ol = %.2f V\n",
-		   app.runtime.open_loop_mode ? "enabled" : "disabled",
-		   (double)app.runtime.theta_ol,
-		   (double)app.runtime.omega_ol,
-		   (double)app.runtime.vq_ol);
+		   app.variable.open_loop_mode ? "enabled" : "disabled",
+		   (double)app.variable.theta_ol,
+		   (double)app.variable.omega_ol,
+		   (double)app.variable.vq_ol);
 }
 
 void adjust_speed_loop_kp(AppContext &app, float32_t delta)
 {
-	app.runtime.speed_Kp += delta;
-	if (app.runtime.speed_Kp < 1.0e-6F) {
-		app.runtime.speed_Kp = 1.0e-6F;
+	app.variable.speed_Kp += delta;
+	if (app.variable.speed_Kp < 1.0e-6F) {
+		app.variable.speed_Kp = 1.0e-6F;
 	}
-	app.runtime.motor_control.setSpeedLoopKp(app.runtime.speed_Kp);
-	app.runtime.motor_control.setSpeedLoopKi(app.runtime.speed_Ki);
-	app.runtime.motor_control.reset();
-	app.runtime.speed_Kp = app.runtime.motor_control.getSpeedLoopKp();
-	app.runtime.speed_Ki = app.runtime.motor_control.getSpeedLoopKi();
-	app.runtime.speed_Ti = app.runtime.motor_control.getSpeedLoopTi();
+	app.variable.motor_control.setSpeedLoopKp(app.variable.speed_Kp);
+	app.variable.motor_control.setSpeedLoopKi(app.variable.speed_Ki);
+	app.variable.motor_control.reset();
+	app.variable.speed_Kp = app.variable.motor_control.getSpeedLoopKp();
+	app.variable.speed_Ki = app.variable.motor_control.getSpeedLoopKi();
+	app.variable.speed_Ti = app.variable.motor_control.getSpeedLoopTi();
 	printk("speed-loop Kp = %.4f, Ki = %.4f, Ti = %.4f\n",
-		   (double)app.runtime.speed_Kp,
-		   (double)app.runtime.speed_Ki,
-		   (double)app.runtime.speed_Ti);
+		   (double)app.variable.speed_Kp,
+		   (double)app.variable.speed_Ki,
+		   (double)app.variable.speed_Ti);
 }
 
 void adjust_speed_loop_ki(AppContext &app, float32_t delta)
 {
-	app.runtime.speed_Ki += delta;
-	if (app.runtime.speed_Ki < 1.0e-6F) {
-		app.runtime.speed_Ki = 1.0e-6F;
+	app.variable.speed_Ki += delta;
+	if (app.variable.speed_Ki < 1.0e-6F) {
+		app.variable.speed_Ki = 1.0e-6F;
 	}
-	app.runtime.motor_control.setSpeedLoopKi(app.runtime.speed_Ki);
-	app.runtime.motor_control.reset();
-	app.runtime.speed_Kp = app.runtime.motor_control.getSpeedLoopKp();
-	app.runtime.speed_Ki = app.runtime.motor_control.getSpeedLoopKi();
-	app.runtime.speed_Ti = app.runtime.motor_control.getSpeedLoopTi();
+	app.variable.motor_control.setSpeedLoopKi(app.variable.speed_Ki);
+	app.variable.motor_control.reset();
+	app.variable.speed_Kp = app.variable.motor_control.getSpeedLoopKp();
+	app.variable.speed_Ki = app.variable.motor_control.getSpeedLoopKi();
+	app.variable.speed_Ti = app.variable.motor_control.getSpeedLoopTi();
 	printk("speed-loop Kp = %.4f, Ki = %.4f, Ti = %.4f\n",
-		   (double)app.runtime.speed_Kp,
-		   (double)app.runtime.speed_Ki,
-		   (double)app.runtime.speed_Ti);
+		   (double)app.variable.speed_Kp,
+		   (double)app.variable.speed_Ki,
+		   (double)app.variable.speed_Ti);
 }
