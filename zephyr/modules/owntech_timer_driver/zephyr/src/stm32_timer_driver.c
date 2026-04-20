@@ -32,6 +32,80 @@
 #include "stm32_timer_driver.h"
 
 
+static uint32_t timer_stm32_get_encoder_index_polarity(
+	encoder_index_polarity_t polarity)
+{
+	switch (polarity)
+	{
+		case encoder_index_polarity_inverted:
+			return LL_TIM_ETR_POLARITY_INVERTED;
+
+		case encoder_index_polarity_noninverted:
+		default:
+			return LL_TIM_ETR_POLARITY_NONINVERTED;
+	}
+}
+
+static uint32_t timer_stm32_get_encoder_index_configuration(
+	encoder_index_configuration_t configuration)
+{
+	uint32_t ll_configuration = LL_TIM_INDEX_UP_DOWN | LL_TIM_INDEX_ALL;
+
+	switch (configuration)
+	{
+		case encoder_index_configuration_a_low_b_high:
+			ll_configuration |= LL_TIM_INDEX_POSITION_DOWN_UP;
+			break;
+
+		case encoder_index_configuration_a_high_b_low:
+			ll_configuration |= LL_TIM_INDEX_POSITION_UP_DOWN;
+			break;
+
+		case encoder_index_configuration_a_high_b_high:
+			ll_configuration |= LL_TIM_INDEX_POSITION_UP_UP;
+			break;
+
+		case encoder_index_configuration_a_low_b_low:
+		default:
+			ll_configuration |= LL_TIM_INDEX_POSITION_DOWN_DOWN;
+			break;
+	}
+
+	return ll_configuration;
+}
+
+static void timer_stm32_apply_encoder_index_configuration(
+	TIM_TypeDef* tim_dev,
+	const struct timer_config_t* config)
+{
+	if ((tim_dev == NULL) || (config == NULL))
+	{
+		return;
+	}
+
+	if (config->timer_encoder_index_enable == encoder_index_enabled)
+	{
+		LL_TIM_ConfigETR(
+			tim_dev,
+			timer_stm32_get_encoder_index_polarity(
+				config->timer_encoder_index_polarity),
+			LL_TIM_ETR_PRESCALER_DIV1,
+			LL_TIM_ETR_FILTER_FDIV1);
+
+		LL_TIM_ConfigIDX(
+			tim_dev,
+			timer_stm32_get_encoder_index_configuration(
+				config->timer_encoder_index_configuration));
+
+		LL_TIM_EnableEncoderIndex(tim_dev);
+	}
+	else
+	{
+		LL_TIM_DisableEncoderIndex(tim_dev);
+	}
+}
+
+
 static int timer_stm32_init(const struct device* dev)
 {
 	TIM_TypeDef* tim_dev =
@@ -187,6 +261,8 @@ void timer_stm32_config(const struct device* dev,
 
 			LL_GPIO_SetPinPull(GPIOB,LL_GPIO_PIN_7,pull);
 			LL_GPIO_SetAFPin_0_7(GPIOB,LL_GPIO_PIN_7,LL_GPIO_AF_2);
+
+			timer_stm32_apply_encoder_index_configuration(tim_dev, config);
 		}
 	} 
 	else if (tim_dev == TIM3)
@@ -256,6 +332,8 @@ void timer_stm32_config(const struct device* dev,
 
 			LL_GPIO_SetPinPull(GPIOC,LL_GPIO_PIN_7,pull);
 			LL_GPIO_SetAFPin_0_7(GPIOC,LL_GPIO_PIN_7,LL_GPIO_AF_2);
+
+			timer_stm32_apply_encoder_index_configuration(tim_dev, config);
 		}
 	}
 }
@@ -364,17 +442,6 @@ uint32_t timer_stm32_get_count(const struct device* dev)
 	 LL_TIM_SetTriggerOutput(TIM3, LL_TIM_TRGO_RESET);
 	 LL_TIM_DisableMasterSlaveMode(TIM3);
 
-	 LL_TIM_ConfigETR(TIM3,
-					  LL_TIM_ETR_POLARITY_INVERTED,
-					  LL_TIM_ETR_PRESCALER_DIV1,
-					  LL_TIM_ETR_FILTER_FDIV16_N5);
- 
-	 LL_TIM_ConfigIDX(
-		 TIM3,
-		 LL_TIM_INDEX_POSITION_UP_UP|LL_TIM_INDEX_UP_DOWN|LL_TIM_INDEX_ALL
-	 );
- 
-	 LL_TIM_EnableEncoderIndex(TIM3);
  }
  
 
@@ -410,17 +477,6 @@ void init_timer_4()
 	LL_TIM_IC_SetPolarity(TIM4, LL_TIM_CHANNEL_CH2, LL_TIM_IC_POLARITY_RISING);
 	LL_TIM_SetTriggerOutput(TIM4, LL_TIM_TRGO_RESET);
 	LL_TIM_DisableMasterSlaveMode(TIM4);
-	LL_TIM_ConfigETR(TIM4,
-					 LL_TIM_ETR_POLARITY_NONINVERTED,
-					 LL_TIM_ETR_PRESCALER_DIV1,
-					 LL_TIM_ETR_FILTER_FDIV1);
-
-	LL_TIM_ConfigIDX(
-		TIM4,
-		LL_TIM_INDEX_ALL|LL_TIM_INDEX_POSITION_DOWN_DOWN|LL_TIM_INDEX_UP_DOWN
-	);
-
-	LL_TIM_EnableEncoderIndex(TIM4);
 }
 
 void init_timer_6()
