@@ -17,6 +17,7 @@ The sensor selection is done entirely from the devicetree overlay. `src/main.cpp
 - `src/main.cpp`: state machine, task entry points, and runtime sequencing
 - `src/app.h`: helper declarations plus the shared `AppContext`
 - `src/app.cpp`: helper implementations used by `main.cpp`
+- `owntech/lib/USB/serial_print_channels`: reusable serial print-channel library used by the example
 
 `AppContext` is intentionally split into:
 
@@ -156,6 +157,7 @@ flowchart TD
 - `u`: increase speed reference
 - `d`: decrease speed reference
 - `r`: dump scope data
+- `e`: print the live-stream header row
 - `q`: restart scope acquisition
 - `m`: toggle buffered scope replay
 

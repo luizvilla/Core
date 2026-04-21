@@ -30,6 +30,7 @@
 
 #include "app.h"
 
+#include "SerialPrintChannels.h"
 #include "SpinAPI.h"
 #include "TaskAPI.h"
 #include "transform.h"
@@ -41,8 +42,10 @@ void loop_critical_task();
 void application_task();
 
 static void configure_scope();
+static void configure_print_channels();
 
 static AppContext app;
+static SerialPrintChannels print;
 
 static constexpr uint16_t SCOPE_SIZE = 512U;
 static ScopeMimicry scope(SCOPE_SIZE, 19);
@@ -50,6 +53,7 @@ static ScopeMimicry scope(SCOPE_SIZE, 19);
 static enum control_state_mode control_state;
 static float32_t control_state_f;
 static uint8_t asked_mode = IDLEMODE;
+static bool print_header_requested = false;
 
 bool mytrigger()
 {
@@ -82,6 +86,29 @@ static void configure_scope()
 	scope.start();
 }
 
+static void configure_print_channels()
+{
+	print.clearChannels();
+	print.setCapacity(16U);
+	print.setSeparator(":");
+	print.connectChannel(app.variable.V_high, "VH");
+	print.connectChannel(app.variable.Iq_max, "IQM");
+	print.connectChannel(app.variable.speed_ref, "S_ref");
+	print.connectChannel(app.variable.w_meas, "w_meas");
+	print.connectChannel(app.variable.I1_offset, "I1_offset");
+	print.connectChannel(control_state_f, "control_state");
+	print.connectChannel(app.variable.encoder_count_f, "encoder_count");
+	print.connectChannel(app.variable.encoder_delta_count_f, "encoder_delta_count");
+	print.connectChannel(app.variable.electrical_offset_print, "electrical_offset");
+	print.connectChannel(app.variable.open_loop_mode_print, "open_loop_mode");
+	print.connectChannel(app.variable.angle_filtered, "angle_filtered");
+	print.connectChannel(app.variable.theta_ol, "theta_ol");
+	print.connectChannel(app.variable.omega_ol, "omega_ol");
+	print.connectChannel(app.variable.Idq_ref.q, "Iq_ref");
+	print.connectChannel(app.variable.vq_ol, "vq_ol");
+	print.connectChannel(app.variable.speed_meas_print, "speed_meas");
+}
+
 void setup_routine()
 {
 	initialize_variable_defaults(app);
@@ -90,11 +117,12 @@ void setup_routine()
 	shield.sensors.enableDefaultOwnverterSensors();
 	app.variable.position_sensor_initialized = shield.position.initDefault();
 	if (!app.variable.position_sensor_initialized) {
-		printk("ERROR: failed to initialize the default position sensor from app.overlay.\n");
+		print.message("ERROR: failed to initialize the default position sensor from app.overlay.");
 	}
 	app.variable.active_position_type = shield.position.getActiveSensorType();
 
 	configure_scope();
+	configure_print_channels();
 
 	init_motor_control(app);
 	init_filters_and_regulators(app);
@@ -119,22 +147,26 @@ void loop_background_task()
 	app.variable.received_serial_char = console_getchar();
 	switch (app.variable.received_serial_char) {
 	case 'p':
-		printk("power asked");
+		print.message("power asked");
 		asked_mode = POWERMODE;
 		scope.start();
 		break;
 	case 'i':
-		printk("idle asked");
+		print.message("idle asked");
 		asked_mode = IDLEMODE;
 		app.variable.speed_ref = 0.0F;
 		break;
 	case 'o':
-		printk("offset recalibration asked");
+		print.message("offset recalibration asked");
 		restart_offset_calibration(app, asked_mode, IDLEMODE, control_state);
 		spin.led.turnOn();
 		break;
 	case 'r':
 		app.variable.is_downloading = true;
+		break;
+	case 'e':
+	case 'E':
+		print_header_requested = true;
 		break;
 	case 'u':
 		app.variable.speed_ref += app.setup.speed_ref_step;
@@ -175,22 +207,22 @@ void loop_background_task()
 	case 'j':
 	case 'J':
 		app.variable.omega_ol -= app.setup.open_loop_speed_step;
-		printk("open-loop speed = %.2f rad/s\n", (double)app.variable.omega_ol);
+		print.message("open-loop speed = %.2f rad/s", (double)app.variable.omega_ol);
 		break;
 	case 'k':
 	case 'K':
 		app.variable.omega_ol += app.setup.open_loop_speed_step;
-		printk("open-loop speed = %.2f rad/s\n", (double)app.variable.omega_ol);
+		print.message("open-loop speed = %.2f rad/s", (double)app.variable.omega_ol);
 		break;
 	case 'n':
 	case 'N':
 		app.variable.vq_ol -= app.setup.open_loop_vq_step;
-		printk("open-loop vq = %.2f V\n", (double)app.variable.vq_ol);
+		print.message("open-loop vq = %.2f V", (double)app.variable.vq_ol);
 		break;
 	case 'b':
 	case 'B':
 		app.variable.vq_ol += app.setup.open_loop_vq_step;
-		printk("open-loop vq = %.2f V\n", (double)app.variable.vq_ol);
+		print.message("open-loop vq = %.2f V", (double)app.variable.vq_ol);
 		break;
 	case 't':
 	case 'T':
@@ -232,22 +264,12 @@ void loop_background_task()
 void application_task()
 {
 	if (!app.variable.memory_print) {
-		printk("%7.2f:", (double)app.variable.V_high);
-		printk("%7.2f:", (double)app.variable.Iq_max);
-		printk("%7.2f:", (double)app.variable.speed_ref);
-		printk("%7.2f:", (double)app.variable.w_meas);
-		printk("%7.2f:", (double)app.variable.I1_offset);
-		printk("%7d:", control_state);
-		printk("%7u:", app.variable.encoder_count);
-		printk("%7ld:", (long)app.variable.encoder_delta_count);
-		printk("%7.2f:", (double)shield.position.getElectricalOffset());
-		printk("%7d:", shield.position.getDirectionSign());
-		printk("%7d:", app.variable.open_loop_mode ? 1 : 0);
-		printk("%7.2f:", (double)app.variable.angle_filtered);
-		printk("%7.2f:", (double)app.variable.theta_ol);
-		printk("%7.2f:", (double)app.variable.omega_ol);
-		printk("%7.2f:", (double)app.variable.Idq_ref.q);
-		printk("%7.2f\n", (double)app.variable.vq_ol);
+		if (print_header_requested) {
+			print.printHeader();
+			print_header_requested = false;
+		} else {
+			print.printValues();
+		}
 	} else {
 		app.variable.k_app_idx = (app.variable.k_app_idx + 1U) % SCOPE_SIZE;
 		printk("%.2f:", (double)scope.get_channel_value(app.variable.k_app_idx, 0));
