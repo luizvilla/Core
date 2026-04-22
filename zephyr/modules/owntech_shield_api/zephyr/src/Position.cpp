@@ -34,14 +34,23 @@
 #define POSITION_DEFAULT_HALL_INTERPOLATION HALL_INTERPOLATION_NONE
 #define POSITION_DEFAULT_HALL_SECTOR_TABLE {5U, 1U, 0U, 3U, 4U, 2U}
 
+#define POSITION_GPIO_PORT(node_id, prop) \
+	(DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(node_id, prop, 0), DT_NODELABEL(gpioa)) ? PA : \
+	 DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(node_id, prop, 0), DT_NODELABEL(gpiob)) ? PB : \
+	 DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(node_id, prop, 0), DT_NODELABEL(gpioc)) ? PC : \
+	 DT_SAME_NODE(DT_GPIO_CTLR_BY_IDX(node_id, prop, 0), DT_NODELABEL(gpiod)) ? PD : 0)
+
+#define POSITION_GPIO_ENCODE(node_id, prop) \
+	(POSITION_GPIO_PORT(node_id, prop) | DT_GPIO_PIN_BY_IDX(node_id, prop, 0))
+
 #define POSITION_HALL_A(node_id) \
-	DT_GPIO_PIN_BY_IDX(node_id, hall_a_gpios, 0)
+	POSITION_GPIO_ENCODE(node_id, hall_a_gpios)
 
 #define POSITION_HALL_B(node_id) \
-	DT_GPIO_PIN_BY_IDX(node_id, hall_b_gpios, 0)
+	POSITION_GPIO_ENCODE(node_id, hall_b_gpios)
 
 #define POSITION_HALL_C(node_id) \
-	DT_GPIO_PIN_BY_IDX(node_id, hall_c_gpios, 0)
+	POSITION_GPIO_ENCODE(node_id, hall_c_gpios)
 
 #define POSITION_TIMER_FROM_NODE(timer_node_id) \
 	(DT_SAME_NODE(timer_node_id, DT_NODELABEL(timers4)) ? TIMER4 : TIMER3)
