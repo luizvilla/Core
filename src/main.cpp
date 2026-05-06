@@ -202,6 +202,27 @@ float32_t saturate(const float32_t x, float32_t min, float32_t max) {
     return x;
 }
 
+float32_t clamp_duty(float32_t duty)
+{
+    return saturate(duty, DUTY_MIN, DUTY_MAX);
+}
+
+float32_t control_bus_voltage()
+{
+    if (V_high_filt > 1.0F) {
+        return V_high_filt;
+    }
+    return Udc;
+}
+
+void apply_complementary_duty(float32_t duty)
+{
+    duty_cycle_1 = clamp_duty(duty);
+    duty_cycle_2 = clamp_duty(1.0F - duty);
+    shield.power.setDutyCycle(LEG1, duty_cycle_1);
+    shield.power.setDutyCycle(LEG2, duty_cycle_2);
+}
+
 float32_t sign(float32_t x, float32_t tol=1e-3) {
     if (x > tol) {
         return 1.0F;
@@ -320,7 +341,7 @@ void setup_routine()
 
     Idq_ref.d = 0.0;
     Idq_ref.q = 0.0;
-    Vdq_ref.d = 0.0;
+    Vdq_ref.d = Vgrid_amplitude_ref;
     Vdq_ref.q = 0.0;
 
     Idq_ref_max.d = 8.0;
@@ -697,60 +718,67 @@ void loop_critical_task()
         inverter.setVBus(V_high_filt);
 
         if (local_mode == FORMING ){
-            inverter.setVdqRef(Vdq_ref);
+            if (teaching_mode == OPEN_LOOP) {
+                delta_duty_cycle = 0.5F + local_vgrid / (2.0F * control_bus_voltage());
+                apply_complementary_duty(delta_duty_cycle);
+            } else {
+                inverter.setVBus(control_bus_voltage());
+                inverter.setVdqRef(Vdq_ref);
+                delta_duty_cycle = inverter.calculateDuty(local_vgrid, local_igrid);
+                apply_complementary_duty(delta_duty_cycle);
+            }
         }else{
             inverter.setIdqRef(Idq_ref);
-        }
-
-        delta_duty_cycle = inverter.calculateDuty(Vgrid_meas, Igrid_meas);
+            delta_duty_cycle = inverter.calculateDuty(Vgrid_meas, Igrid_meas);
 
 
-        if (local_mode == FOLLOWING ){
-            if(pwm_enable = false)
-            {        
-                duty_cycle_offset = VN_meas/V_high_filt;        
-            } 
-            else
-            {
-                if (duty_cycle_offset < 0.5F) {
-                    duty_cycle_offset = rate_limiter(0.5F, duty_cycle_offset, 1.0F); // ramp of 0.1 duty / 100 ms = 0.1/0.1 = 1e-1/1e-1 = 1
-                    
-                } else {
-                    duty_cycle_offset = 0.5F;
+            if (local_mode == FOLLOWING ){
+                if(pwm_enable = false)
+                {        
+                    duty_cycle_offset = VN_meas/V_high_filt;        
+                } 
+                else
+                {
+                    if (duty_cycle_offset < 0.5F) {
+                        duty_cycle_offset = rate_limiter(0.5F, duty_cycle_offset, 1.0F); // ramp of 0.1 duty / 100 ms = 0.1/0.1 = 1e-1/1e-1 = 1
+                        
+                    } else {
+                        duty_cycle_offset = 0.5F;
+                    }
+
                 }
-
+            } else {
+                duty_cycle_offset = 0.5F;
             }
-        } else {
-            duty_cycle_offset = 0.5F;
-        }
 
-        duty_cycle_1 = delta_duty_cycle + duty_cycle_offset;
-        duty_cycle_2 = - delta_duty_cycle + duty_cycle_offset ;
-        
-        if (local_mode == FOLLOWING && !pwm_enable)
-        {
-            power_counter++;
-            if(power_counter>2000){
-                shield.power.start(ALL);
-                pwm_enable = true;
+            duty_cycle_1 = delta_duty_cycle + duty_cycle_offset;
+            duty_cycle_2 = - delta_duty_cycle + duty_cycle_offset ;
+            
+            if (local_mode == FOLLOWING && !pwm_enable)
+            {
+                power_counter++;
+                if(power_counter>2000){
+                    shield.power.start(ALL);
+                    pwm_enable = true;
+                }
             }
+
+            if(duty_cycle_1>0.5){
+                duty_cycle_1 += 0.02;
+            } else {
+                duty_cycle_1 -= 0.02;
+            }
+
+            if(duty_cycle_2>0.5){
+                duty_cycle_2 += 0.02;
+            } else {
+                duty_cycle_2 -= 0.02;
+            }
+
+
+            shield.power.setDutyCycle(LEG1, duty_cycle_1);
+            shield.power.setDutyCycle(LEG2, duty_cycle_2);
         }
-
-        if(duty_cycle_1>0.5){
-            duty_cycle_1 += 0.02;
-        } else {
-            duty_cycle_1 -= 0.02;
-        }
-
-        if(duty_cycle_2>0.5){
-            duty_cycle_2 += 0.02;
-        } else {
-            duty_cycle_2 -= 0.02;
-        }
-
-
-        shield.power.setDutyCycle(LEG1, duty_cycle_1);
-        shield.power.setDutyCycle(LEG2, duty_cycle_2);
 
     }
 
