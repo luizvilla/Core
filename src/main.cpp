@@ -50,6 +50,7 @@ void setup_routine();           /* Setups the hardware and software of the syste
 void loop_communication_task(); // code to be executed in the slow communication task
 void loop_application_task();   // Code to be executed in the background task
 void loop_critical_task();     // Code to be executed in real time in the critical task
+void configure_teaching_mode(uint8_t requested_mode);
 
 //--------------USER VARIABLES DECLARATIONS-------------------
 static const uint32_t control_task_period = 100; //[us] period of the control task
@@ -106,6 +107,16 @@ static bool is_net_synchronized;
 static float32_t omega;
 
 static inverter_mode local_mode = FORMING;
+enum TeachingMode
+{
+    OPEN_LOOP = 1,
+    GRID_FORMING_LOCAL_SINE = 2,
+    GRID_FOLLOWING_LOCAL_PLL = 3,
+    GRID_FOLLOWING_MEASURED_PLL = 4
+};
+
+static TeachingMode teaching_mode = GRID_FORMING_LOCAL_SINE;
+static float32_t teaching_mode_scope = GRID_FORMING_LOCAL_SINE;
 
 /* duty_cycle*/
 static float32_t delta_duty_cycle;// [No unit]
@@ -141,7 +152,7 @@ static float32_t desync_counter_scope;
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
-static ScopeMimicry scope(1024, 21);
+static ScopeMimicry scope(1024, 22);
 static bool is_downloading;
 static bool trigger = false;
 //---------------------------------------------------------------
@@ -214,6 +225,50 @@ void update_teaching_sine()
     local_igrid = local_vgrid / LOAD_RESISTANCE;
 }
 
+inverter_mode inverter_mode_for_teaching_mode(TeachingMode requested_mode)
+{
+    if (requested_mode == GRID_FOLLOWING_LOCAL_PLL ||
+        requested_mode == GRID_FOLLOWING_MEASURED_PLL)
+    {
+        return FOLLOWING;
+    }
+    return FORMING;
+}
+
+void stop_pwm_outputs()
+{
+    if (pwm_enable)
+    {
+        shield.power.stop(ALL);
+        pwm_enable = false;
+    }
+}
+
+void configure_teaching_mode(uint8_t requested_mode)
+{
+    if (requested_mode < OPEN_LOOP || requested_mode > GRID_FOLLOWING_MEASURED_PLL)
+    {
+        return;
+    }
+
+    teaching_mode = static_cast<TeachingMode>(requested_mode);
+    teaching_mode_scope = static_cast<float32_t>(requested_mode);
+    local_mode = inverter_mode_for_teaching_mode(teaching_mode);
+    mode = IDLEMODE;
+    mode_asked = IDLEMODE;
+    is_net_synchronized = false;
+    sync_counter = 0;
+    desync_counter = 0;
+    power_counter = 0;
+    delta_duty_cycle = 0.0F;
+    duty_cycle_1 = 0.5F;
+    duty_cycle_2 = 0.5F;
+    duty_cycle_offset = 0.5F;
+    inverter.init(local_mode, Udc, Vgrid_amplitude_ref, w0, Ts);
+    inverter.setPowerOn(false);
+    stop_pwm_outputs();
+}
+
 //--------------SETUP FUNCTIONS-------------------------------
 
 /**
@@ -247,6 +302,7 @@ void setup_routine()
 	scope.connectChannel(sine, "sine");
 	scope.connectChannel(local_vgrid, "local_vgrid");
 	scope.connectChannel(local_igrid, "local_igrid");
+	scope.connectChannel(teaching_mode_scope, "teaching_mode");
     scope.connectChannel(Vdq.q, "Vq_in");
 	scope.connectChannel(Vdq.d, "Vd_in");
     scope.connectChannel(Vdq_output.q, "Vq_out");
@@ -317,6 +373,10 @@ void loop_communication_task()
             printk("|     ------- grid forming ------        |\n");
             printk("|     press i : idle mode                |\n");
             printk("|     press p : power mode               |\n");
+            printk("|     press 1 : open-loop sine PWM       |\n");
+            printk("|     press 2 : forming, local sine      |\n");
+            printk("|     press 3 : following, local PLL     |\n");
+            printk("|     press 4 : following, measured PLL  |\n");
             printk("|     press d : vdref up by 5V           |\n");
             printk("|     press c : vdref down by 5V         |\n");
             printk("|     press u : vdref up by 1V           |\n");
@@ -334,6 +394,22 @@ void loop_communication_task()
                     scope.start();
                     mode_asked = POWERMODE;
                 }
+            break;
+        case '1':
+            configure_teaching_mode(OPEN_LOOP);
+            printk("open-loop sine PWM\n");
+            break;
+        case '2':
+            configure_teaching_mode(GRID_FORMING_LOCAL_SINE);
+            printk("grid forming with local sine\n");
+            break;
+        case '3':
+            configure_teaching_mode(GRID_FOLLOWING_LOCAL_PLL);
+            printk("grid following PLL with local sine\n");
+            break;
+        case '4':
+            configure_teaching_mode(GRID_FOLLOWING_MEASURED_PLL);
+            printk("grid following PLL with measurements\n");
             break;
         case 'u':
                 if(local_mode == FORMING){
