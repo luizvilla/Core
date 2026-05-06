@@ -97,11 +97,17 @@ void loop_communication_task();
 void loop_application_task();
 void loop_critical_task();
 
+/**
+ * @brief Reports whether the scope capture should trigger.
+ */
 bool a_trigger()
 {
     return trigger;
 }
 
+/**
+ * @brief Clamps a floating-point value inside the requested range.
+ */
 float32_t saturate(float32_t value, float32_t min, float32_t max)
 {
     if (value > max) {
@@ -113,6 +119,9 @@ float32_t saturate(float32_t value, float32_t min, float32_t max)
     return value;
 }
 
+/**
+ * @brief Returns the measured DC bus voltage, or a fallback before sensing is valid.
+ */
 float32_t control_bus_voltage()
 {
     if (V_high_filt > 1.0F) {
@@ -121,11 +130,17 @@ float32_t control_bus_voltage()
     return DC_BUS_FALLBACK;
 }
 
+/**
+ * @brief Clamps one duty-cycle command to the allowed modulation range.
+ */
 float32_t clamp_duty(float32_t duty)
 {
     return saturate(duty, DUTY_MIN, DUTY_MAX);
 }
 
+/**
+ * @brief Starts both PWM legs once and records the output state.
+ */
 void start_pwm_outputs()
 {
     if (!pwm_enable) {
@@ -134,6 +149,9 @@ void start_pwm_outputs()
     }
 }
 
+/**
+ * @brief Stops both PWM legs once and records the output state.
+ */
 void stop_pwm_outputs()
 {
     if (pwm_enable) {
@@ -142,6 +160,9 @@ void stop_pwm_outputs()
     }
 }
 
+/**
+ * @brief Applies clamped complementary duty cycles to the H-bridge legs.
+ */
 void apply_complementary_duty(float32_t duty)
 {
     duty_cycle_1 = clamp_duty(duty);
@@ -150,6 +171,9 @@ void apply_complementary_duty(float32_t duty)
     shield.power.setDutyCycle(LEG2, duty_cycle_2);
 }
 
+/**
+ * @brief Advances the local teaching oscillator and derives voltage/current inputs.
+ */
 void update_teaching_sine()
 {
     teaching_theta = ot_modulo_2pi(teaching_theta + W0 * TS);
@@ -158,6 +182,9 @@ void update_teaching_sine()
     local_igrid = local_vgrid / LOAD_RESISTANCE;
 }
 
+/**
+ * @brief Selects the active PLL voltage/current inputs from local or measured signals.
+ */
 void update_pll_inputs()
 {
     if (following_input_mode == LOCAL_SINE_INPUT) {
@@ -169,12 +196,18 @@ void update_pll_inputs()
     }
 }
 
+/**
+ * @brief Checks whether the PLL frequency estimate is close enough to 50 Hz.
+ */
 bool following_frequency_in_range()
 {
     return omega <= W0 + SYNC_POWER_TOLERANCE &&
            omega >= W0 - SYNC_POWER_TOLERANCE;
 }
 
+/**
+ * @brief Copies the inverter controller diagnostics into scope variables.
+ */
 void refresh_inverter_data()
 {
     Vdq = inverter.getVdq();
@@ -186,6 +219,9 @@ void refresh_inverter_data()
     sync_scope = is_net_synchronized ? 1.0F : 0.0F;
 }
 
+/**
+ * @brief Switches the PLL input source and resets synchronization state safely.
+ */
 void configure_following_input(FollowingInputMode requested_mode)
 {
     following_input_mode = requested_mode;
@@ -203,6 +239,9 @@ void configure_following_input(FollowingInputMode requested_mode)
     stop_pwm_outputs();
 }
 
+/**
+ * @brief Streams a completed ScopeMimicry capture over the serial console.
+ */
 void dump_scope_datas(ScopeMimicry &scope_to_dump)
 {
     scope_to_dump.reset_dump();
@@ -214,6 +253,9 @@ void dump_scope_datas(ScopeMimicry &scope_to_dump)
     printk("end record\n");
 }
 
+/**
+ * @brief Returns to idle when PLL synchronization is lost for a sustained period.
+ */
 void handle_following_desync()
 {
     if (is_net_synchronized) {
@@ -232,11 +274,17 @@ void handle_following_desync()
     }
 }
 
+/**
+ * @brief Adjusts the following-mode d-axis current reference.
+ */
 void adjust_current_reference(float32_t step)
 {
     Idq_ref.d = saturate(Idq_ref.d + step, -0.1F, 8.0F);
 }
 
+/**
+ * @brief Registers scope channels and starts capture for the grid-following example.
+ */
 void setup_scope()
 {
     scope.connectChannel(I1_low_value, "I1_low_value");
@@ -269,6 +317,9 @@ void setup_scope()
     scope.start();
 }
 
+/**
+ * @brief Reads the latest sensor values and derives grid voltage/current measurements.
+ */
 void read_measurements()
 {
     meas_data = shield.sensors.getLatestValue(I1_LOW);
@@ -291,6 +342,9 @@ void read_measurements()
     Igrid_meas = I1_low_value;
 }
 
+/**
+ * @brief Checks both measured currents against the protection threshold.
+ */
 bool overcurrent_detected()
 {
     return I1_low_value > MAX_CURRENT ||
@@ -299,6 +353,9 @@ bool overcurrent_detected()
            I2_low_value < -MAX_CURRENT;
 }
 
+/**
+ * @brief Runs PLL acquisition with PWM disabled until synchronization is valid.
+ */
 void run_startup_mode()
 {
     inverter.setVBus(control_bus_voltage());
@@ -311,6 +368,9 @@ void run_startup_mode()
     stop_pwm_outputs();
 }
 
+/**
+ * @brief Runs synchronized following control and applies PWM only while locked.
+ */
 void run_power_mode()
 {
     inverter.setVBus(control_bus_voltage());
@@ -333,6 +393,9 @@ void run_power_mode()
     start_pwm_outputs();
 }
 
+/**
+ * @brief Configures hardware, scope capture, inverter control, and task scheduling.
+ */
 void setup_routine()
 {
     spin.pwm.initFixedFrequency(50000);
@@ -359,6 +422,9 @@ void setup_routine()
     task.startCritical();
 }
 
+/**
+ * @brief Handles serial commands for PLL input selection, tuning, and scope capture.
+ */
 void loop_communication_task()
 {
     while (1) {
@@ -419,6 +485,9 @@ void loop_communication_task()
     }
 }
 
+/**
+ * @brief Runs the low-rate state machine and status reporting.
+ */
 void loop_application_task()
 {
     switch (mode) {
@@ -472,6 +541,9 @@ void loop_application_task()
     task.suspendBackgroundMs(100);
 }
 
+/**
+ * @brief Runs the 10 kHz following control loop, protection checks, and PWM updates.
+ */
 void loop_critical_task()
 {
     critical_task_counter++;
@@ -500,6 +572,9 @@ void loop_critical_task()
     scope.acquire();
 }
 
+/**
+ * @brief Application entry point.
+ */
 int main(void)
 {
     setup_routine();
