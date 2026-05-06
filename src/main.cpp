@@ -329,6 +329,11 @@ void handle_following_desync()
     }
 }
 
+bool following_frequency_in_range()
+{
+    return omega <= w0 + sync_power_tolerance && omega >= w0 - sync_power_tolerance;
+}
+
 //--------------SETUP FUNCTIONS-------------------------------
 
 /**
@@ -714,7 +719,7 @@ void loop_critical_task()
             delta_duty_cycle = inverter.calculateDuty(following_vgrid_input(), following_igrid_input());
             Vdq = inverter.getVdq();
             omega = inverter.getw();
-            is_net_synchronized = inverter.getSync();
+            is_net_synchronized = inverter.getSync() && following_frequency_in_range();
 
         }
     }
@@ -724,25 +729,6 @@ void loop_critical_task()
         // trigger = true;
         // theta = ot_modulo_2pi(theta + w0 * Ts);
         // sine = (1 + 0.1*Vdq_ref.d*ot_sin(theta))/2;
-
-        if(local_mode == FOLLOWING && teaching_mode != GRID_FOLLOWING_LOCAL_PLL){
-            is_net_synchronized = omega <= w0 + sync_power_tolerance && 
-                                omega >= w0 -sync_power_tolerance; 
-
-            if (is_net_synchronized == false)
-            {
-                desync_counter++;
-                desync_counter_scope = (float32_t)desync_counter;
-                if(desync_counter > 200){
-                    desync_counter = 0;
-                    sync_counter = 0;
-                    mode_asked = IDLEMODE;
-                    mode = IDLEMODE;
-                    printk("System no longer synchronized \n");
-                }                
-            }
-        }
-
 
         inverter.setVBus(V_high_filt);
 
@@ -757,69 +743,25 @@ void loop_critical_task()
                 apply_complementary_duty(delta_duty_cycle);
             }
         }else{
+            inverter.setVBus(control_bus_voltage());
             inverter.setIdqRef(Idq_ref);
-            if (teaching_mode == GRID_FOLLOWING_LOCAL_PLL) {
-                inverter.setVBus(control_bus_voltage());
-                inverter.setPowerOn(true);
-                delta_duty_cycle = inverter.calculateDuty(local_vgrid, local_igrid);
-                is_net_synchronized = inverter.getSync();
-                handle_following_desync();
+            inverter.setPowerOn(true);
+            delta_duty_cycle = inverter.calculateDuty(following_vgrid_input(), following_igrid_input());
+            omega = inverter.getw();
+            is_net_synchronized = inverter.getSync() && following_frequency_in_range();
+            handle_following_desync();
+            if (is_net_synchronized)
+            {
                 apply_complementary_duty(delta_duty_cycle);
                 if (!pwm_enable)
                 {
                     shield.power.start(ALL);
                     pwm_enable = true;
                 }
-            } else {
-                delta_duty_cycle = inverter.calculateDuty(Vgrid_meas, Igrid_meas);
-
-
-                if (local_mode == FOLLOWING ){
-                    if(pwm_enable = false)
-                    {        
-                        duty_cycle_offset = VN_meas/V_high_filt;        
-                    } 
-                    else
-                    {
-                        if (duty_cycle_offset < 0.5F) {
-                            duty_cycle_offset = rate_limiter(0.5F, duty_cycle_offset, 1.0F); // ramp of 0.1 duty / 100 ms = 0.1/0.1 = 1e-1/1e-1 = 1
-                            
-                        } else {
-                            duty_cycle_offset = 0.5F;
-                        }
-
-                    }
-                } else {
-                    duty_cycle_offset = 0.5F;
-                }
-
-                duty_cycle_1 = delta_duty_cycle + duty_cycle_offset;
-                duty_cycle_2 = - delta_duty_cycle + duty_cycle_offset ;
-                
-                if (local_mode == FOLLOWING && !pwm_enable)
-                {
-                    power_counter++;
-                    if(power_counter>2000){
-                        shield.power.start(ALL);
-                        pwm_enable = true;
-                    }
-                }
-
-                if(duty_cycle_1>0.5){
-                    duty_cycle_1 += 0.02;
-                } else {
-                    duty_cycle_1 -= 0.02;
-                }
-
-                if(duty_cycle_2>0.5){
-                    duty_cycle_2 += 0.02;
-                } else {
-                    duty_cycle_2 -= 0.02;
-                }
-
-
-                shield.power.setDutyCycle(LEG1, duty_cycle_1);
-                shield.power.setDutyCycle(LEG2, duty_cycle_2);
+            }
+            else
+            {
+                inverter.setPowerOn(false);
             }
         }
 
