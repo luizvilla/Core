@@ -53,7 +53,7 @@ static constexpr float32_t UDC_STARTUP = 0.0F;
 static constexpr float32_t F0 = 50.0F;
 static constexpr float32_t W0 = 2.0F * PI * F0;
 static constexpr float32_t SYNC_POWER_TOLERANCE = 0.01F * W0;
-static constexpr float32_t LOAD_RESISTANCE = 20.0F;
+static constexpr float32_t LOAD_RESISTANCE = 10.0F;
 static constexpr float32_t MAX_CURRENT = 8.0F;
 static constexpr uint32_t SCOPE_BUFFER_SIZE = 1024;
 static constexpr uint8_t SCOPE_CHANNEL_COUNT = 21;
@@ -330,6 +330,92 @@ void setup_scope()
     scope.start();
 }
 
+void read_measurements()
+{
+    meas_data = shield.sensors.getLatestValue(I1_LOW);
+    if (meas_data != NO_VALUE) I1_low_value = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(V1_LOW);
+    if (meas_data != NO_VALUE) V1_low_value = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(V2_LOW);
+    if (meas_data != NO_VALUE) V2_low_value = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(I2_LOW);
+    if (meas_data != NO_VALUE) I2_low_value = meas_data;
+
+    meas_data = shield.sensors.getLatestValue(V_HIGH);
+    if (meas_data != NO_VALUE) V_high = meas_data;
+
+    V_high_filt = vHighFilter.calculateWithReturn(V_high);
+    Vgrid_meas = V1_low_value - V2_low_value;
+    Igrid_meas = I1_low_value;
+}
+
+bool overcurrent_detected()
+{
+    return I1_low_value > MAX_CURRENT ||
+           I1_low_value < -MAX_CURRENT ||
+           I2_low_value > MAX_CURRENT ||
+           I2_low_value < -MAX_CURRENT;
+}
+
+void run_startup_mode()
+{
+    if (is_following_mode()) {
+        inverter.setVBus(control_bus_voltage());
+        inverter.setPowerOn(false);
+        delta_duty_cycle = inverter.calculateDuty(following_vgrid_input(), following_igrid_input());
+        refresh_inverter_data();
+        is_net_synchronized = inverter.getSync() && following_frequency_in_range();
+        sync_scope = is_net_synchronized ? 1.0F : 0.0F;
+        return;
+    }
+
+    delta_duty_cycle = rate_limiter(0.5F, delta_duty_cycle, 50.0F);
+    if (delta_duty_cycle > 0.5F) {
+        delta_duty_cycle = 0.5F;
+    }
+    apply_common_duty(delta_duty_cycle);
+    start_pwm_outputs();
+}
+
+void run_power_mode()
+{
+    if (teaching_mode == OPEN_LOOP) {
+        delta_duty_cycle = 0.5F + local_vgrid / (2.0F * control_bus_voltage());
+        apply_complementary_duty(delta_duty_cycle);
+        start_pwm_outputs();
+        return;
+    }
+
+    inverter.setVBus(control_bus_voltage());
+
+    if (teaching_mode == GRID_FORMING_LOCAL_SINE) {
+        inverter.setVdqRef(Vdq_ref);
+        delta_duty_cycle = inverter.calculateDuty(local_vgrid, local_igrid);
+        apply_complementary_duty(delta_duty_cycle);
+        start_pwm_outputs();
+        return;
+    }
+
+    inverter.setIdqRef(Idq_ref);
+    inverter.setPowerOn(true);
+    delta_duty_cycle = inverter.calculateDuty(following_vgrid_input(), following_igrid_input());
+    refresh_inverter_data();
+    is_net_synchronized = inverter.getSync() && following_frequency_in_range();
+    sync_scope = is_net_synchronized ? 1.0F : 0.0F;
+    handle_following_desync();
+
+    if (is_net_synchronized) {
+        apply_complementary_duty(delta_duty_cycle);
+        start_pwm_outputs();
+    } else {
+        inverter.setPowerOn(false);
+    }
+}
+
+
 void setup_routine()
 {
     spin.pwm.initFixedFrequency(50000);
@@ -485,90 +571,6 @@ void loop_application_task()
     task.suspendBackgroundMs(100);
 }
 
-void read_measurements()
-{
-    meas_data = shield.sensors.getLatestValue(I1_LOW);
-    if (meas_data != NO_VALUE) I1_low_value = meas_data;
-
-    meas_data = shield.sensors.getLatestValue(V1_LOW);
-    if (meas_data != NO_VALUE) V1_low_value = meas_data;
-
-    meas_data = shield.sensors.getLatestValue(V2_LOW);
-    if (meas_data != NO_VALUE) V2_low_value = meas_data;
-
-    meas_data = shield.sensors.getLatestValue(I2_LOW);
-    if (meas_data != NO_VALUE) I2_low_value = meas_data;
-
-    meas_data = shield.sensors.getLatestValue(V_HIGH);
-    if (meas_data != NO_VALUE) V_high = meas_data;
-
-    V_high_filt = vHighFilter.calculateWithReturn(V_high);
-    Vgrid_meas = V1_low_value - V2_low_value;
-    Igrid_meas = I1_low_value;
-}
-
-bool overcurrent_detected()
-{
-    return I1_low_value > MAX_CURRENT ||
-           I1_low_value < -MAX_CURRENT ||
-           I2_low_value > MAX_CURRENT ||
-           I2_low_value < -MAX_CURRENT;
-}
-
-void run_startup_mode()
-{
-    if (is_following_mode()) {
-        inverter.setVBus(control_bus_voltage());
-        inverter.setPowerOn(false);
-        delta_duty_cycle = inverter.calculateDuty(following_vgrid_input(), following_igrid_input());
-        refresh_inverter_data();
-        is_net_synchronized = inverter.getSync() && following_frequency_in_range();
-        sync_scope = is_net_synchronized ? 1.0F : 0.0F;
-        return;
-    }
-
-    delta_duty_cycle = rate_limiter(0.5F, delta_duty_cycle, 50.0F);
-    if (delta_duty_cycle > 0.5F) {
-        delta_duty_cycle = 0.5F;
-    }
-    apply_common_duty(delta_duty_cycle);
-    start_pwm_outputs();
-}
-
-void run_power_mode()
-{
-    if (teaching_mode == OPEN_LOOP) {
-        delta_duty_cycle = 0.5F + local_vgrid / (2.0F * control_bus_voltage());
-        apply_complementary_duty(delta_duty_cycle);
-        start_pwm_outputs();
-        return;
-    }
-
-    inverter.setVBus(control_bus_voltage());
-
-    if (teaching_mode == GRID_FORMING_LOCAL_SINE) {
-        inverter.setVdqRef(Vdq_ref);
-        delta_duty_cycle = inverter.calculateDuty(local_vgrid, local_igrid);
-        apply_complementary_duty(delta_duty_cycle);
-        start_pwm_outputs();
-        return;
-    }
-
-    inverter.setIdqRef(Idq_ref);
-    inverter.setPowerOn(true);
-    delta_duty_cycle = inverter.calculateDuty(following_vgrid_input(), following_igrid_input());
-    refresh_inverter_data();
-    is_net_synchronized = inverter.getSync() && following_frequency_in_range();
-    sync_scope = is_net_synchronized ? 1.0F : 0.0F;
-    handle_following_desync();
-
-    if (is_net_synchronized) {
-        apply_complementary_duty(delta_duty_cycle);
-        start_pwm_outputs();
-    } else {
-        inverter.setPowerOn(false);
-    }
-}
 
 void loop_critical_task()
 {
