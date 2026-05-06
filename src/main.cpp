@@ -117,6 +117,7 @@ static float32_t Udc = 20.0F; // dc voltage supply assumed [V]
 static const float f0 = 50.0F; // fundamental frequency [Hz]
 static const float32_t w0 = 2.0F * PI * f0;   // pulsation [rad/s]
 static const float32_t sync_power_tolerance = 0.01*w0;
+static const float32_t LOAD_RESISTANCE = 20.0F;
 /* Sinewave settings */
 static float32_t Vgrid_ref; //[V]
 static float32_t Vgrid_amplitude_ref = 20.0F; // [V]
@@ -124,6 +125,8 @@ static float32_t Vgrid_amplitude = 20.0F; // [V]
 static float angle = 0.F; // [rad]
 static float theta = 0.F; // [rad]
 static float32_t sine = 0.F; // [rad]
+static float32_t local_vgrid; // [V]
+static float32_t local_igrid; // [A]
 
 static float32_t Ts = control_task_period * 1.0e-6F;
 
@@ -138,7 +141,7 @@ static float32_t desync_counter_scope;
 
 // the scope help us to record datas during the critical task
 // its a library which must be included in platformio.ini
-static ScopeMimicry scope(1024, 19);
+static ScopeMimicry scope(1024, 21);
 static bool is_downloading;
 static bool trigger = false;
 //---------------------------------------------------------------
@@ -203,6 +206,14 @@ float32_t rate_limiter(const float32_t ref, float32_t value, const float32_t rat
     return value;
 }
 
+void update_teaching_sine()
+{
+    theta = ot_modulo_2pi(theta + w0 * Ts);
+    sine = ot_sin(theta);
+    local_vgrid = Vgrid_amplitude_ref * sine;
+    local_igrid = local_vgrid / LOAD_RESISTANCE;
+}
+
 //--------------SETUP FUNCTIONS-------------------------------
 
 /**
@@ -234,6 +245,8 @@ void setup_routine()
     scope.connectChannel(duty_cycle_2, "duty_cycle_2");
 	scope.connectChannel(Iab.alpha, "Ialpha");
 	scope.connectChannel(sine, "sine");
+	scope.connectChannel(local_vgrid, "local_vgrid");
+	scope.connectChannel(local_igrid, "local_igrid");
     scope.connectChannel(Vdq.q, "Vq_in");
 	scope.connectChannel(Vdq.d, "Vd_in");
     scope.connectChannel(Vdq_output.q, "Vq_out");
@@ -516,6 +529,7 @@ void loop_critical_task()
     VN_meas = (V1_low_value+V2_low_value)/2;
     Igrid_meas = I1_low_value;
     // Igrid_meas = I1_low_value;
+    update_teaching_sine();
 
     // MANAGE OVERCURRENT
     if (I1_low_value > MAX_CURRENT
