@@ -83,11 +83,17 @@ void loop_communication_task();
 void loop_application_task();
 void loop_critical_task();
 
+/**
+ * @brief Reports whether the scope capture should trigger.
+ */
 bool a_trigger()
 {
     return trigger;
 }
 
+/**
+ * @brief Clamps a floating-point value inside the requested range.
+ */
 float32_t saturate(float32_t value, float32_t min, float32_t max)
 {
     if (value > max) {
@@ -99,6 +105,9 @@ float32_t saturate(float32_t value, float32_t min, float32_t max)
     return value;
 }
 
+/**
+ * @brief Returns the sign of a value while ignoring small noise around zero.
+ */
 float32_t sign(float32_t value, float32_t tolerance = 1.0e-3F)
 {
     if (value > tolerance) {
@@ -110,12 +119,18 @@ float32_t sign(float32_t value, float32_t tolerance = 1.0e-3F)
     return 0.0F;
 }
 
+/**
+ * @brief Moves a value toward its reference with a fixed slew rate.
+ */
 float32_t rate_limiter(float32_t reference, float32_t value, float32_t rate)
 {
     value += TS * rate * sign(reference - value);
     return value;
 }
 
+/**
+ * @brief Returns the measured DC bus voltage, or a fallback before sensing is valid.
+ */
 float32_t control_bus_voltage()
 {
     if (V_high_filt > 1.0F) {
@@ -124,11 +139,17 @@ float32_t control_bus_voltage()
     return DC_BUS_FALLBACK;
 }
 
+/**
+ * @brief Clamps one duty-cycle command to the allowed modulation range.
+ */
 float32_t clamp_duty(float32_t duty)
 {
     return saturate(duty, DUTY_MIN, DUTY_MAX);
 }
 
+/**
+ * @brief Starts both PWM legs once and records the output state.
+ */
 void start_pwm_outputs()
 {
     if (!pwm_enable) {
@@ -137,6 +158,9 @@ void start_pwm_outputs()
     }
 }
 
+/**
+ * @brief Stops both PWM legs once and records the output state.
+ */
 void stop_pwm_outputs()
 {
     if (pwm_enable) {
@@ -145,6 +169,9 @@ void stop_pwm_outputs()
     }
 }
 
+/**
+ * @brief Applies the same clamped duty cycle to both H-bridge legs.
+ */
 void apply_common_duty(float32_t duty)
 {
     duty_cycle_1 = clamp_duty(duty);
@@ -153,6 +180,9 @@ void apply_common_duty(float32_t duty)
     shield.power.setDutyCycle(LEG2, duty_cycle_2);
 }
 
+/**
+ * @brief Applies clamped complementary duty cycles to the H-bridge legs.
+ */
 void apply_complementary_duty(float32_t duty)
 {
     duty_cycle_1 = clamp_duty(duty);
@@ -161,6 +191,9 @@ void apply_complementary_duty(float32_t duty)
     shield.power.setDutyCycle(LEG2, duty_cycle_2);
 }
 
+/**
+ * @brief Advances the local teaching oscillator and derives voltage/current inputs.
+ */
 void update_teaching_sine()
 {
     teaching_theta = ot_modulo_2pi(teaching_theta + W0 * TS);
@@ -169,6 +202,9 @@ void update_teaching_sine()
     local_igrid = local_vgrid / LOAD_RESISTANCE;
 }
 
+/**
+ * @brief Copies the inverter controller diagnostics into scope variables.
+ */
 void refresh_inverter_data()
 {
     Vdq = inverter.getVdq();
@@ -179,6 +215,9 @@ void refresh_inverter_data()
     omega = inverter.getw();
 }
 
+/**
+ * @brief Streams a completed ScopeMimicry capture over the serial console.
+ */
 void dump_scope_datas(ScopeMimicry &scope_to_dump)
 {
     scope_to_dump.reset_dump();
@@ -190,12 +229,18 @@ void dump_scope_datas(ScopeMimicry &scope_to_dump)
     printk("end record\n");
 }
 
+/**
+ * @brief Adjusts the forming-mode voltage reference and matching teaching sine amplitude.
+ */
 void adjust_voltage_reference(float32_t step)
 {
     Vdq_ref.d = saturate(Vdq_ref.d + step, 0.0F, 30.0F);
     local_voltage_amplitude = Vdq_ref.d;
 }
 
+/**
+ * @brief Registers scope channels and starts capture for the grid-forming example.
+ */
 void setup_scope()
 {
     scope.connectChannel(I1_low_value, "I1_low_value");
@@ -220,6 +265,9 @@ void setup_scope()
     scope.start();
 }
 
+/**
+ * @brief Reads the latest sensor values and derives grid voltage/current measurements.
+ */
 void read_measurements()
 {
     meas_data = shield.sensors.getLatestValue(I1_LOW);
@@ -242,6 +290,9 @@ void read_measurements()
     Igrid_meas = I1_low_value;
 }
 
+/**
+ * @brief Checks both measured currents against the protection threshold.
+ */
 bool overcurrent_detected()
 {
     return I1_low_value > MAX_CURRENT ||
@@ -250,6 +301,9 @@ bool overcurrent_detected()
            I2_low_value < -MAX_CURRENT;
 }
 
+/**
+ * @brief Configures hardware, scope capture, inverter control, and task scheduling.
+ */
 void setup_routine()
 {
     spin.pwm.initFixedFrequency(50000);
@@ -274,6 +328,9 @@ void setup_routine()
     task.startCritical();
 }
 
+/**
+ * @brief Handles serial commands for mode changes, voltage tuning, and scope capture.
+ */
 void loop_communication_task()
 {
     while (1) {
@@ -324,6 +381,9 @@ void loop_communication_task()
     }
 }
 
+/**
+ * @brief Runs the low-rate state machine and status reporting.
+ */
 void loop_application_task()
 {
     switch (mode) {
@@ -373,6 +433,9 @@ void loop_application_task()
     task.suspendBackgroundMs(100);
 }
 
+/**
+ * @brief Runs the 10 kHz forming control loop, protection checks, and PWM updates.
+ */
 void loop_critical_task()
 {
     critical_task_counter++;
@@ -407,6 +470,9 @@ void loop_critical_task()
     scope.acquire();
 }
 
+/**
+ * @brief Application entry point.
+ */
 int main(void)
 {
     setup_routine();
