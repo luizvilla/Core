@@ -313,8 +313,8 @@ void loop_application_task()
 
     if (!is_downloading) {
         /* Prints the data */
-        printk("%.3f:", (double)I2_low_value);	/* Prints I2 */
-        printk("%.3f:", (double)V2_low_value);  /* Prints V2 */
+        printk("%.3f:", (double)I2_filt);	/* Prints I2 */
+        printk("%.3f:", (double)V2_filt);  /* Prints V2 */
         printk("%.3f:", (double)duty_cycle);    /* Prints duty cycle */
         printk("%.3f:", (double)duty_cycle2);	/* Prints duty cycle 2 */	
         printk("%.3f:", (double)V_high);        /* Prints V_high */
