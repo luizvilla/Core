@@ -120,7 +120,7 @@ static constexpr float32_t MAX_CURRENT = 8.0F;
 /* Size of the scope buffer for data recording */
 static constexpr uint32_t SCOPE_BUFFER_SIZE = 1024;
 /* Number of channels recorded in the scope for diagnostics */
-static constexpr uint8_t SCOPE_CHANNEL_COUNT = 17;
+static constexpr uint8_t SCOPE_CHANNEL_COUNT = 19;
 
 /* State of the PWM outputs */
 static bool pwm_enable = false;
@@ -196,6 +196,10 @@ static uint32_t critical_task_counter;
 static singlePhaseInverter inverter;
 /* First-order low-pass filter for the high-side voltage measurement */
 static LowPassFirstOrderFilter vHighFilter(TS, 0.1F);
+/* Third harmonic detector for SOGI resonance analysis */
+static HarmonicDetector h3Detector;
+/* [V] Estimated peak amplitude of the third harmonic in Vgrid_meas */
+static float32_t h3_amplitude;
 /* ScopeMimicry instance for recording control variables and diagnostics */
 static ScopeMimicry scope(SCOPE_BUFFER_SIZE, SCOPE_CHANNEL_COUNT);
 /*--------------------------------------------------------------- */
@@ -373,6 +377,7 @@ void setup_scope()
     scope.connectChannel(omega, "omega");
     scope.connectChannel(phase_shift_deg, "phase_shift");
     scope.connectChannel(state_mode_scope, "state");
+    scope.connectChannel(h3_amplitude, "h3_amplitude");
     scope.set_delay(0.5F);
     scope.set_trigger(a_trigger);
     scope.start();
@@ -435,8 +440,9 @@ void setup_routine()
 
     Vdq_ref.d = local_voltage_amplitude;
     Vdq_ref.q = 0.0F;
+    h3Detector.init(TS, 3.0F * W0, 1.0F / (PI * F0));
     setup_scope();
-    inverter.init(FORMING, DC_BUS_FALLBACK, local_voltage_amplitude, W0, TS);
+    inverter.init(FORMING, BIPOLAR, DC_BUS_FALLBACK, local_voltage_amplitude, W0, TS);
 
     uint32_t app_task_number = task.createBackground(loop_application_task);
     uint32_t com_task_number = task.createBackground(loop_communication_task);
@@ -568,6 +574,7 @@ void loop_critical_task()
 {
     critical_task_counter++;
     read_measurements();
+    h3_amplitude = h3Detector.calculateWithReturn(Vgrid_meas);
     update_teaching_sine();
 
     if (overcurrent_detected()) {
