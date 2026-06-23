@@ -1,0 +1,50 @@
+&powershield{
+	default-frequency = <100000>;
+	min-frequency = <5000>;
+};
+
+&leg1 {
+	default-modulation = "Lft_aligned";
+};
+
+&leg2 {
+	default-modulation = "Lft_aligned";
+};
+
+
+/* Channel list definition */
+/* Order    | ADC 1    |   ADC2       */
+/* 0        | I1_LOW   |   V1_LOW     */
+/* 1        | I2_LOW   |   V2_LOW     */
+/* 2        | V_HIGH   |   I_HIGH     */
+
+// &i1low {
+// 	default-adc = "ADC_1";
+// 	default-order = <0>;
+// };
+
+// &i2low {
+// 	default-adc = "ADC_1";
+// 	default-order = <1>;
+// };
+
+// &vhigh {
+// 	default-adc = "ADC_1";
+// 	default-order = <2>;
+// };
+
+
+// &v1low {
+// 	default-adc = "ADC_2";
+// 	default-order = <0>;
+// };
+
+// &v2low {
+// 	default-adc = "ADC_2";
+// 	default-order = <1>;
+// };
+
+// &ihigh {
+// 	default-adc = "ADC_2";
+// 	default-order = <2>;
+// };

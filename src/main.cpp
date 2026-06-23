@@ -33,7 +33,6 @@
 #include "SpinAPI.h"
 #include "ShieldAPI.h"
 #include "TaskAPI.h"
-#include "filters.h"
 
 /*--------------OWNTECH Libraries----------------------------- */
 #include "pid.h"
@@ -49,10 +48,6 @@ void loop_communication_task();
 void loop_application_task();
 /* Code to be executed in real time in the critical task */
 void loop_critical_task();
-/* Counts the transferred charge in A.h */
-void update_current_counter(float32_t current_value);
-/* Converts the A.h counter into a valid voltage curve index */
-void current_counter_to_index(float32_t counter_value);
 
 /*--------------USER VARIABLES DECLARATIONS------------------- */
 
@@ -72,55 +67,38 @@ static float32_t I2_low_value;
 static float32_t I_high;
 static float32_t V_high;
 
-
-static float32_t I_test;
-
 static float32_t temp_1_value;
 static float32_t temp_2_value;
 
 /* Temporary storage fore measured value (ctrl task) */
 static float meas_data;
 
-float32_t duty_cycle = 0.3;
-uint32_t init_soc = 10;
+static float32_t mean_duty_cycle = 0.5F;
+static float32_t duty_cycle_step = 0.01F;
+static float32_t duty_cycle_step_max = 0.15F;
+static float32_t duty_cycle_step_min = -0.15F;
+static float32_t duty_cycle = mean_duty_cycle;
 
+static float32_t duty_cycle_sine_vector[] = {
+    0.000000F, 0.062791F, 0.125333F, 0.187381F, 0.248690F, 0.309017F, 0.368125F, 0.425779F, 0.481754F, 0.535827F,
+    0.587785F, 0.637424F, 0.684547F, 0.728969F, 0.770513F, 0.809017F, 0.844328F, 0.876307F, 0.904827F, 0.929776F,
+    0.951057F, 0.968583F, 0.982287F, 0.992115F, 0.998027F, 1.000000F, 0.998027F, 0.992115F, 0.982287F, 0.968583F,
+    0.951057F, 0.929776F, 0.904827F, 0.876307F, 0.844328F, 0.809017F, 0.770513F, 0.728969F, 0.684547F, 0.637424F,
+    0.587785F, 0.535827F, 0.481754F, 0.425779F, 0.368125F, 0.309017F, 0.248690F, 0.187381F, 0.125333F, 0.062791F,
+    0.000000F, -0.062791F, -0.125333F, -0.187381F, -0.248690F, -0.309017F, -0.368125F, -0.425779F, -0.481754F, -0.535827F,
+    -0.587785F, -0.637424F, -0.684547F, -0.728969F, -0.770513F, -0.809017F, -0.844328F, -0.876307F, -0.904827F, -0.929776F,
+    -0.951057F, -0.968583F, -0.982287F, -0.992115F, -0.998027F, -1.000000F, -0.998027F, -0.992115F, -0.982287F, -0.968583F,
+    -0.951057F, -0.929776F, -0.904827F, -0.876307F, -0.844328F, -0.809017F, -0.770513F, -0.728969F, -0.684547F, -0.637424F,
+    -0.587785F, -0.535827F, -0.481754F, -0.425779F, -0.368125F, -0.309017F, -0.248690F, -0.187381F, -0.125333F, -0.062791F
+};
+
+static constexpr uint32_t duty_cycle_sine_vector_length =
+    sizeof(duty_cycle_sine_vector) / sizeof(duty_cycle_sine_vector[0]);
+static uint32_t duty_cycle_sine_counter = 0U;
+static uint32_t duty_cycle_sine_jump = 1U;
 
 /* Voltage reference */
 static float32_t voltage_reference = 15;
-static float32_t voltage_values[] = {15, 12, 10, 8};
-/* Positive electrode sampled on x in [-0.297, 1.005] with 50 points. */
-static float32_t positive_potential[] = {
-    3.23527F, 3.36715F, 3.42126F, 3.43816F, 3.44493F, 3.44493F, 3.44493F, 3.44831F, 3.44831F,
-    3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F,
-    3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F,
-    3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.44831F, 3.45169F, 3.45169F,
-    3.45169F, 3.45169F, 3.45169F, 3.45169F, 3.45169F, 3.45507F, 3.45507F, 3.45845F, 3.45845F,
-    3.46522F, 3.47536F, 3.49903F, 3.63092F, 3.79324F
-};
-/* Negative electrode sampled on x in [0.000, 1.200] with 50 points. */
-static float32_t negative_potential[] = {
-    0.56812F, 0.38213F, 0.28068F, 0.21643F, 0.19275F, 0.18599F, 0.17585F, 0.15217F, 0.15217F,
-    0.14203F, 0.13188F, 0.12512F, 0.11836F, 0.11159F, 0.10821F, 0.09469F, 0.09469F, 0.09469F,
-    0.09469F, 0.09469F, 0.09469F, 0.09469F, 0.09469F, 0.09469F, 0.09469F, 0.09469F, 0.09469F,
-    0.09469F, 0.08792F, 0.08116F, 0.06763F, 0.06763F, 0.06763F, 0.06763F, 0.06425F, 0.06425F,
-    0.06425F, 0.06425F, 0.06425F, 0.06087F, 0.06087F, 0.06087F, 0.05749F, 0.05072F, 0.03720F,
-    0.02367F, 0.01353F, 0.00676F, 0.00338F, 0.00000F
-};
-
-static float32_t adimmentional_ah_vector[] = {
-    0.00000F, 0.02041F, 0.04082F, 0.06122F, 0.08163F, 0.10204F, 0.12245F, 0.14286F, 0.16327F,
-    0.18367F, 0.20408F, 0.22449F, 0.24490F, 0.26531F, 0.28571F, 0.30612F, 0.32653F, 0.34694F,
-    0.36735F, 0.38776F, 0.40816F, 0.42857F, 0.44898F, 0.46939F, 0.48980F, 0.51020F, 0.53061F,
-    0.55102F, 0.57143F, 0.59184F, 0.61224F, 0.63265F, 0.65306F, 0.67347F, 0.69388F, 0.71429F,
-    0.73469F, 0.75510F, 0.77551F, 0.79592F, 0.81633F, 0.83673F, 0.85714F, 0.87755F, 0.89796F,
-    0.91837F, 0.93878F, 0.95918F, 0.97959F, 1.00000F
-};
-static constexpr uint32_t electrode_curve_count = sizeof(positive_potential) / sizeof(positive_potential[0]);
-static constexpr uint32_t voltage_values_count = sizeof(voltage_values) / sizeof(voltage_values[0]);
-static float32_t current_counter = 0;
-/* Temporary normalized-capacity step used by the voltage lookup index helper. */
-static constexpr float32_t voltage_curve_step_ah = 1.0F / static_cast<float32_t>(electrode_curve_count - 1U);
-static float32_t internal_resistor = 0.0; 
 
 /* PID coefficients for a 8.6ms step response*/
 static float32_t kp = 0.000215;
@@ -132,24 +110,6 @@ static float32_t lower_bound = 0.0F;
 static float32_t Ts = control_task_period * 1e-6;
 static PidParams pid_params(Ts, kp, Ti, Td, N, lower_bound, upper_bound);
 static Pid pid;
-
-/* Filter */
-
-
-const float32_t tau = 1.0F;               // constant time
-static LowPassFirstOrderFilter average_current_filter(Ts, tau);
-
-uint32_t index_neg = 0U; 
-uint32_t index_pos = 0U;
-
-float32_t init_ah = 0.0F; /* Initial A.h value, used to compute the current counter */
-    float32_t scale_coefficient_neg = 1.2F; /*  */
-    float32_t scale_coefficient_pos = 1.3F; /*  */
-    float32_t nominal_capacity = 1.0F; /*  */
-    float32_t pos_offset = 0.3F; /*  */
-
-
-
 
 /*--------------------------------------------------------------- */
 
@@ -163,51 +123,6 @@ enum serial_interface_menu_mode
 uint8_t mode = IDLEMODE;
 
 /*--------------SETUP FUNCTIONS------------------------------- */
-
-void update_current_counter(float32_t current_value)
-{
-    // const float32_t average_current = average_current_filter.calculateWithReturn(current_value);
-    const float32_t ah_increment = current_value * Ts / 3600.0F;
-    const float32_t max_counter = voltage_curve_step_ah * static_cast<float32_t>(voltage_values_count - 1U);
-
-    current_counter += ah_increment;
-
-    if (current_counter < 0.0F)
-    {
-        current_counter = 0.0F;
-    }
-    else if (current_counter > max_counter)
-    {
-        current_counter = max_counter;
-    }
-}
-
-void current_counter_to_index(float32_t counter_value)
-{
-
-
-
-    float32_t ah_now = init_ah + counter_value;
-
-    if (ah_now <= 0.0F)
-    {
-        ah_now = 0.0F;
-    }
-
-    index_neg = static_cast<uint32_t>(ah_now / (scale_coefficient_neg * nominal_capacity));
-    index_pos = static_cast<uint32_t>((ah_now+pos_offset) / (scale_coefficient_pos * nominal_capacity));
-
-    if (index_neg >= 49U)
-    {
-        index_neg = 49U;
-    }
-
-    if (index_pos >= 49U)
-    {
-        index_pos = 49U;
-    }
-
-}
 
 /**
  * This is the setup routine.
@@ -254,8 +169,12 @@ void loop_communication_task()
                "|     ---- MENU buck voltage mode ----   |\n"
                "|     press i : idle mode                |\n"
                "|     press p : power mode               |\n"
-               "|     press u : voltage reference UP     |\n"
-               "|     press d : voltage reference DOWN   |\n"
+               "|     press u : mean duty cycle UP       |\n"
+               "|     press j : mean duty cycle DOWN     |\n"
+               "|     press t : duty cycle step UP       |\n"
+               "|     press g : duty cycle step DOWN     |\n"
+               "|     press f : sine jump UP             |\n"
+               "|     press s : sine jump DOWN           |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
         break;
@@ -268,10 +187,33 @@ void loop_communication_task()
         mode = POWERMODE;
         break;
     case 'u':
-        I_test += 1;
+        mean_duty_cycle += 0.01F;
+        if (mean_duty_cycle > 1.0F - duty_cycle_step) mean_duty_cycle = 1.0F - duty_cycle_step;
         break;
-    case 'd':
-        I_test -= 1;
+    case 'j':
+        mean_duty_cycle -= 0.01F;
+        if (mean_duty_cycle < duty_cycle_step) mean_duty_cycle = duty_cycle_step;
+        break;
+    case 't':
+        duty_cycle_step += 0.01F; 
+        if (duty_cycle_step > duty_cycle_step_max) duty_cycle_step = duty_cycle_step_max;
+        break;
+    case 'g':
+        duty_cycle_step -= 0.01F;
+        if (duty_cycle_step < duty_cycle_step_min) duty_cycle_step = duty_cycle_step_min;
+        break;
+    case 'f':
+        duty_cycle_sine_jump++;
+        if (duty_cycle_sine_jump >= 50)
+        {
+            duty_cycle_sine_jump = 50;
+        }
+        break;
+    case 's':
+        if (duty_cycle_sine_jump > 1U)
+        {
+            duty_cycle_sine_jump--;
+        }
         break;
     default:
         break;
@@ -301,16 +243,16 @@ void loop_application_task()
         meas_data = shield.sensors.getLatestValue(TEMP_SENSOR_2);
         if (meas_data != NO_VALUE) temp_2_value = meas_data;
 
-
-
-
     }
 
 
-    
-    printk("%.3f:", (double)voltage_reference);
-    printk("%.3f:", (double)I_test);
+    printk("%.3f:", (double)mean_duty_cycle);
+    printk("%.3f:", (double)duty_cycle_step);
+    printk("%.3f:", (double)duty_cycle);
+    printk("%u:", duty_cycle_sine_jump);
     printk("\n");
+
+
     task.suspendBackgroundMs(100);
 }
 
@@ -352,17 +294,16 @@ void loop_critical_task()
     }
     else if (mode == POWERMODE)
     {
+        duty_cycle = mean_duty_cycle + (duty_cycle_step * duty_cycle_sine_vector[duty_cycle_sine_counter]);
 
-        update_current_counter(I_test);
+        shield.power.setDutyCycle(LEG1,mean_duty_cycle);
+        shield.power.setDutyCycle(LEG2,duty_cycle);
 
-        current_counter_to_index(current_counter);
-
-        voltage_reference = (positive_potential[index_pos]  - 
-                             negative_potential[index_neg]) + 
-                             internal_resistor * I_test;
-
-        duty_cycle = pid.calculateWithReturn(voltage_reference, V1_low_value);
-        shield.power.setDutyCycle(ALL,duty_cycle);
+        duty_cycle_sine_counter += duty_cycle_sine_jump;
+        if (duty_cycle_sine_counter >= duty_cycle_sine_vector_length)
+        {
+            duty_cycle_sine_counter -= duty_cycle_sine_vector_length;
+        }
 
         /* Set POWER ON */
         if (!pwm_enable)
