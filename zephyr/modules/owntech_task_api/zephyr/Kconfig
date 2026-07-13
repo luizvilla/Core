@@ -23,4 +23,16 @@ if OWNTECH_TASK_API
 		int "Stack size for asynchronous threads"
 		default 1024
 
+	config OWNTECH_TASK_ENABLE_PERIODIC_TASKS
+		bool "Enable support for a nested preemptible periodic real-time task"
+		default n
+		help
+			A periodic task is an additional hard real-time task that runs
+			less often than the critical task but remains a Zero-Latency
+			Interrupt, meaning it can be preempted by the critical task
+			without RTOS scheduling jitter. Enabling this reserves TIM7's
+			IRQ vector (TIM7_DAC_IRQn) as a software-triggered interrupt
+			line: TIM7 can no longer be used through the generic timer
+			driver while this is on.
+
 endif
