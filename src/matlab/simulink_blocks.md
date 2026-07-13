@@ -206,14 +206,37 @@ exists.
 - **Precondition**: Step 1 committed.
 - **Resume check**: `git log --oneline -- src/matlab/ShieldSendBlock.m`.
 - **Do**:
-  - [ ] `classdef ShieldSendBlock < matlab.System` with `Ref1`/`Ref2` inputs.
-  - [ ] `setupImpl` calls `getShieldConnection()`; `stepImpl` sends both `REFERENCE` commands;
+  - [x] `classdef ShieldSendBlock < matlab.System` with `Ref1`/`Ref2` inputs (named via
+        `getInputNamesImpl`).
+  - [x] `setupImpl` calls `getShieldConnection()`; `stepImpl` sends both `REFERENCE` commands;
         `releaseImpl` calls `releaseShieldConnection()`.
-  - [ ] Force interpreted execution (`getSimulateUsingImpl`).
-  - [ ] Declare discrete sample time via `getSampleTimeImpl` with a `SampleTime` mask parameter.
-  - [ ] `checkcode` clean.
+  - [x] Force interpreted execution (`getSimulateUsingImpl` + `showSimulateUsingImpl`, both
+        `Static Access=protected` — see implementation note below).
+  - [x] Declare discrete sample time via `getSampleTimeImpl` with a `SampleTime` mask parameter
+        (via `obj.createSampleTime('Type','Discrete','SampleTime',obj.SampleTime)`).
+  - [x] `checkcode` clean.
+  - **Implementation detail found while building this, not anticipated in the architecture
+    description**: `matlab.System` does not automatically support `MyClass('Prop', val, ...)`
+    construction — an explicit constructor calling `setProperties(obj, nargin, varargin{:})`
+    is required, or construction fails with "No matching constructor found for superclass
+    'matlab.system.SystemInterface'". Confirmed against real MathWorks source
+    (`toolbox/shared/seriallib_blocks/+system/SerialReceive.m`, a real serial-hardware System
+    object shipped with Instrument Control Toolbox) before implementing, rather than relying on
+    memory for the exact `matlab.System` override method signatures — that same source also
+    confirmed the `getSampleTimeImpl`/`createSampleTime` pattern, and a separate real example
+    (`+codertarget/+armM4/+blocks/TcpSend.m`) confirmed `getSimulateUsingImpl`/
+    `showSimulateUsingImpl` must be `methods (Static, Access = protected)`, not plain instance
+    methods.
 - **Definition of done**: directly calling `step(obj, ref1, ref2)` against a pty loopback
   produces the expected `REFERENCE LEG1 V1 <ref1>` / `REFERENCE LEG2 V2 <ref2>` wire traffic.
+  - **Verified 2026-07-13** without real hardware, using the same pty-loopback pattern as Step
+    1: `checkcode` reported no issues. `ShieldSendBlock('ForcedPort', port)` constructed
+    correctly; `step(obj, 7.25, 3.5)` produced, on the wire, the 7-command
+    `getShieldConnection` setup sequence (first call) followed by exactly
+    `s_LEG1_r_V1_7.25000` and `s_LEG2_r_V2_3.50000` — the correctly-formatted `REFERENCE`
+    commands for the given `ref1`/`ref2` values; `release(obj)` then sent exactly one `d_i`
+    (`IDLE`) via `releaseShieldConnection`. Full setup→step→release lifecycle confirmed
+    end-to-end.
 - **Commit**: `feat(matlab): add Simulink block for sending shield reference commands`
 
 ### Step 3 — `ShieldGetBlock.m`
@@ -269,8 +292,15 @@ exists.
   up one implementation detail not anticipated in the original architecture description: a
   third file, `shieldConnectionSingleton.m`, was needed to actually share state between the two
   public functions (documented in Architecture and the Support files table above).
-- [ ] **Step 2** and **Step 3** (`ShieldSendBlock.m`, `ShieldGetBlock.m`) can proceed in
-  parallel — both only depend on Step 1, not on each other. **This is the next action.**
+- [x] **Step 2** — `ShieldSendBlock.m` implemented, `checkcode`-clean, and verified against a
+  pty loopback (see Step 2's "Verified" note): full setup→step→release lifecycle confirmed,
+  correct `REFERENCE` formatting for both legs. Found that `matlab.System` needs an explicit
+  constructor calling `setProperties` — confirmed against real MathWorks source before
+  implementing rather than guessing from memory (see Step 2's implementation-detail note).
+- [ ] **Step 3** (`ShieldGetBlock.m`) — only depends on Step 1, not Step 2, so could have been
+  built in parallel; now that Step 2 is done, its `matlab.System` patterns (constructor,
+  `getSimulateUsingImpl`, `getSampleTimeImpl`) are already confirmed and can be reused directly.
+  **This is the next action.**
 - [ ] **Step 4** — `build_shield_test_model.m` + `shield_test_model.slx`, plus its no-hardware
   pass.
 - [ ] **Step 5** — real-hardware verification, gated by explicit confirmation.
