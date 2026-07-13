@@ -19,19 +19,31 @@ a real controller diagram.
 **Three pieces**, all to live in `src/matlab/`:
 
 1. **`getShieldConnection.m`** (+ **`releaseShieldConnection.m`**) — a shared connection
-   singleton. A plain function holding a `persistent` `ShieldDevice` handle. First call from
-   *either* downstream block does: `findShieldDevicePort` → `ShieldDevice` construction → the
-   one-time setup sequence (`IDLE`→`BUCK LEG1/LEG2 ON`→`LEG LEG1/LEG2 ON`→
-   `REFERENCE LEG1 V1 5`→`POWER_ON`, exactly `comm_script.m`'s existing setup block). Subsequent
-   calls return the same handle. This avoids relying on Simulink block execution order (not
-   guaranteed between unconnected blocks) or on editing `InitFcn`/`StopFcn` callbacks embedded in
-   a binary `.slx` (not code-reviewable) — everything stays in plain, diffable `.m` files.
-   `releaseShieldConnection.m` mirrors this: first call sends `IDLE` and clears the persistent
-   handle (mirrors `comm_script.m`'s `onCleanup`/`safeIdle`); later calls are no-ops.
+   singleton holding a `ShieldDevice` handle. First call from *either* downstream block does:
+   `findShieldDevicePort` → `ShieldDevice` construction → the one-time setup sequence
+   (`IDLE`→`BUCK LEG1/LEG2 ON`→`LEG LEG1/LEG2 ON`→`REFERENCE LEG1 V1 5`→`POWER_ON`, exactly
+   `comm_script.m`'s existing setup block). Subsequent calls return the same handle. This avoids
+   relying on Simulink block execution order (not guaranteed between unconnected blocks) or on
+   editing `InitFcn`/`StopFcn` callbacks embedded in a binary `.slx` (not code-reviewable) —
+   everything stays in plain, diffable `.m` files. `releaseShieldConnection.m` mirrors this:
+   first call sends `IDLE` and clears the stored handle (mirrors `comm_script.m`'s
+   `onCleanup`/`safeIdle`); later calls are no-ops.
+   - **Implementation detail found while building this**: MATLAB `persistent` variables are
+     scoped per-function, not shared across separate `.m` files — so `getShieldConnection.m`
+     and `releaseShieldConnection.m`, as two independent top-level functions, can't directly
+     share a `persistent` handle with each other the way the "plain function holding a
+     `persistent` handle" description above implies in isolation. A third file,
+     **`shieldConnectionSingleton.m`**, holds the actual `persistent` state and exposes
+     `get`/`set`/`clear` actions; both public functions delegate to it. This was chosen over
+     `global` (harder to review, namespace risk) or storing the handle in the base workspace via
+     `assignin`/`evalin` (pollutes the user's interactive workspace, vulnerable to a stray
+     `clear` in the command window). See Step 1's "Verified" note for how this was confirmed.
    - Testability hook (mirroring `findShieldDevicePort`'s `Interactive` flag and
      `comm_script.m`'s `EnablePlot` flag): accept optional `VendorID`/`ProductID`/`ForcedPort`
      arguments so a no-hardware test can inject the pty fake-board's port instead of relying on
-     real USB auto-discovery.
+     real USB auto-discovery. `Interactive` defaults to `false` here (unlike
+     `findShieldDevicePort`'s own default of `true`), since `getShieldConnection` is meant to
+     run unattended from a Simulink block rather than from a human at a terminal.
 
 2. **`ShieldSendBlock.m`** — a `matlab.System` object. Inputs: `Ref1` (→ `REFERENCE LEG1 V1`),
    `Ref2` (→ `REFERENCE LEG2 V2`) — matching `comm_script.m`'s existing two-leg demo exactly
@@ -58,8 +70,9 @@ a real controller diagram.
 
 | File | Purpose |
 |---|---|
-| `getShieldConnection.m` | Shared connection singleton (see above). |
-| `releaseShieldConnection.m` | Matching teardown singleton — sends `IDLE`, clears the handle, no-op on repeat calls. |
+| `getShieldConnection.m` | Shared connection accessor (see above). |
+| `releaseShieldConnection.m` | Matching teardown accessor — sends `IDLE`, clears the handle, no-op on repeat calls. |
+| `shieldConnectionSingleton.m` | Private state holder (`get`/`set`/`clear`) shared by the two functions above — needed because MATLAB `persistent` variables can't be shared across separate `.m` files (see "Implementation detail" note above). Not called directly by anything else. |
 | `ShieldSendBlock.m` | `matlab.System` — sends `REFERENCE` to both legs each step. |
 | `ShieldGetBlock.m` | `matlab.System` — reads `V1`/`V2` each step. |
 | `build_shield_test_model.m` | Programmatic builder for the test model (below) — not hand-drawn, so construction is code-reviewable. |
@@ -152,15 +165,30 @@ exists.
 - **Precondition**: none (first step).
 - **Resume check**: `git log --oneline -- src/matlab/getShieldConnection.m`.
 - **Do**:
-  - [ ] Implement `getShieldConnection` with a `persistent` `ShieldDevice` handle; first call
-        discovers the port (`findShieldDevicePort`, with `VendorID`/`ProductID`/`ForcedPort`
-        pass-through options), constructs `ShieldDevice`, and runs the one-time setup sequence.
-  - [ ] Implement `releaseShieldConnection`: first call sends `IDLE` and clears the persistent
+  - [x] Implement `getShieldConnection` with a shared `ShieldDevice` handle (via
+        `shieldConnectionSingleton.m` — see the "Implementation detail" note in Architecture
+        above); first call discovers the port (`findShieldDevicePort`, with
+        `VendorID`/`ProductID`/`ForcedPort` pass-through options), constructs `ShieldDevice`,
+        and runs the one-time setup sequence.
+  - [x] Implement `releaseShieldConnection`: first call sends `IDLE` and clears the stored
         handle; subsequent calls are no-ops.
-  - [ ] `checkcode` clean on both files.
+  - [x] `checkcode` clean on all three files (`getShieldConnection.m`,
+        `releaseShieldConnection.m`, `shieldConnectionSingleton.m`).
 - **Definition of done**: calling `getShieldConnection()` twice in a row (e.g. against a pty
   loopback) returns the *same* handle both times, and only one discovery/setup sequence is
   observed on the wire; `releaseShieldConnection()` called twice sends exactly one `IDLE`.
+  - **Verified 2026-07-13** without real hardware, using the same Python `pty`-based virtual
+    serial loopback pattern established in `README.md`'s Step 1: `checkcode` reported no issues
+    on all three files. Wire trace confirmed exactly the expected 7-command setup sequence
+    (`IDLE`, `BUCK LEG1 ON`, `BUCK LEG2 ON`, `LEG LEG1 ON`, `LEG LEG2 ON`,
+    `REFERENCE LEG1 V1 5.00000`, `POWER_ON`) on the first `getShieldConnection()` call; a
+    second call returned the identical handle (MATLAB handle `==` comparison) with **zero**
+    additional wire traffic; `releaseShieldConnection()` sent exactly one `IDLE`, and a second
+    call was a true no-op (no additional traffic); a further `getShieldConnection()` call after
+    release correctly performed a fresh 7-command setup and returned a *new*, distinct handle —
+    confirming the full get/release lifecycle, not just the two behaviors named in the
+    definition of done above. 15 total commands logged across the whole sequence
+    (7 + 0 + 1 + 0 + 7), exactly as expected.
 - **Commit**: `feat(matlab): add shared shield connection singleton`
 
 ### Step 2 — `ShieldSendBlock.m`
@@ -226,6 +254,16 @@ exists.
 
 ## Next steps
 
-Nothing implemented yet — Step 1 (`getShieldConnection.m`/`releaseShieldConnection.m`) is the
-next action. Steps 2 and 3 can proceed in parallel once Step 1 lands, since both only depend on
-it, not on each other.
+- [x] **Step 1** — `getShieldConnection.m`/`releaseShieldConnection.m` implemented,
+  `checkcode`-clean, and verified against a pty loopback (see Step 1's "Verified" note). Picked
+  up one implementation detail not anticipated in the original architecture description: a
+  third file, `shieldConnectionSingleton.m`, was needed to actually share state between the two
+  public functions (documented in Architecture and the Support files table above).
+- [ ] **Step 2** and **Step 3** (`ShieldSendBlock.m`, `ShieldGetBlock.m`) can proceed in
+  parallel — both only depend on Step 1, not on each other. **This is the next action.**
+- [ ] **Step 4** — `build_shield_test_model.m` + `shield_test_model.slx`, plus its no-hardware
+  pass.
+- [ ] **Step 5** — real-hardware verification, gated by explicit confirmation.
+
+If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above already
+have commits, and continue from the first unchecked item.
