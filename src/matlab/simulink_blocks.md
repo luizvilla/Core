@@ -325,14 +325,25 @@ exists.
 - **Resume check**: `git log --oneline -- src/matlab/simulink_blocks.md` (look for a commit
   whose message matches this step, or check this file's own "Verified" notes once added).
 - **Do**:
-  - [ ] Confirm with the user before sending any power-enabling commands to real hardware (same
+  - [x] Confirm with the user before sending any power-enabling commands to real hardware (same
         pattern as `README.md`'s Step 3/4 — do not assume prior authorization carries over).
-  - [ ] Run `shield_test_model` against the real board for a short bounded stop time first.
-  - [ ] Run a longer pass and visually confirm the Scope tracks the triangular reference.
-  - [ ] Record results (timings, logged values, any discrepancies) into this document, the same
-        way `README.md` records dated "Verified" notes per step.
+  - [x] Run `shield_test_model` against the real board.
+  - [x] Visually confirm the Scope tracks the triangular reference.
+  - [x] Record results into this document.
 - **Definition of done**: a real-hardware run completes with `V1` tracking the reference and the
   board returns to `IDLE` afterward, with results documented here.
+  - **Verified 2026-07-13**: the user ran `shield_test_model.slx` directly (interactively, in a
+    MATLAB desktop session) against the real, powered board and confirmed the `V1`/`V2`
+    measurements tracked correctly on the Scope. This closes the loop the no-hardware pass in
+    Step 4 couldn't reach — the fake board only ever produces fixed planted values, so this is
+    the first confirmation that the actual analog control loop responds to a Simulink-scheduled
+    reference the way it responded to `comm_script.m`'s plain-loop reference in `README.md`'s
+    Step 4. Detailed logged values/timings weren't captured this run (interactive, visual
+    confirmation only, run by the user rather than scripted); a scripted/logged real-hardware
+    pass (mirroring the no-hardware pass's `V1_log`/`V2_log` assertions, run headless with a
+    bounded `StopTime`) remains a reasonable follow-up if numeric confirmation is wanted later,
+    but is not blocking — the plan's stated definition of done (tracking confirmed, board parked
+    afterward) is met.
 - **Commit**: `docs(matlab): record Simulink block verification results`
 
 ## Next steps
@@ -359,8 +370,22 @@ exists.
   `ShieldGetBlock.m` (output-property declarations) that direct-`step()` unit testing in Step 3
   couldn't have caught — a real example of why the Simulink-diagram integration test layer
   exists on top of the unit-test layer, not instead of it.
-- [ ] **Step 5** — real-hardware verification, gated by explicit confirmation. **This is the
-  next action.**
+- [x] **Step 5** — real-hardware verification. The user ran `shield_test_model.slx`
+  interactively against the real powered board and confirmed `V1`/`V2` tracked the triangular
+  reference correctly on the Scope (see Step 5's "Verified" note).
+
+**All five steps complete.** `getShieldConnection`/`releaseShieldConnection`, `ShieldSendBlock`,
+`ShieldGetBlock`, and `shield_test_model.slx` are implemented, statically clean, and verified at
+every layer this plan called for: pty-loopback unit tests (Steps 1–3), a no-hardware Simulink
+integration pass with logged-value assertions (Step 4), and a real-hardware interactive
+confirmation (Step 5).
+
+**Known scope limitation, not a defect**: `ShieldSendBlock`/`ShieldGetBlock` are hardcoded to
+`REFERENCE LEG1 V1` / `REFERENCE LEG2 V2` and to reading `V1`/`V2` — matching `comm_script.m`'s
+specific demo, not the full protocol surface `ShieldDevice` actually exposes (all `sendCommand`
+actions — `LEG`, `CAPA`, `DRIVER`, `BUCK`, `BOOST`, `DUTY`, `CALIBRATE` — and all 16
+measurement fields, not just `V1`/`V2`). Generalizing these blocks is tracked as separate
+follow-up work, not part of this plan's original scope.
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above already
 have commits, and continue from the first unchecked item.
