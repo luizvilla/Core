@@ -45,6 +45,31 @@ classdef ShieldGetBlock < matlab.System
             name = 'V1';
             varargout{1} = 'V2';
         end
+
+        % Simulink's automatic output-property inference tries to
+        % statically analyze stepImpl via code generation regardless of
+        % the "Simulate using" setting, and fails because
+        % getShieldConnection uses inputParser (not codegen-compatible).
+        % Declaring these explicitly skips that inference entirely.
+        function [sz1, sz2] = getOutputSizeImpl(~)
+            sz1 = [1 1];
+            sz2 = [1 1];
+        end
+
+        function [dt1, dt2] = getOutputDataTypeImpl(~)
+            dt1 = 'double';
+            dt2 = 'double';
+        end
+
+        function [cplx1, cplx2] = isOutputComplexImpl(~)
+            cplx1 = false;
+            cplx2 = false;
+        end
+
+        function [fixed1, fixed2] = isOutputFixedSizeImpl(~)
+            fixed1 = true;
+            fixed2 = true;
+        end
     end
 
     methods (Static, Access = protected)
