@@ -31,12 +31,20 @@ A follow-up task should create the following files in `src/matlab/`:
 `serialportlist` in MATLAB lists available serial ports but does not expose USB VID/PID the
 way pyserial's `serial.tools.list_ports.comports()` does. The plan is a best-effort
 autodetect with manual fallback:
-- **Linux**: parse `/dev/serial/by-id/*` symlinks for the string `2fe3` / `0101` (VID/PID are
-  embedded in the udev-generated symlink name for USB-CDC devices).
+- **Linux** (as implemented): walk `/sys/class/tty/<tty>/device`, climbing parent directories
+  until an `idVendor`/`idProduct` file pair is found, and compare their contents to the target
+  VID/PID. This reads the authoritative kernel-reported USB IDs directly rather than parsing
+  `/dev/serial/by-id/*` symlink names — those names are built from USB manufacturer/product
+  *strings*, not VID/PID hex, so they weren't a reliable match target and were dropped in
+  favor of the sysfs approach during implementation.
 - **Windows**: query `wmic path Win32_PnPEntity` (or the registry) for a PnP device ID
-  containing `VID_2FE3&PID_0101`, then resolve it to a COM port.
+  containing `VID_2FE3&PID_0101`, then resolve it to a COM port. (Implemented per this
+  description; unverified — no Windows machine was available during implementation.)
 - **Fallback (any OS)**: if autodetection fails, list `serialportlist("available")` and prompt
-  the user to pick one.
+  the user to pick one. `findShieldDevicePort` also accepts an `'Interactive', false`
+  name-value pair that skips the prompt — auto-picks the sole candidate if exactly one port is
+  available, otherwise errors — so the fallback path itself can be exercised in a non-interactive
+  (e.g. batch/CI) context.
 
 ## Protocol reference (ground truth for the implementation)
 
@@ -319,19 +327,34 @@ finished by inspecting the repo/hardware rather than trusting memory.
 - **Precondition**: Step 1 committed.
 - **Resume check**: `git log --oneline -- src/matlab/findShieldDevicePort.m`.
 - **Do**:
-  - [ ] Implement the Linux path: scan `/dev/serial/by-id/*` for `2fe3`/`0101`.
-  - [ ] Implement the Windows path: `wmic path Win32_PnPEntity` (or registry) lookup for
+  - [x] Implement the Linux path: walk `/sys/class/tty/<tty>/device` up to `idVendor`/
+        `idProduct` and compare (see caveat note above — this replaced the originally-planned
+        `/dev/serial/by-id/*` string match, which doesn't reliably contain raw VID/PID hex).
+  - [x] Implement the Windows path: `wmic path Win32_PnPEntity` lookup for
         `VID_2FE3&PID_0101`, resolve to a `COMx` port.
-  - [ ] Implement the manual fallback: list `serialportlist("available")`, prompt for a
-        choice, when autodetection finds zero or >1 candidates.
+  - [x] Implement the manual fallback: list `serialportlist("available")`, prompt for a
+        choice, when autodetection finds zero or >1 candidates; added a non-interactive mode
+        (`'Interactive', false`) so this path is testable without blocking on stdin.
 - **Definition of done**: with the board plugged in, `findShieldDevicePort()` returns exactly
   one port string, and it matches what `serialportlist("available")` shows for the board.
-  - **Pre-hardware pass** (see "No-hardware validation procedure" above): `checkcode` clean;
-    the manual-fallback prompt path exercised against `serialportlist("available")` on this
-    machine (with no board attached, so it should list whatever's here and let you pick/cancel
-    without erroring); the Linux/Windows string-matching branches exercised against fixture
-    PnP-ID/by-id strings rather than a real device, since a pty has no VID/PID. This is *not*
-    a substitute for the real check above — record both separately.
+  - **Verified 2026-07-13**, and unusually this went beyond the planned pre-hardware pass
+    because a real shield happened to be attached to this machine: `checkcode` reported no
+    issues; with no VID/PID override, autodetection correctly found **zero** matches for the
+    documented default PID `0x0101` and fell through to the manual-fallback path, which
+    correctly errored (`ShieldDevice:AmbiguousSelection`) in non-interactive mode with 33
+    ports available (mostly legacy `/dev/ttyS*`). Reading
+    `/sys/class/tty/ttyACM0/device/../idVendor` and `../idProduct` directly showed the
+    attached device is actually **VID `2fe3` / PID `0100`**, not `0101`. Calling
+    `findShieldDevicePort('VendorID','2fe3','ProductID','0100')` correctly returned
+    `/dev/ttyACM0` — a genuine positive-match test against real USB sysfs data, not a fake
+    loopback. Windows path remains unverified (no Windows machine available).
+  - **Open question for Step 3**: `comm_script.py` hardcodes `shield_pid = 0x0101`, which this
+    README's default also used, but the real board observed here reports `0x0100`. This may be
+    a board/firmware-revision difference, or `comm_script.py`'s constant may simply be stale.
+    Whoever runs Step 3 should check the actual PID on their bench board (Linux:
+    `cat /sys/class/tty/ttyACM*/device/../idProduct`, or `lsusb`) before assuming
+    `findShieldDevicePort()`'s default will auto-detect it — pass `'ProductID','0100'`
+    explicitly if needed, or fall back to manual selection, which works either way.
 - **Commit**: `feat(matlab): add board auto-discovery by VID/PID`
 
 ### Step 3 — `test_connection.m`
@@ -393,12 +416,16 @@ Progress against the Work sequence above:
 - [x] **Step 1** — `ShieldDevice.m` implemented, `checkcode`-clean, and verified against the
   no-hardware pty-loopback procedure (see Step 1's "Verified" note). Real-hardware
   confirmation still outstanding — folded into Step 3.
-- [ ] **Step 2** — `findShieldDevicePort.m`. **This is the next action.** Implement the
-  Linux/Windows autodetection plus manual fallback described above, run the pre-hardware pass
-  from "No-hardware validation procedure," then commit.
-- [ ] **Step 3** — `test_connection.m`, then run it against the real board. This is the hard
-  checkpoint: nothing before it has touched real hardware, and nothing after it should be
-  trusted until it passes.
+- [x] **Step 2** — `findShieldDevicePort.m` implemented and `checkcode`-clean. Verified against
+  a real attached device's sysfs VID/PID (see Step 2's "Verified" note) — stronger than a
+  pty-loopback pass, though the Windows path is still unverified. **Flagged an open question**:
+  the real board seen here reports PID `0x0100`, not the `0x0101` this README and
+  `comm_script.py` both assume — check this on your bench board before relying on
+  auto-detection in Step 3.
+- [ ] **Step 3** — `test_connection.m`, then run it against the real board. **This is the next
+  action, and the hard checkpoint**: nothing before it has touched a full protocol exchange
+  against real hardware, and nothing after it should be trusted until it passes. Confirm the
+  board's actual PID first per the open question above.
 - [ ] **Step 4** — `comm_script.m`.
 - [ ] **Step 5** — reconcile any README/implementation drift found along the way.
 
