@@ -181,6 +181,60 @@ Run this script manually with the board connected before relying on `comm_script
 isolates connection/parsing bugs from the plotting/animation loop, which is harder to debug
 interactively.
 
+## No-hardware validation procedure
+
+Before the real-hardware checkpoint in Step 3, each step should be validated as far as
+possible without the board attached. This machine has MATLAB on `PATH`
+(`matlab -batch "..."` runs a script non-interactively and exits) but no `socat`, so the
+harness below uses Python's built-in `pty` module to fake a serial device instead. This is the
+same procedure used to validate `ShieldDevice.m` in Step 1 — reuse it for Steps 2 and 4.
+
+**Two layers, run in this order:**
+
+1. **Static check** — catches syntax/undefined-variable/style issues before ever opening a
+   port:
+
+   ```bash
+   matlab -batch "result = checkcode('/path/to/File.m'); \
+     if isempty(result), disp('CHECKCODE: no issues'); \
+     else, for i=1:numel(result), fprintf('CHECKCODE: line %d: %s\n', result(i).line, result(i).message); end; end"
+   ```
+
+2. **Behavioral check** — exercises the real code path against a virtual serial port:
+   - A Python helper (`fake_board.py`) opens a pty pair with `pty.openpty()`, writes the slave
+     device path (e.g. `/dev/pts/5`) to a file so MATLAB can read it, then loops: logs every
+     byte it receives on the master end (with a timestamp, so chunking/pacing can be checked),
+     and periodically writes a synthetic response — e.g. a bogus non-16-field "debug" line
+     followed by a well-formed 16-field telemetry frame with known values planted at specific
+     indices.
+   - A MATLAB wrapper function (`test_<thing>.m`) reads the port path from that file,
+     exercises the class/function under test (constructs `ShieldDevice`, calls `sendCommand`/
+     `getMeasurement`/etc., wrapped in `try`/`catch` so failures are reported instead of
+     aborting the batch run), and `fprintf`s results in an easily `grep`-able form
+     (`MSG1:...`, `V1:...`, `ERRTEST:OK:...`).
+   - Run the Python harness in the background, wait for its port-path file to appear, then run
+     `matlab -batch "test_<thing>('/path/to/port.txt')"`, then kill the harness and inspect its
+     byte log alongside MATLAB's stdout.
+   - Put both files under the scratchpad/temp directory, not in `src/matlab/` — they are test
+     scaffolding for this validation procedure, not part of the shipped `.m` files.
+
+**What this can and cannot prove:**
+
+- Can prove: exact wire-format strings, chunk sizes and inter-chunk/inter-command timing
+  (from the logged receive timestamps), correct parsing/index-mapping of measurement frames,
+  correct rejection of malformed/interleaved lines, correct error handling on bad input —
+  i.e. everything in the "Protocol reference" section above.
+- Cannot prove: real USB enumeration or VID/PID matching (a pty has no USB VID/PID, so
+  `findShieldDevicePort`'s autodetection logic itself can only be validated against real
+  hardware or by unit-testing its string-matching against fixture strings — its *manual
+  fallback* prompt path, which just wraps `serialportlist`, can still be exercised), and
+  anything about the real firmware's actual timing/format/quirks. That gap is exactly what
+  Step 3's `test_connection.m` run against the physical board is for — treat a pass here as
+  "implementation matches the documented protocol," not as "verified against hardware."
+
+Record the result in the corresponding Work-sequence step below (checkboxes + a dated
+"Verified" note), the same way Step 1 is recorded, so it's visible without re-deriving it.
+
 ## Commit sequence
 
 This README documents the plan; a follow-up implementation task should land the `.m` files in
@@ -253,6 +307,12 @@ finished by inspecting the repo/hardware rather than trusting memory.
         choice, when autodetection finds zero or >1 candidates.
 - **Definition of done**: with the board plugged in, `findShieldDevicePort()` returns exactly
   one port string, and it matches what `serialportlist("available")` shows for the board.
+  - **Pre-hardware pass** (see "No-hardware validation procedure" above): `checkcode` clean;
+    the manual-fallback prompt path exercised against `serialportlist("available")` on this
+    machine (with no board attached, so it should list whatever's here and let you pick/cancel
+    without erroring); the Linux/Windows string-matching branches exercised against fixture
+    PnP-ID/by-id strings rather than a real device, since a pty has no VID/PID. This is *not*
+    a substitute for the real check above — record both separately.
 - **Commit**: `feat(matlab): add board auto-discovery by VID/PID`
 
 ### Step 3 — `test_connection.m`
@@ -289,6 +349,14 @@ finished by inspecting the repo/hardware rather than trusting memory.
 - **Definition of done**: running `comm_script.m` against real hardware shows a live-updating
   V1/V2 plot tracking the triangular reference, and closing the figure (or Ctrl+C) leaves the
   board in `IDLE`.
+  - **Pre-hardware pass** (see "No-hardware validation procedure" above): `checkcode` clean;
+    extend `fake_board.py` to answer the full setup sequence (not just `LEG`/`REFERENCE`) and
+    to stream continuously-updating telemetry so the 200-frame loop's reference ramp/wrap
+    logic and repeated `getMeasurement` calls can be checked against known planted values over
+    many frames; run under `matlab -batch` with `-nodisplay` and confirm it completes 200
+    frames and sends the final `IDLE` without error. Note: batch mode has no figure window, so
+    this only proves the control/data-flow logic, not that the plot actually renders correctly
+    — visually confirming the live plot is real-hardware-only, part of the Step 4 real check.
 - **Commit**: `feat(matlab): add MATLAB port of comm_script.py demo loop`
 
 ### Step 5 — README corrections
@@ -301,6 +369,20 @@ finished by inspecting the repo/hardware rather than trusting memory.
 
 ## Next steps
 
-This README is the design plan only. `ShieldDevice.m`, `findShieldDevicePort.m`,
-`test_connection.m`, and `comm_script.m` are a follow-up implementation task and are not part
-of this change.
+Progress against the Work sequence above:
+
+- [x] **Step 1** — `ShieldDevice.m` implemented, `checkcode`-clean, and verified against the
+  no-hardware pty-loopback procedure (see Step 1's "Verified" note). Real-hardware
+  confirmation still outstanding — folded into Step 3.
+- [ ] **Step 2** — `findShieldDevicePort.m`. **This is the next action.** Implement the
+  Linux/Windows autodetection plus manual fallback described above, run the pre-hardware pass
+  from "No-hardware validation procedure," then commit.
+- [ ] **Step 3** — `test_connection.m`, then run it against the real board. This is the hard
+  checkpoint: nothing before it has touched real hardware, and nothing after it should be
+  trusted until it passes.
+- [ ] **Step 4** — `comm_script.m`.
+- [ ] **Step 5** — reconcile any README/implementation drift found along the way.
+
+If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above
+already have commits, match that against the checkboxes here and in the corresponding Work
+sequence block, and continue from the first unchecked item.
