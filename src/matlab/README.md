@@ -232,6 +232,25 @@ same procedure used to validate `ShieldDevice.m` in Step 1 — reuse it for Step
   Step 3's `test_connection.m` run against the physical board is for — treat a pass here as
   "implementation matches the documented protocol," not as "verified against hardware."
 
+**Why a real board is unavoidable eventually**: this procedure validates the MATLAB code
+against *my reconstruction* of the protocol from reading the firmware source — not against the
+firmware actually running. A pty-loopback pass only proves internal consistency (the code does
+what the README says), it cannot catch a case where the README/source-reading is itself wrong,
+where the real board's USB-CDC enumeration behaves differently than assumed, or where actual
+telemetry timing/framing has quirks not visible in source. Concretely, a real board is required
+starting at:
+
+- **Step 2** — to prove `findShieldDevicePort` actually finds VID `0x2FE3`/PID `0x0101` on this
+  OS, not just that its string-matching logic is internally correct against fixtures.
+- **Step 3** — the hard checkpoint: nothing before it has touched real hardware, and nothing
+  after it should be trusted until it passes against the physical board.
+- **Step 4** — to confirm the live plot actually renders and tracks real measurements (batch
+  mode has no figure window, so the no-hardware pass for Step 4 only proves control/data-flow
+  logic, never the plot itself).
+
+No-hardware passes are a fast way to catch implementation bugs early and cheaply, but they are
+additive to, not a replacement for, running against the board.
+
 Record the result in the corresponding Work-sequence step below (checkboxes + a dated
 "Verified" note), the same way Step 1 is recorded, so it's visible without re-deriving it.
 
