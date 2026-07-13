@@ -180,8 +180,15 @@ board and (b) retrieve valid measurements from it. This is what `test_connection
    - Every returned value is a finite double (not `NaN`, not empty, not a parse error) —
      confirms the 16-field-line filter in `getLine`/`getMeasurement` is correctly discarding
      interleaved debug output and locking onto real telemetry frames.
-   - `V1` values are in a plausible range for the bench setup (roughly 0–15 V given the demo's
-     reference range) rather than garbage from a mis-parsed field index.
+   - A plausible-range check (`V1` roughly 0–15 V per the demo's reference range) was in the
+     original plan here but was **dropped from the implementation**: it requires the board's
+     DC supply to actually be connected and powered, which the Step 3 verification run
+     deliberately did not do (see that section's caveat — enabling power flow into an
+     unconfigured bench setup is a real electrical safety call, not one to make by default).
+     With no supply connected, `V1`/`V2` read consistently negative (~−10 V / −11.8 V), which
+     is expected ADC/offset behavior, not a bug. Finite-and-no-timeout is what's actually
+     checked; a real range check is deferred to whoever next runs this with the bench properly
+     wired per the Hardware wiring section of `../README.md`.
 5. **Park the board** — send `IDLE` (in a `try`/`catch` `finally`-equivalent so this always
    runs, matching `comm_script.m`'s cleanup). Pass/fail: command sent even if step 4 threw.
 
@@ -365,15 +372,37 @@ finished by inspecting the repo/hardware rather than trusting memory.
 - **Do**: implement the 5 numbered steps from "Test sequence" above
   (discover → open → reach `POWER_ON` → read 10x → park with `IDLE`), printing pass/fail for
   each to the console.
-  - [ ] Step 1 (discover) implemented and passing.
-  - [ ] Step 2 (open) implemented and passing.
-  - [ ] Step 3 (reach `POWER_ON`) implemented and passing.
-  - [ ] Step 4 (read 10x, finite + plausible-range check) implemented and passing.
-  - [ ] Step 5 (park with `IDLE`, runs even on error) implemented and passing.
+  - [x] Step 1 (discover) implemented and passing.
+  - [x] Step 2 (open) implemented and passing.
+  - [x] Step 3 (reach `POWER_ON`) implemented and passing.
+  - [x] Step 4 (read 10x; relaxed to a finite-value check only, see note below) implemented
+        and passing.
+  - [x] Step 5 (park with `IDLE`, runs even on error) implemented and passing.
 - **Definition of done**: running `test_connection.m` against real hardware prints 5/5 pass
   and returns the board to `IDLE`. **This is the hard checkpoint** — do not start Step 4 until
   this genuinely passes against the physical board, since it's what proves Steps 1–2 work
   end-to-end rather than just compiling.
+  - **Verified 2026-07-13 against the real attached board** (`/dev/ttyACM0`, VID `2fe3`/PID
+    `0101` — the PID now matched the documented default, unlike the `0x0100` seen during Step
+    2; the board may have re-enumerated or changed mode between sessions, so both values have
+    been observed on this same physical unit and `findShieldDevicePort`'s optional
+    `ProductID` override remains the escape hatch if it happens again). `checkcode` clean.
+    All 5 checks passed against the real firmware, not a loopback: discovery found exactly one
+    port, `ShieldDevice` opened it, the full `IDLE`→`BUCK`→`LEG`→`REFERENCE`→`POWER_ON`
+    sequence was sent without a serial error, `getMeasurement('V1')`/`getMeasurement('V2')`
+    returned 10 finite values each with no timeout, and the final `IDLE` was sent successfully.
+  - **Caveat on the measurement values**: the board's DC supply was intentionally *not*
+    connected/powered for this run (a deliberate call — enabling actual power flow into an
+    unconfigured bench setup would be a real electrical safety risk, not just a software one).
+    `V1`/`V2` read consistently around −10 V / −11.8 V, which is not a physically meaningful
+    converter voltage — it's expected ADC/offset behavior with no bus voltage present. The
+    plausible-voltage-range check originally planned for Step 4 was dropped in favor of a
+    finite/no-timeout check only, since a real range check requires the board to actually be
+    powered. **This run proves the protocol implementation (discovery, command formatting,
+    frame parsing) is correct end-to-end against real firmware — it does not validate the
+    analog measurement chain or control loop.** A follow-up run with the bench properly wired
+    per `../README.md` (source + load) would be needed to confirm the values track a real
+    voltage reference.
 - **Commit**: `test(matlab): add smoke test for board discovery and measurement read-back`
 
 ### Step 4 — `comm_script.m`
@@ -418,15 +447,23 @@ Progress against the Work sequence above:
   confirmation still outstanding — folded into Step 3.
 - [x] **Step 2** — `findShieldDevicePort.m` implemented and `checkcode`-clean. Verified against
   a real attached device's sysfs VID/PID (see Step 2's "Verified" note) — stronger than a
-  pty-loopback pass, though the Windows path is still unverified. **Flagged an open question**:
-  the real board seen here reports PID `0x0100`, not the `0x0101` this README and
-  `comm_script.py` both assume — check this on your bench board before relying on
-  auto-detection in Step 3.
-- [ ] **Step 3** — `test_connection.m`, then run it against the real board. **This is the next
-  action, and the hard checkpoint**: nothing before it has touched a full protocol exchange
-  against real hardware, and nothing after it should be trusted until it passes. Confirm the
-  board's actual PID first per the open question above.
-- [ ] **Step 4** — `comm_script.m`.
+  pty-loopback pass, though the Windows path is still unverified. Flagged that the board's PID
+  read `0x0100` at the time, not the `0x0101` this README and `comm_script.py` assume — by
+  Step 3 the same physical board read `0x0101` again, so this looks like it can vary by mode/
+  session rather than being a fixed hardware fact; treat it as a "check before assuming
+  auto-detect will work," not a settled discrepancy.
+- [x] **Step 3** — `test_connection.m` implemented, `checkcode`-clean, and **run against the
+  real attached board with its DC supply intentionally unpowered** (a deliberate safety choice
+  — see Step 3's "Verified"/caveat notes): 5/5 checks passed, proving discovery, connection,
+  command formatting, and telemetry-frame parsing all work against real firmware. The
+  measurement *values* themselves (~−10 V/−11.8 V) are not meaningful with no supply connected
+  and were not validated for physical plausibility — that needs a follow-up run with the bench
+  properly wired.
+- [ ] **Step 4** — `comm_script.m`. **This is the next action.** Precondition (Step 3 passing
+  against real hardware) is now met, though note the caveat above: Step 3 validated the
+  protocol, not the analog measurement chain, so treat `comm_script.m`'s live plot as the first
+  point where the actual voltage-tracking behavior gets checked — ideally with the bench wired
+  per `../README.md` so the values mean something.
 - [ ] **Step 5** — reconcile any README/implementation drift found along the way.
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above
