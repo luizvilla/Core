@@ -189,6 +189,16 @@ exists.
     confirming the full get/release lifecycle, not just the two behaviors named in the
     definition of done above. 15 total commands logged across the whole sequence
     (7 + 0 + 1 + 0 + 7), exactly as expected.
+  - **Discovery re-confirmed against real hardware 2026-07-13**: with a board attached, a
+    sysfs check (`idVendor`/`idProduct` under `/sys/class/tty/ttyACM0`) showed VID `2fe3`/PID
+    `0101`, and `findShieldDevicePort()` run directly in MATLAB against it returned
+    `/dev/ttyACM0` on the first try — no fallback needed this time, unlike the PID
+    `0x0100`/`0x0101` variability noted in `README.md`'s Step 2. **Scope note**: this only
+    exercises `findShieldDevicePort` (discovery), not `getShieldConnection` as a whole —
+    opening a connection would run the full setup sequence and start power flow, which needs
+    the same explicit go-ahead as the rest of this project's real-hardware steps. A full
+    real-hardware pass of `getShieldConnection`/`releaseShieldConnection` (open, setup, park)
+    is still pending — see Step 5.
 - **Commit**: `feat(matlab): add shared shield connection singleton`
 
 ### Step 2 — `ShieldSendBlock.m`
