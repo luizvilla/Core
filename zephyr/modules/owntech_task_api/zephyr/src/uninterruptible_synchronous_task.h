@@ -86,5 +86,16 @@ void scheduling_start_uninterruptible_synchronous_task(
  */
 void scheduling_stop_uninterruptible_synchronous_task();
 
+/**
+ * @brief Get the configured period of the uninterruptible synchronous task.
+ *
+ * Used by the periodic task (see periodic_synchronous_task.h) to validate
+ * that its own period is an integer multiple of this one.
+ *
+ * @return The task period in microseconds, or `0` if the task has not been
+ *         defined yet.
+ */
+uint32_t scheduling_get_uninterruptible_synchronous_task_period();
+
 
 #endif /* UNINTERRUPTIBLESYNCHRONOUSTASK_H_ */

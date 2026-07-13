@@ -272,3 +272,8 @@ void scheduling_stop_uninterruptible_synchronous_task()
 		uninterruptibleTaskStatus = task_status_t::suspended;
 	}
 }
+
+uint32_t scheduling_get_uninterruptible_synchronous_task_period()
+{
+	return task_period;
+}

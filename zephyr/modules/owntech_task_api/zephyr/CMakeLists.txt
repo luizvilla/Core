@@ -11,5 +11,6 @@ if(CONFIG_OWNTECH_TASK_API)
     src/scheduling_common.cpp
     src/uninterruptible_synchronous_task.cpp
     src/asynchronous_tasks.cpp
+    src/periodic_synchronous_task.cpp
     )
 endif()
