@@ -26,6 +26,7 @@
 /* OwnTech Power API */
 #include "../src/uninterruptible_synchronous_task.h"
 #include "../src/asynchronous_tasks.h"
+#include "../src/periodic_synchronous_task.h"
 
 
 /* Current class header */
@@ -99,3 +100,30 @@ void TaskAPI::suspendBackgroundUs(uint32_t duration_us)
 }
 
 #endif /* CONFIG_OWNTECH_TASK_ENABLE_ASYNCHRONOUS_TASKS */
+
+
+/* Periodic task */
+
+#ifdef CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS
+
+int8_t TaskAPI::createPeriodic(task_function_t periodic_task,
+								uint32_t task_period_us)
+{
+	return scheduling_define_periodic_task(periodic_task, task_period_us);
+}
+
+void TaskAPI::startPeriodic(int8_t task_number)
+{
+	if (task_number != 0) return;
+
+	scheduling_start_periodic_task();
+}
+
+void TaskAPI::stopPeriodic(int8_t task_number)
+{
+	if (task_number != 0) return;
+
+	scheduling_stop_periodic_task();
+}
+
+#endif /* CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS */

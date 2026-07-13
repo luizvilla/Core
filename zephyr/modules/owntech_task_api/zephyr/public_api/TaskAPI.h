@@ -195,6 +195,60 @@ public:
 
 #endif /* CONFIG_OWNTECH_TASK_ENABLE_ASYNCHRONOUS_TASKS */
 
+#ifdef CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS
+
+	/**
+	 * @brief Creates a periodic task.
+	 *
+	 *        A periodic task is an additional hard real-time task that
+	 *        runs less often than the critical task, but remains a Zero
+	 *        Latency Interrupt: it can be preempted by the critical task,
+	 *        unlike a background task it is not subject to RTOS
+	 *        scheduling jitter.
+	 *
+	 *        The critical task must already be defined (see
+	 *        createCritical()) before calling this function, as its
+	 *        period is the base unit `task_period_us` is checked against.
+	 *
+	 *        Only one periodic task can be defined.
+	 *
+	 * @param periodic_task Pointer to the void(void) function
+	 *        to be executed periodically.
+	 *
+	 * @param task_period_us Period of the function in µs. Must be a
+	 *        positive integer multiple of the critical task's period.
+	 *
+	 * @return Number assigned to the task (always `0` for now, since only
+	 *         one periodic task can be defined), or `-1` if there was an
+	 *         error defining the task (critical task not defined yet,
+	 *         invalid period, or a periodic task is already defined).
+	 */
+	int8_t createPeriodic(task_function_t periodic_task,
+						  uint32_t task_period_us);
+
+	/**
+	 * @brief Use this function to start a previously defined
+	 *        periodic task using its task number.
+	 *
+	 * @param task_number Number of the task to start, obtained
+	 *        using createPeriodic().
+	 */
+	void startPeriodic(int8_t task_number);
+
+	/**
+	 * @brief Use this function to stop a previously started
+	 *        periodic task using its task number.
+	 *
+	 *        The task can then be resumed by calling startPeriodic()
+	 *        again.
+	 *
+	 * @param task_number Number of the task to stop, obtained
+	 *        using createPeriodic().
+	 */
+	void stopPeriodic(int8_t task_number);
+
+#endif /* CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS */
+
 private:
 	static const int DEFAULT_PRIORITY;
 
