@@ -263,21 +263,60 @@ exists.
     frame streamed by the fake board (with an interleaved non-16-field debug line, confirming
     the field-count filter still works when called through the block); `release(obj)` sent
     exactly one `IDLE`. Full setup→step→release lifecycle confirmed, matching Step 2's result.
-- **Commit**: `feat(matlab): add Simulink block for reading shield measurements`
+  - **Amended during Step 4**: placing `ShieldGetBlock` inside an actual Simulink model (not
+    just calling `step()` directly) surfaced an error this direct-call test couldn't catch —
+    Simulink's automatic output-property inference tries to statically analyze `stepImpl` via
+    code generation *regardless of the "Simulate using" setting*, and fails because
+    `getShieldConnection` uses `inputParser` (not codegen-compatible):
+    `Function inputParser is not supported for code generation`. Fixed by explicitly
+    implementing `getOutputSizeImpl`/`getOutputDataTypeImpl`/`isOutputComplexImpl`/
+    `isOutputFixedSizeImpl` (declaring both outputs as `[1 1]` `double`, real, fixed-size) so
+    Simulink never attempts that inference — the same four methods present in the real
+    `SerialReceive.m` example checked during Step 2, which should have been included from the
+    start. Re-verified: the direct-`step()` pty-loopback test above still passes unchanged.
+- **Commit**: `feat(matlab): add Simulink block for reading shield measurements`,
+  amended by `fix(matlab): declare ShieldGetBlock output properties for Simulink inference`
 
 ### Step 4 — `build_shield_test_model.m` + `shield_test_model.slx`
 
 - **Precondition**: Steps 1–3 committed.
 - **Resume check**: `git log --oneline -- src/matlab/build_shield_test_model.m`.
 - **Do**:
-  - [ ] Write `build_shield_test_model.m` per "Simple Simulink test model" above: reference
-        source → both `ShieldSendBlock` inputs; `ShieldGetBlock` outputs → `Scope` +
-        `To Workspace`; discrete fixed-step config; bounded/settable stop time.
-  - [ ] Run the builder to generate `shield_test_model.slx`; commit both.
-  - [ ] No-hardware pass: run the model against the pty fake board for a short bounded stop
+  - [x] Write `build_shield_test_model.m` per "Simple Simulink test model" above: reference
+        source (`Repeating Sequence Stair`, `OutValues = [5.5:0.5:14.5, 5.0]`, reproducing
+        `comm_script.m`'s ramp exactly) → both `ShieldSendBlock` inputs; `ShieldGetBlock`
+        outputs → one 2-port `Scope` + separate `V1`/`V2` `To Workspace` blocks; ramp also
+        logged to its own `To Workspace`; discrete fixed-step solver (`FixedStepDiscrete`,
+        step = 1s matching the blocks' `SampleTime`); `StopTime` defaults to 5s (bounded, and
+        overridable via `set_param` before `sim()` for a longer real run in Step 5).
+  - [x] Run the builder to generate `shield_test_model.slx`; commit both.
+  - [x] No-hardware pass: run the model against the pty fake board for a short bounded stop
         time; assert logged `V1`/`V2` match the planted values.
 - **Definition of done**: the no-hardware pass above completes with no errors and correct logged
   values, proving both blocks share one connection inside an actual compiled model.
+  - **Implementation details confirmed against real Simulink** (not assumed) before writing the
+    final builder: the "MATLAB System" block's library path
+    (`simulink/User-Defined Functions/MATLAB System`) and its class-selection parameter (`System`
+    — not `SystemObjectClassName`, which doesn't exist); that setting `System` auto-exposes the
+    class's `Nontunable` properties as directly `set_param`-able block parameters; `Repeating
+    Sequence Stair`'s `tsamp` is a scalar sample time, not a per-value timestamp vector as first
+    assumed; and that `set_param(model, 'ReturnWorkspaceOutputs', 'on')` plus
+    `simOut = sim(model); get(simOut, 'VarName')` retrieves `To Workspace` logs without touching
+    the base workspace (consistent with this project's earlier preference — see
+    `getShieldConnection`'s design note — for avoiding base-workspace pollution).
+  - **Verified 2026-07-13** without real hardware, using the same pty fake-board pattern as
+    Steps 1–3 (continuously-streamed synthetic telemetry, `V1 = 9.87654`, `V2 = 1.23456`),
+    `ForcedPort` set via `set_param` on both blocks before `sim()`: the model ran to completion
+    (`StopTime = 5`, 6 sample points including `t=0`) with no errors.
+    `V1_log`/`V2_log` were `[9.87654 9.87654 9.87654 9.87654 9.87654 9.87654]` and
+    `[1.23456 1.23456 1.23456 1.23456 1.23456 1.23456]` — an exact match at every sample, every
+    time. `Ref_log` was `[5.5 6 6.5 7 7.5 8]`, the correct start of the triangular ramp. Total
+    wall-clock time ≈97s (model compile/load overhead plus ~1s/frame real-I/O-paced steps,
+    consistent with the timing documented in `README.md`'s Step 4). This is the first
+    confirmation that `ShieldSendBlock` and `ShieldGetBlock` correctly share one
+    `getShieldConnection()` instance *inside a compiled Simulink model*, not just when called
+    directly from a script (Steps 2–3's tests).
+  - See Step 3's "Amended during Step 4" note for a `ShieldGetBlock.m` fix this pass required.
 - **Commit**: `test(matlab): add Simulink test model wiring the shield blocks together`
 
 ### Step 5 — Real-hardware verification
@@ -313,10 +352,15 @@ exists.
   correctly returned the exact planted `V1`/`V2` values, full setup→step→release lifecycle
   confirmed, matching Step 2's result and reusing its already-confirmed `matlab.System`
   patterns directly.
-- [ ] **Step 4** — `build_shield_test_model.m` + `shield_test_model.slx`, plus its no-hardware
-  pass. **This is the next action** — both runtime blocks now exist, so this is the first point
-  they get exercised together inside an actual compiled Simulink model.
-- [ ] **Step 5** — real-hardware verification, gated by explicit confirmation.
+- [x] **Step 4** — `build_shield_test_model.m` + `shield_test_model.slx` implemented, and the
+  no-hardware pass confirmed both blocks correctly share one connection inside a compiled
+  model: `V1_log`/`V2_log` exactly matched the fake board's planted values at every one of 6
+  sample points, `Ref_log` showed the correct triangular-ramp start. Required a fix to
+  `ShieldGetBlock.m` (output-property declarations) that direct-`step()` unit testing in Step 3
+  couldn't have caught — a real example of why the Simulink-diagram integration test layer
+  exists on top of the unit-test layer, not instead of it.
+- [ ] **Step 5** — real-hardware verification, gated by explicit confirmation. **This is the
+  next action.**
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above already
 have commits, and continue from the first unchecked item.
