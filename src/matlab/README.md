@@ -139,9 +139,18 @@ newline-terminated protocol.
    - Send `REFERENCE LEG1 V1 <ref>` and `REFERENCE LEG2 V2 <ref>`.
    - Sleep an extra 10 ms (on top of the 0.2 s built into the command send).
    - Read `V1` and `V2` measurements and append them to a live plot.
-   - Every 200 frames, clear the plot and re-base the sliding time axis.
-4. On exit — normal completion, error, or figure close — always send `IDLE` to park the board
-   (MATLAB `try`/`catch`, the analogue of the Python `try`/`finally`).
+   - Every 200 frames, clear the plot and re-base the sliding time axis. **Implementation
+     note**: `comm_script.py`'s own version of this reset is dead code —
+     `FuncAnimation(..., frames=range(frame_limit), ...)` only ever calls its callback with
+     `frame` in `0..frame_limit-1`, so the `if frame == frame_limit:` clear branch can never
+     run, and the Python plot's data lists grow unbounded across animation repeats instead of
+     ever resetting. `comm_script.m` implements the reset as originally documented here
+     (working, bounded-memory behavior) rather than reproducing that bug — see "Differences /
+     porting notes" below.
+4. On exit — normal completion, error, or figure close — always send `IDLE` to park the board.
+   Implemented with MATLAB's `onCleanup`, not `try`/`catch`: `onCleanup` fires on normal
+   return, a thrown error, *and* a user Ctrl+C interrupt, which a plain `try`/`catch` would not
+   reliably catch — a closer match to Python's `try`/`finally` guarantee than `try`/`catch` is.
 
 ## Differences / porting notes
 
@@ -153,6 +162,16 @@ newline-terminated protocol.
   the legacy `serial`/`instrfind` API.
 - Python's `matplotlib.animation.FuncAnimation` becomes a MATLAB loop using `animatedline` and
   `drawnow limitrate` for the live-updating plot.
+- `comm_script.m` fixes a dead-code bug in `comm_script.py`'s plot-reset logic (see
+  `comm_script.m` flow, step 3, above) rather than reproducing it, since the intent (a
+  bounded, resetting sliding window) is what's documented and useful, not the unreachable
+  branch.
+- `comm_script.m` is a function with name-value options (`FrameLimit`, `MaxCycles`,
+  `EnablePlot`, plus the `findShieldDevicePort` pass-throughs), not a bare top-level script
+  like `comm_script.py`. `MaxCycles`/`EnablePlot` exist specifically to make headless,
+  bounded-duration verification runs possible (see Step 4's "Verified" note) — calling
+  `comm_script()` with no arguments reproduces the original's "run with a live plot until the
+  figure is closed" behavior.
 
 ## Prerequisites
 
@@ -423,24 +442,33 @@ finished by inspecting the repo/hardware rather than trusting memory.
 - **Precondition**: Step 3 committed and passing against real hardware.
 - **Resume check**: `git log --oneline -- src/matlab/comm_script.m`.
 - **Do**:
-  - [ ] Port the setup sequence (`IDLE` → `BUCK`×2 → `LEG`×2 → `REFERENCE LEG1 V1 5` →
+  - [x] Port the setup sequence (`IDLE` → `BUCK`×2 → `LEG`×2 → `REFERENCE LEG1 V1 5` →
         `POWER_ON`), reusing `ShieldDevice`/`findShieldDevicePort`.
-  - [ ] Implement the 200-frame loop: triangular reference (5, +0.5, wrap at 15), send
+  - [x] Implement the 200-frame loop: triangular reference (5, +0.5, wrap at 15), send
         `REFERENCE` for both legs, 10 ms extra sleep, read `V1`/`V2`.
-  - [ ] Implement the live plot with `animatedline`/`drawnow limitrate`, resetting the window
-        every 200 frames.
-  - [ ] Wrap the loop in `try`/`catch` that always sends `IDLE` on exit.
+  - [x] Implement the live plot with `animatedline`/`drawnow limitrate`, resetting the window
+        every `FrameLimit` frames (working reset — see the dead-code note in the flow section
+        above for why this isn't a literal line-for-line port of `comm_script.py`).
+  - [x] Guarantee `IDLE` on exit via `onCleanup` (covers normal completion, error, figure
+        close, and Ctrl+C — see "Differences / porting notes" for why this was chosen over
+        `try`/`catch`).
 - **Definition of done**: running `comm_script.m` against real hardware shows a live-updating
   V1/V2 plot tracking the triangular reference, and closing the figure (or Ctrl+C) leaves the
   board in `IDLE`.
-  - **Pre-hardware pass** (see "No-hardware validation procedure" above): `checkcode` clean;
-    extend `fake_board.py` to answer the full setup sequence (not just `LEG`/`REFERENCE`) and
-    to stream continuously-updating telemetry so the 200-frame loop's reference ramp/wrap
-    logic and repeated `getMeasurement` calls can be checked against known planted values over
-    many frames; run under `matlab -batch` with `-nodisplay` and confirm it completes 200
-    frames and sends the final `IDLE` without error. Note: batch mode has no figure window, so
-    this only proves the control/data-flow logic, not that the plot actually renders correctly
-    — visually confirming the live plot is real-hardware-only, part of the Step 4 real check.
+  - **Verified 2026-07-13 against the real, powered board** (30 Vdc, same session as Step 3's
+    powered re-verification). `checkcode` clean. Ran the full functional loop headless —
+    `comm_script('EnablePlot', false, 'MaxCycles', 1)` — driving **both legs** (LEG2 exercised
+    for the first time in this project) through the complete 200-frame ramp (5→15→5 V) against
+    real firmware: completed in 205.4 s with no errors, consistent with the expected ~1 s/frame
+    from the chunked-write/settle-delay timing documented above. Independently confirmed the
+    board returned to `IDLE` afterward by raw-reading `/dev/ttyACM0` for 3 s and observing no
+    telemetry — matches the firmware's documented behavior that `IDLE` stops broadcasting.
+  - **Not verified**: the actual live plot rendering. This machine was only driven via
+    `matlab -batch` (no display), so `EnablePlot=false` was used for the real-hardware run —
+    it proves the command/ramp/measurement control-flow is correct, not that
+    `animatedline`/`drawnow` actually renders a readable live V1/V2 plot or that the
+    window-reset every `FrameLimit` frames looks right visually. Run `comm_script()` with
+    default arguments in an interactive MATLAB desktop session to confirm that part.
 - **Commit**: `feat(matlab): add MATLAB port of comm_script.py demo loop`
 
 ### Step 5 — README corrections
@@ -472,11 +500,20 @@ Progress against the Work sequence above:
   and closed-loop voltage regulation, not just the serial protocol). See Step 3's "Verified"/
   "Re-verified" notes. Both the protocol and the control loop are now confirmed against real
   hardware.
-- [ ] **Step 4** — `comm_script.m`. **This is the next action.** All preconditions are now
-  fully met, including the bench being powered — `comm_script.m`'s live 200-frame plot can be
-  meaningfully verified against real regulation behavior when implemented, not just
-  control-flow.
-- [ ] **Step 5** — reconcile any README/implementation drift found along the way.
+- [x] **Step 4** — `comm_script.m` implemented, `checkcode`-clean, and run headless
+  (`EnablePlot=false`) against the real powered board for one full 200-frame cycle driving
+  both legs 5→15→5 V: completed in 205.4 s with no errors, and the board was independently
+  confirmed back in `IDLE` afterward. Fixed a dead-code bug found in `comm_script.py`'s
+  plot-reset logic rather than reproducing it (see Step 4's "Verified" note and "Differences /
+  porting notes"). **Not yet verified**: the actual live-plot rendering — that needs an
+  interactive MATLAB desktop session (`comm_script()` with defaults), since this environment
+  only has non-interactive `matlab -batch` access.
+- [ ] **Step 5** — reconcile any README/implementation drift found along the way. **This is
+  the last step.** Candidate items already identified: the Linux-detection method changed from
+  the original plan (Step 2), the PID `0x0100`/`0x0101` variability (Step 2/3), and the
+  plot-reset dead-code fix (Step 4) are all documented inline already — Step 5 is mainly about
+  a final read-through to check nothing else drifted, plus whatever the interactive plot check
+  above turns up.
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above
 already have commits, match that against the checkboxes here and in the corresponding Work
