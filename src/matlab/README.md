@@ -1,50 +1,64 @@
-# MATLAB Communication Protocol (plan)
+# MATLAB Communication Protocol
 
-This document is the design plan for a MATLAB port of [`../comm_script.py`](../comm_script.py).
-It describes the exact serial protocol the Python script uses to drive a Twist 1.4.1 board and
-the file layout a follow-up implementation task will create in this folder. **No `.m` code is
-part of this change** — this README is the reference the implementation must match.
+MATLAB port of [`../comm_script.py`](../comm_script.py), driving a Twist 1.4.1 board over the
+same serial protocol. **Status: implemented and verified against real hardware** — all four
+`.m` files below exist, and the Work sequence section records dated evidence for each one,
+including two real-hardware runs (unpowered and powered at 30 Vdc) and an interactive
+confirmation that the live plot renders correctly. This document remains the protocol
+reference and implementation log: the tables below are the ground truth the `.m` files were
+built against, and the Work sequence is the audit trail of how each was actually verified —
+keep both in sync with the code going forward, per Step 5.
 
 ## Overview
 
 `comm_script.py` puts a Twist board through a fixed setup sequence (idle → configure both legs
 in buck mode → set an initial voltage reference → power on), then runs a real-time loop that
 ramps the voltage reference on `LEG1`/`LEG2` and plots the measured `V1`/`V2` values live. The
-MATLAB port should reproduce this exactly: same wire protocol, same command sequence, same
-measurement parsing, same live plot behaviour — for users who prototype in MATLAB/Simulink
-instead of Python.
+MATLAB port reproduces this: same wire protocol, same command sequence, same measurement
+parsing, same live plot behaviour — for users who prototype in MATLAB/Simulink instead of
+Python. One deliberate deviation is documented below (a dead-code plot-reset bug in the
+original was fixed rather than reproduced); everything else matches.
 
-## Support script files needed
+## Support script files
 
-A follow-up task should create the following files in `src/matlab/`:
+`src/matlab/` contains:
 
 | File | Purpose |
 |---|---|
 | `ShieldDevice.m` | `classdef` wrapping a `serialport` object. Methods: `sendCommand`, `sendMessage`, `getMeasurement`, `getLine`. Constructor defaults match `Shield_Class.__init__`: 115200 baud, 8 data bits, no parity, 1 stop bit, 2 s timeout. Holds the 16-field TWIST index map (see below) as a property. |
-| `findShieldDevicePort.m` | Device discovery helper, analogue of `find_devices.py`. See caveat below — MATLAB has no direct cross-platform VID/PID query like pyserial's `list_ports`, so this does best-effort OS-specific autodetection with a manual fallback. |
-| `comm_script.m` | Top-level script reproducing the exact command sequence and the real-time plot loop from `comm_script.py`. |
+| `findShieldDevicePort.m` | Device discovery function, analogue of `find_devices.py`. See caveat below — MATLAB has no direct cross-platform VID/PID query like pyserial's `list_ports`, so this does best-effort OS-specific autodetection with a manual fallback. |
+| `comm_script.m` | Function reproducing `comm_script.py`'s command sequence and real-time plot loop, with `FrameLimit`/`MaxCycles`/`EnablePlot` options added for headless/bounded verification — call it with no arguments to reproduce the original's behaviour exactly (run with a live plot until the figure is closed). |
 | `test_connection.m` | Standalone smoke test — finds the board, opens it, and confirms `V1`/`V2` measurements can be read back. See "Test sequence" below. |
 | `README.md` | This document. |
 
 ### `findShieldDevicePort.m` — device discovery caveat
 
 `serialportlist` in MATLAB lists available serial ports but does not expose USB VID/PID the
-way pyserial's `serial.tools.list_ports.comports()` does. The plan is a best-effort
+way pyserial's `serial.tools.list_ports.comports()` does. Implemented as a best-effort
 autodetect with manual fallback:
-- **Linux** (as implemented): walk `/sys/class/tty/<tty>/device`, climbing parent directories
-  until an `idVendor`/`idProduct` file pair is found, and compare their contents to the target
-  VID/PID. This reads the authoritative kernel-reported USB IDs directly rather than parsing
+
+- **Linux**: walk `/sys/class/tty/<tty>/device`, climbing parent directories until an
+  `idVendor`/`idProduct` file pair is found, and compare their contents to the target VID/PID
+  (passed in via `VendorID`/`ProductID` name-value arguments, default `2fe3`/`0101`). This
+  reads the authoritative kernel-reported USB IDs directly rather than parsing
   `/dev/serial/by-id/*` symlink names — those names are built from USB manufacturer/product
   *strings*, not VID/PID hex, so they weren't a reliable match target and were dropped in
-  favor of the sysfs approach during implementation.
-- **Windows**: query `wmic path Win32_PnPEntity` (or the registry) for a PnP device ID
-  containing `VID_2FE3&PID_0101`, then resolve it to a COM port. (Implemented per this
-  description; unverified — no Windows machine was available during implementation.)
+  favor of the sysfs approach during implementation. Verified against real hardware — see
+  Step 2 below.
+- **Windows**: query `wmic path Win32_PnPEntity` for a PnP device ID containing
+  `VID_<VendorID>&PID_<ProductID>` (same default `2fe3`/`0101`), then resolve it to a COM
+  port. Implemented per this description; **unverified** — no Windows machine was available
+  during implementation.
 - **Fallback (any OS)**: if autodetection fails, list `serialportlist("available")` and prompt
   the user to pick one. `findShieldDevicePort` also accepts an `'Interactive', false`
   name-value pair that skips the prompt — auto-picks the sole candidate if exactly one port is
   available, otherwise errors — so the fallback path itself can be exercised in a non-interactive
   (e.g. batch/CI) context.
+- **Note on the default PID**: real-hardware testing (Step 2/3) found the same physical board
+  reporting PID `0x0100` in one session and `0x0101` (the default used here, matching
+  `comm_script.py`'s hardcoded value) in another. Don't assume auto-detection will find your
+  board on the first try — check `cat /sys/class/tty/ttyACM*/device/../idProduct` (Linux) or
+  `lsusb` first, and pass `'ProductID', '...'` explicitly if it differs.
 
 ## Protocol reference (ground truth for the implementation)
 
@@ -63,7 +77,7 @@ and cross-checked against the firmware-side parser (`comm_protocol.cpp`, `initia
 | Parity | None |
 | Stop bits | 1 |
 | Read timeout | 2 s |
-| USB VID / PID | `0x2FE3` / `0x0101` |
+| USB VID / PID | `0x2FE3` / `0x0101` (documented default — seen to vary on real hardware, see the device discovery caveat above) |
 
 ### Sending a command
 
@@ -185,8 +199,11 @@ Goal: verify, independently of the full 200-frame demo, that the MATLAB port can
 board and (b) retrieve valid measurements from it. This is what `test_connection.m` should do:
 
 1. **Discover the port** — call `findShieldDevicePort()`. Pass/fail: returns exactly one port
-   whose PnP ID matches `VID_2FE3&PID_0101` (or, on the manual fallback path, the user-selected
-   port responds at all in step 2). Fail if zero or more than one candidate port is found.
+   whose PnP ID matches the target VID/PID (default `VID_2FE3&PID_0101`, but see the device
+   discovery caveat above — real hardware has been observed reporting `PID_0100` in one
+   session; pass `'ProductID','0100'` if auto-detection comes up empty) (or, on the manual
+   fallback path, the user-selected port responds at all in step 2). Fail if zero or more than
+   one candidate port is found with the PID actually in use.
 2. **Open the device** — construct `ShieldDevice(port)`. Pass/fail: `serialport` opens without
    error at 115200-8-N-1; no exception thrown.
 3. **Reach `POWER_ON`** — send `IDLE`, `BUCK LEG1 ON`, `LEG LEG1 ON`,
@@ -290,8 +307,8 @@ Record the result in the corresponding Work-sequence step below (checkboxes + a 
 
 ## Commit sequence
 
-This README documents the plan; a follow-up implementation task should land the `.m` files in
-small, independently-reviewable commits rather than one large drop:
+The `.m` files landed in small, independently-reviewable commits rather than one large drop,
+in this order (all now on the branch — see `git log --oneline -- src/matlab/`):
 
 1. `ShieldDevice.m` — `feat(matlab): add ShieldDevice class for Twist serial protocol`
 2. `findShieldDevicePort.m` — `feat(matlab): add board auto-discovery by VID/PID`
@@ -463,12 +480,14 @@ finished by inspecting the repo/hardware rather than trusting memory.
     from the chunked-write/settle-delay timing documented above. Independently confirmed the
     board returned to `IDLE` afterward by raw-reading `/dev/ttyACM0` for 3 s and observing no
     telemetry — matches the firmware's documented behavior that `IDLE` stops broadcasting.
-  - **Not verified**: the actual live plot rendering. This machine was only driven via
-    `matlab -batch` (no display), so `EnablePlot=false` was used for the real-hardware run —
-    it proves the command/ramp/measurement control-flow is correct, not that
-    `animatedline`/`drawnow` actually renders a readable live V1/V2 plot or that the
-    window-reset every `FrameLimit` frames looks right visually. Run `comm_script()` with
-    default arguments in an interactive MATLAB desktop session to confirm that part.
+  - **Live plot visually confirmed 2026-07-13**: the headless run above proved the
+    control/data-flow but not that anything actually rendered, since this environment only had
+    non-interactive `matlab -batch` access. The user ran `comm_script()` with default
+    arguments in an interactive MATLAB desktop session against the same powered board and
+    confirmed it worked — the live V1/V2 plot renders and tracks the ramping reference as
+    intended. This closes the last open gap from the earlier headless-only verification; all
+    four `.m` files now have real-hardware evidence for both protocol correctness and (for
+    `comm_script.m`) the visual/interactive behavior.
 - **Commit**: `feat(matlab): add MATLAB port of comm_script.py demo loop`
 
 ### Step 5 — README corrections
@@ -476,7 +495,26 @@ finished by inspecting the repo/hardware rather than trusting memory.
 - **Precondition**: Steps 1–4 done.
 - **Do**: fix any discrepancy discovered during implementation/testing between this README and
   the actual working `.m` files (e.g. a timing constant that needed tweaking on real hardware).
+  - [x] Title/intro updated from "design plan, no code yet" to reflect implemented +
+        real-hardware-verified status.
+  - [x] "Support script files needed" reworded from future tense to present (all four files
+        exist); `comm_script.m` row updated to describe it as a function with options, not a
+        bare script.
+  - [x] Windows device-discovery caveat reworded to make clear the VID/PID are parameterized
+        (`VendorID`/`ProductID`), not hardcoded, matching the Linux description and the actual
+        `findShieldDevicePort.m` signature.
+  - [x] Connection table and Test sequence step 1 updated to flag the observed PID
+        `0x0100`/`0x0101` variability instead of stating `0x0101` as an unconditional fact.
+  - [x] Step 4 updated with the interactive live-plot confirmation, closing the one gap left
+        by headless-only real-hardware verification.
+  - [x] Read through remaining sections (Protocol reference, Command format table, field index
+        map, `comm_script.m` flow, Differences/porting notes, Prerequisites, No-hardware
+        validation procedure, Commit sequence) against the shipped `.m` files — no further
+        drift found; they match the implementation as built.
 - **Definition of done**: README matches the shipped code.
+  - **Done 2026-07-13.** All items above applied. The Commit sequence section's planned order
+    (Steps 1→5, each its own commit, `test_connection.m` before `comm_script.m`) was followed
+    exactly as originally planned — no deviation there to document.
 - **Commit**: `docs(matlab): correct README per implementation findings`
 
 ## Next steps
@@ -505,15 +543,16 @@ Progress against the Work sequence above:
   both legs 5→15→5 V: completed in 205.4 s with no errors, and the board was independently
   confirmed back in `IDLE` afterward. Fixed a dead-code bug found in `comm_script.py`'s
   plot-reset logic rather than reproducing it (see Step 4's "Verified" note and "Differences /
-  porting notes"). **Not yet verified**: the actual live-plot rendering — that needs an
-  interactive MATLAB desktop session (`comm_script()` with defaults), since this environment
-  only has non-interactive `matlab -batch` access.
-- [ ] **Step 5** — reconcile any README/implementation drift found along the way. **This is
-  the last step.** Candidate items already identified: the Linux-detection method changed from
-  the original plan (Step 2), the PID `0x0100`/`0x0101` variability (Step 2/3), and the
-  plot-reset dead-code fix (Step 4) are all documented inline already — Step 5 is mainly about
-  a final read-through to check nothing else drifted, plus whatever the interactive plot check
-  above turns up.
+  porting notes"). **Live plot rendering visually confirmed** in an interactive MATLAB desktop
+  session against the same powered board — see Step 4's final note. All four `.m` files now
+  have real-hardware evidence.
+- [x] **Step 5** — README reconciled against the shipped implementation: title/intro, the
+  support-files table, the Windows caveat wording, the Connection table, and Test sequence
+  step 1 were all updated (see Step 5's checklist for the full list); no further drift found
+  on a full read-through. **The MATLAB port is complete**: implemented, statically clean, and
+  verified end-to-end against real hardware — protocol (Steps 1–3), closed-loop regulation
+  (Step 3 powered re-run), full command/ramp/measurement control-flow (Step 4 headless run),
+  and live-plot rendering (Step 4 interactive confirmation).
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above
 already have commits, match that against the checkboxes here and in the corresponding Work
