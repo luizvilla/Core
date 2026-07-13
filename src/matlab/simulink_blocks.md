@@ -384,8 +384,257 @@ confirmation (Step 5).
 `REFERENCE LEG1 V1` / `REFERENCE LEG2 V2` and to reading `V1`/`V2` — matching `comm_script.m`'s
 specific demo, not the full protocol surface `ShieldDevice` actually exposes (all `sendCommand`
 actions — `LEG`, `CAPA`, `DRIVER`, `BUCK`, `BOOST`, `DUTY`, `CALIBRATE` — and all 16
-measurement fields, not just `V1`/`V2`). Generalizing these blocks is tracked as separate
-follow-up work, not part of this plan's original scope.
+measurement fields, not just `V1`/`V2`). The section below plans generalizing this.
+
+If resuming cold on Steps 1–5 above: run `git log --oneline -- src/matlab/` to see which of the
+files have commits, and continue from the first unchecked item. For the expansion below, see its
+own Work sequence and resume checks.
+
+---
+
+## Expansion: generalized command/measurement blocks
+
+**Status: plan only.** None of the files below exist yet. This section is the design plan a
+follow-up implementation task executes against, the same way Steps 1–5 above were planned before
+being built — see that plan's own scope note: this document currently only contains the plan
+text; no `.m`/`.slx` files from this section exist until a later task builds them.
+
+### Why this expansion
+
+`ShieldSendBlock`/`ShieldGetBlock` only ever drive `LEG1/V1` + `LEG2/V2` via `REFERENCE`. Two
+gaps became apparent after real-hardware use: (1) the wider protocol (`LEG`/`CAPA`/`DRIVER`/
+`BUCK`/`BOOST` toggles, `DUTY`, `CALIBRATE`, `IDLE`/`POWER_OFF`/`POWER_ON` modes, and all 16
+measurement fields — see the Protocol reference above) isn't reachable from Simulink at all; and
+(2) more importantly, `getShieldConnection()` currently runs the full `BUCK`→`LEG`→`POWER_ON`
+setup **automatically and unconditionally** the moment any block first connects, so there is
+currently no way to control power state dynamically from *within* a running model — e.g. a
+safety interlock that only powers on when a condition is met.
+
+**Scope of this round**: generalize `REFERENCE` (send) and measurement read-back (get) to any
+leg/variable/field, and add mode/toggle command blocks so power sequencing can be driven from
+the diagram. `DUTY` and `CALIBRATE` are deferred to a documented future round — comparatively
+niche (`DUTY` is an open-loop alternative to `REFERENCE`'s closed loop; `CALIBRATE` is a
+one-time sensor-calibration operation, not a runtime control concern), unlike power sequencing
+which is operationally essential.
+
+**Explicit non-goal**: `ShieldSendBlock.m`/`ShieldGetBlock.m`/`shield_test_model.slx` stay
+**untouched** — real-hardware-verified today, this expansion adds new, separate blocks alongside
+them rather than generalizing them in place, so the already-validated model keeps working
+exactly as-is.
+
+### Expansion architecture
+
+**One necessary shared change**: `getShieldConnection.m` gains an `AutoSetup` option (default
+`true`, preserving all existing behavior exactly — `ShieldSendBlock`/`ShieldGetBlock` don't pass
+it, so they're unaffected). When `false`, the one-time `BUCK`/`LEG`/`REFERENCE`/`POWER_ON`
+sequence is skipped entirely, leaving the board in whatever state discovery left it in — letting
+a diagram built from the new Mode/Toggle blocks drive that sequencing itself instead.
+
+- **Gotcha to document alongside the change**: `getShieldConnection`'s persistent handle is a
+  shared singleton — only the *first* block to execute `setupImpl` actually determines which
+  `AutoSetup` (and `VendorID`/`ProductID`/`ForcedPort`) value takes effect for the whole model,
+  since later calls just return the cached handle without re-evaluating their own parameters.
+  Any model mixing manually-sequenced blocks must set `AutoSetup=false` **consistently on every
+  block instance** in that diagram, not just one. This "first call wins" behavior already
+  existed; `AutoSetup` just makes the consequence of getting it wrong more visible.
+
+**Four new blocks**, all `matlab.System`, all reusing `getShieldConnection`/
+`releaseShieldConnection` exactly like the existing two (same constructor-via-`setProperties`/
+`getSampleTimeImpl`/`createSampleTime`/static-`getSimulateUsingImpl`/`showSimulateUsingImpl`
+pattern confirmed in Steps 2–3, and the same `getOutputSizeImpl`/`getOutputDataTypeImpl`/
+`isOutputComplexImpl`/`isOutputFixedSizeImpl` fix from Step 4 wherever a block has outputs):
+
+1. **`ShieldReferenceBlock.m`** — generalizes `ShieldSendBlock`. Mask parameters `Leg` and
+   `Variable` (dropdowns via `matlab.system.StringSet`, the same pattern used by the real
+   `SerialReceive.m`'s `ActionWhenDataUnavailableSet`, checked as a reference during Step 2).
+   Single `Value` input. `stepImpl` sends `sendCommand('REFERENCE', Leg, Variable, value)`. One
+   instance = one leg/variable target; drop two instances to reproduce today's `LEG1/V1` +
+   `LEG2/V2` demo.
+2. **`ShieldMeasurementBlock.m`** — generalizes `ShieldGetBlock`. Mask parameter `Field`
+   (`StringSet` dropdown over all 16 valid keys from the field index map above). Single `Value`
+   output. One instance = one field being watched.
+3. **`ShieldModeBlock.m`** — sends `IDLE`/`POWER_OFF`/`POWER_ON`. Mask parameter `Mode`
+   (`StringSet` dropdown). Single boolean `Trigger` input; sends the configured mode command
+   only on a rising edge (tracked via a private `LastTrigger` property, the same "retain state
+   across steps" idiom `Device` already uses) — these are one-shot mode transitions, not
+   continuously-driven values, so sending every sample step would be both wasteful (each command
+   costs real wall-clock time, ~0.2–0.4s, per the chunked-write timing documented above) and
+   semantically wrong. One instance per mode; drop up to three for full runtime control.
+4. **`ShieldToggleBlock.m`** — sends `LEG`/`CAPA`/`DRIVER`/`BUCK`/`BOOST`. Mask parameters
+   `Action` and `Leg` (`StringSet` dropdowns). Single boolean `State` input; sends `on`/`off`
+   only when `State` *changes* (private `LastState` property, initialized empty so the first
+   step always sends), not every step — matches a physical toggle's semantics and avoids
+   redundant traffic.
+
+All four also expose `SampleTime`/`VendorID`/`ProductID`/`Interactive`/`ForcedPort`/`AutoSetup`
+as `Nontunable` mask parameters, matching the existing two blocks' pass-through pattern.
+
+### New generalized test model
+
+`build_shield_generalized_test_model.m` → `shield_generalized_test_model.slx`. Deliberately
+demonstrates *manual* sequencing (not relying on `getShieldConnection`'s automatic setup) as the
+real proof this expansion adds genuine capability, not just parameterized coverage:
+`AutoSetup=false` on every block instance; a one-shot pulse at `t=0` (e.g. a `Step` source
+feeding a `ShieldToggleBlock` for `BUCK LEG1`, another for `LEG LEG1`) sequences the board up,
+then a `ShieldModeBlock` (`POWER_ON`) trigger, then a `ShieldReferenceBlock`/
+`ShieldMeasurementBlock` pair drives/reads `LEG1`/`V1` — reproducing what `getShieldConnection`
+currently automates, but explicitly, from the diagram. `Scope` + `To Workspace` on the
+measurement, same pattern as `shield_test_model.slx`.
+
+### Expansion testing strategy
+
+Same two-layer method as Steps 1–5, applied per new block:
+
+1. **No-hardware unit test** — pty-loopback, direct `step()`/`release()` calls (as in Steps
+   1–3): for `ShieldReferenceBlock`/`ShieldToggleBlock`, assert exact wire-format strings for
+   arbitrary `Leg`/`Variable`/`Action` mask configurations, not just the two hardcoded
+   leg/variable pairs already tested. For `ShieldModeBlock`/`ShieldToggleBlock` specifically,
+   also assert edge/change-detection: stepping with an unchanged trigger/state value a second
+   time must **not** re-send the command — new behavior the existing blocks don't have, needing
+   its own explicit check.
+2. **Simulink-diagram integration test** — `shield_generalized_test_model.slx` against the pty
+   fake board (as in Step 4), asserting logged values, and specifically confirming that with
+   `AutoSetup=false` set on every block, **no** setup-sequence traffic appears before the
+   model's own explicit Toggle/Mode blocks send it.
+3. **Real hardware** — gated by explicit confirmation before any power-enabling command, same
+   pattern as every real-hardware step in this project so far.
+
+### Expansion commit sequence
+
+1. `getShieldConnection.m` — `feat(matlab): add AutoSetup option to getShieldConnection for manual sequencing`
+2. `ShieldReferenceBlock.m` — `feat(matlab): add generalized Simulink block for REFERENCE commands`
+3. `ShieldMeasurementBlock.m` — `feat(matlab): add generalized Simulink block for reading any measurement field`
+4. `ShieldModeBlock.m` — `feat(matlab): add Simulink block for IDLE/POWER_OFF/POWER_ON mode commands`
+5. `ShieldToggleBlock.m` — `feat(matlab): add Simulink block for LEG/CAPA/DRIVER/BUCK/BOOST toggle commands`
+6. `build_shield_generalized_test_model.m` + generated `.slx` — `test(matlab): add Simulink test model demonstrating the generalized shield blocks`
+7. Real-hardware verification (gated) — `docs(matlab): record generalized shield blocks verification results`
+
+Each step also gets its own `docs(matlab): record Expansion Step N verification results`
+follow-up commit, matching the established pattern above of separating implementation commits
+from verification-record commits.
+
+### Expansion work sequence (resumable, one block per commit)
+
+Same format as Steps 1–5: precondition, resume check via `git log`, a `Do` checklist, a
+definition of done, and the commit to make once done.
+
+### Expansion Step 1 — `getShieldConnection.m`: add `AutoSetup`
+
+- **Precondition**: none (only modifies an existing, already-complete file).
+- **Resume check**: `git log --oneline -- src/matlab/getShieldConnection.m` — look for a commit
+  matching this step's message (the file already has Step 1's original commit).
+- **Do**:
+  - [ ] Add `AutoSetup` name-value option, default `true`.
+  - [ ] When `true` (default): behavior unchanged from today.
+  - [ ] When `false`: skip the `IDLE`/`BUCK`/`LEG`/`REFERENCE`/`POWER_ON` sequence entirely
+        after constructing `ShieldDevice`.
+  - [ ] `checkcode` clean.
+- **Definition of done**: pty-loopback test confirms `AutoSetup=false` produces **zero** setup
+  commands on first call (only the port-open, no wire traffic), while `AutoSetup=true` (or
+  omitted) still produces the original 7-command sequence — a regression check against Step 1's
+  original behavior.
+- **Commit**: `feat(matlab): add AutoSetup option to getShieldConnection for manual sequencing`
+
+### Expansion Step 2 — `ShieldReferenceBlock.m`
+
+- **Precondition**: Expansion Step 1 committed.
+- **Resume check**: `git log --oneline -- src/matlab/ShieldReferenceBlock.m`.
+- **Do**:
+  - [ ] `classdef ShieldReferenceBlock < matlab.System`, mask parameters `Leg`/`Variable` as
+        `StringSet` dropdowns, single `Value` input.
+  - [ ] `setupImpl`/`releaseImpl`/`getSampleTimeImpl`/static `getSimulateUsingImpl`/
+        `showSimulateUsingImpl`, all mirroring `ShieldSendBlock.m`.
+  - [ ] `checkcode` clean.
+- **Definition of done**: pty-loopback `step(obj, value)` produces the correct
+  `REFERENCE <Leg> <Variable> <value:.5f>` wire string for at least two different `Leg`/
+  `Variable` mask configurations (not just `LEG1`/`V1`), proving genuine generalization.
+- **Commit**: `feat(matlab): add generalized Simulink block for REFERENCE commands`
+
+### Expansion Step 3 — `ShieldMeasurementBlock.m`
+
+- **Precondition**: Expansion Step 1 committed (parallel-buildable with Step 2).
+- **Resume check**: `git log --oneline -- src/matlab/ShieldMeasurementBlock.m`.
+- **Do**:
+  - [ ] `classdef ShieldMeasurementBlock < matlab.System`, mask parameter `Field` as a
+        `StringSet` dropdown over all 16 keys, single `Value` output.
+  - [ ] Output-property declarations (`getOutputSizeImpl` etc.) from the start, per Step 4's
+        lesson — don't wait for a Simulink-integration-test failure to discover the need.
+  - [ ] `checkcode` clean.
+- **Definition of done**: pty-loopback `step(obj)` returns the correct planted value for at
+  least two different `Field` mask configurations (e.g. `V1` and `VH`), not just `V1`/`V2`.
+- **Commit**: `feat(matlab): add generalized Simulink block for reading any measurement field`
+
+### Expansion Step 4 — `ShieldModeBlock.m`
+
+- **Precondition**: Expansion Step 1 committed.
+- **Resume check**: `git log --oneline -- src/matlab/ShieldModeBlock.m`.
+- **Do**:
+  - [ ] `classdef ShieldModeBlock < matlab.System`, mask parameter `Mode` as a `StringSet`
+        dropdown (`IDLE`/`POWER_OFF`/`POWER_ON`), single boolean `Trigger` input, no output.
+  - [ ] Rising-edge detection via a private `LastTrigger` property; send the mode command only
+        on a `false→true` transition.
+  - [ ] `checkcode` clean.
+- **Definition of done**: pty-loopback test confirms a rising edge sends exactly one command,
+  holding `Trigger` true across further steps sends nothing more, and a subsequent
+  `true→false→true` cycle sends exactly one more command.
+- **Commit**: `feat(matlab): add Simulink block for IDLE/POWER_OFF/POWER_ON mode commands`
+
+### Expansion Step 5 — `ShieldToggleBlock.m`
+
+- **Precondition**: Expansion Step 1 committed.
+- **Resume check**: `git log --oneline -- src/matlab/ShieldToggleBlock.m`.
+- **Do**:
+  - [ ] `classdef ShieldToggleBlock < matlab.System`, mask parameters `Action`/`Leg` as
+        `StringSet` dropdowns, single boolean `State` input, no output.
+  - [ ] Change detection via a private `LastState` property (initialized empty so the first
+        step always sends); send `on`/`off` only when `State` differs from `LastState`.
+  - [ ] `checkcode` clean.
+- **Definition of done**: pty-loopback test confirms the first step always sends (regardless of
+  `State`'s value), an unchanged `State` on the next step sends nothing more, and a state flip
+  sends exactly one more command with the correct `on`/`off` suffix.
+- **Commit**: `feat(matlab): add Simulink block for LEG/CAPA/DRIVER/BUCK/BOOST toggle commands`
+
+### Expansion Step 6 — `build_shield_generalized_test_model.m` + `.slx`
+
+- **Precondition**: Expansion Steps 1–5 committed.
+- **Resume check**: `git log --oneline -- src/matlab/build_shield_generalized_test_model.m`.
+- **Do**:
+  - [ ] Build the model per "New test model" above: `AutoSetup=false` throughout, manual
+        `BUCK`/`LEG`/`POWER_ON` sequencing via `ShieldToggleBlock`/`ShieldModeBlock` instances,
+        then `ShieldReferenceBlock`/`ShieldMeasurementBlock` on `LEG1`/`V1`.
+  - [ ] No-hardware pass: run against the pty fake board, assert no setup traffic appears
+        before the model's own Toggle/Mode blocks send it, and that measurement logging still
+        works once sequencing completes.
+- **Definition of done**: the no-hardware pass completes with no errors, confirming manual
+  sequencing genuinely replaces `getShieldConnection`'s automatic setup when `AutoSetup=false`.
+- **Commit**: `test(matlab): add Simulink test model demonstrating the generalized shield blocks`
+
+### Expansion Step 7 — Real-hardware verification
+
+- **Precondition**: Expansion Step 6 committed and passing its no-hardware pass.
+- **Resume check**: check this document's own "Verified" notes under this step once added.
+- **Do**:
+  - [ ] Confirm with the user before sending any power-enabling commands to real hardware (same
+        pattern as every real-hardware step in this project — do not assume prior authorization
+        carries over).
+  - [ ] Run `shield_generalized_test_model` against the real board.
+  - [ ] Confirm the manual Toggle/Mode sequencing actually powers the board and `V1` tracks the
+        reference, and that the board returns to a safe state afterward.
+  - [ ] Record results into this document.
+- **Definition of done**: a real-hardware run confirms manually-sequenced power-up works and
+  `V1` tracks the reference, documented here.
+- **Commit**: `docs(matlab): record generalized shield blocks verification results`
+
+## Next steps (expansion)
+
+- [ ] **Expansion Step 1** — `getShieldConnection.m`'s `AutoSetup` option. **This is the next
+  action** once implementation of this expansion begins.
+- [ ] **Expansion Steps 2–3** (`ShieldReferenceBlock.m`, `ShieldMeasurementBlock.m`) and
+  **Expansion Steps 4–5** (`ShieldModeBlock.m`, `ShieldToggleBlock.m`) can all proceed in
+  parallel once Step 1 lands — none of the four depend on each other.
+- [ ] **Expansion Step 6** — the generalized test model, once Steps 1–5 are done.
+- [ ] **Expansion Step 7** — real-hardware verification, gated by explicit confirmation.
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above already
-have commits, and continue from the first unchecked item.
+have commits, and continue from the first unchecked item — separately for Steps 1–5 above and
+for the Expansion Steps here.
