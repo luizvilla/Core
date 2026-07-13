@@ -40,6 +40,8 @@ void setup_routine();
 void loop_background_task();
 /* Code to be executed in real time in the critical task */
 void loop_critical_task();
+/* Code to be executed in real time in the periodic task */
+void loop_periodic_task();
 
 /* --------------USER VARIABLES DECLARATIONS------------------- */
 
@@ -65,10 +67,18 @@ void setup_routine()
     /* Uncomment following line if you use the critical task */
     /* task.createCritical(loop_critical_task, 500); */
 
+    /* Uncomment the following lines to also use a periodic task: a second
+     * hard real-time task, running less often than the critical task, that
+     * the critical task can preempt (requires CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS
+     * and the critical task to already be declared above). */
+    /* int8_t periodic_id = task.createPeriodic(loop_periodic_task, 5000); */
+
     /* Finally, start tasks */
     task.startBackground(background_task_number);
     /* Uncomment following line if you use the critical task */
     /* task.startCritical(); */
+    /* Uncomment following line if you use the periodic task */
+    /* task.startPeriodic(periodic_id); */
 }
 
 /* --------------LOOP FUNCTIONS-------------------------------- */
@@ -100,6 +110,20 @@ void loop_background_task()
  * run in Real Time and control your power flow.
  */
 void loop_critical_task()
+{
+
+}
+
+/**
+ * Uncomment lines in setup_routine() to use the periodic task.
+ *
+ * This is the code loop of the periodic task. It runs less often than the
+ * critical task (every 5000 micro-seconds in this example), and unlike the
+ * critical task it can be preempted by it: the critical task always wins,
+ * but the periodic task still preempts regular Zephyr threads, so it stays
+ * hard real-time.
+ */
+void loop_periodic_task()
 {
 
 }
