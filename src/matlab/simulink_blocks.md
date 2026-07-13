@@ -245,13 +245,24 @@ exists.
   Step 1).
 - **Resume check**: `git log --oneline -- src/matlab/ShieldGetBlock.m`.
 - **Do**:
-  - [ ] `classdef ShieldGetBlock < matlab.System` with `V1`/`V2` outputs, no inputs.
-  - [ ] `setupImpl`/`releaseImpl` matching Step 2's pattern; `stepImpl` calls
+  - [x] `classdef ShieldGetBlock < matlab.System` with `V1`/`V2` outputs (named via
+        `getOutputNamesImpl`), no inputs.
+  - [x] `setupImpl`/`releaseImpl` matching Step 2's pattern; `stepImpl` calls
         `getMeasurement('V1')`/`getMeasurement('V2')`.
-  - [ ] Force interpreted execution; declare discrete sample time.
-  - [ ] `checkcode` clean.
+  - [x] Force interpreted execution; declare discrete sample time — identical pattern to
+        `ShieldSendBlock.m` (constructor via `setProperties`, `createSampleTime`, static
+        `getSimulateUsingImpl`/`showSimulateUsingImpl`), reused directly since Step 2 already
+        confirmed these against real MathWorks source.
+  - [x] `checkcode` clean.
 - **Definition of done**: directly calling `step(obj)` against a pty loopback returns the exact
   planted `V1`/`V2` values from a synthetic telemetry frame.
+  - **Verified 2026-07-13** without real hardware: `checkcode` reported no issues.
+    `ShieldGetBlock('ForcedPort', port)` constructed correctly; `setupImpl` ran the same
+    7-command `getShieldConnection` setup sequence; `step(obj)` correctly returned
+    `[8.11111, 2.22222]`, the exact `V1`/`V2` values planted in a synthetic 16-field telemetry
+    frame streamed by the fake board (with an interleaved non-16-field debug line, confirming
+    the field-count filter still works when called through the block); `release(obj)` sent
+    exactly one `IDLE`. Full setup→step→release lifecycle confirmed, matching Step 2's result.
 - **Commit**: `feat(matlab): add Simulink block for reading shield measurements`
 
 ### Step 4 — `build_shield_test_model.m` + `shield_test_model.slx`
@@ -297,12 +308,14 @@ exists.
   correct `REFERENCE` formatting for both legs. Found that `matlab.System` needs an explicit
   constructor calling `setProperties` — confirmed against real MathWorks source before
   implementing rather than guessing from memory (see Step 2's implementation-detail note).
-- [ ] **Step 3** (`ShieldGetBlock.m`) — only depends on Step 1, not Step 2, so could have been
-  built in parallel; now that Step 2 is done, its `matlab.System` patterns (constructor,
-  `getSimulateUsingImpl`, `getSampleTimeImpl`) are already confirmed and can be reused directly.
-  **This is the next action.**
+- [x] **Step 3** — `ShieldGetBlock.m` implemented, `checkcode`-clean, and verified against a
+  pty loopback with a synthetic telemetry frame (see Step 3's "Verified" note): `step(obj)`
+  correctly returned the exact planted `V1`/`V2` values, full setup→step→release lifecycle
+  confirmed, matching Step 2's result and reusing its already-confirmed `matlab.System`
+  patterns directly.
 - [ ] **Step 4** — `build_shield_test_model.m` + `shield_test_model.slx`, plus its no-hardware
-  pass.
+  pass. **This is the next action** — both runtime blocks now exist, so this is the first point
+  they get exercised together inside an actual compiled Simulink model.
 - [ ] **Step 5** — real-hardware verification, gated by explicit confirmation.
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above already
