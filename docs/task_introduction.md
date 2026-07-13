@@ -121,5 +121,52 @@ Non-critical tasks aren't synchronous, meaning they're not recurring at regular 
         In that case after executing `do_stuff();` the task will be suspended for 500us and resumed after. It creates a pseudo periodical task, runs every 500us + the time taken to execute `do_stuff()`.
 
 
+## Nested preemptible periodic task
+
+The control task cannot be preempted, and background tasks give no
+real-time guarantee. Sometimes you need something in between: a second
+hard real-time task that runs less often than the control task, but that
+the control task can still preempt without any RTOS scheduling jitter.
+That's what a **periodic task** is for.
+
+### Why this is safe
+
+Both the control task and the periodic task run as Zero Latency Interrupts
+(ZLI): interrupts mapped below the RTOS priority level, so Zephyr's
+scheduler never introduces jitter on either of them. The control task uses
+priority 0 (the highest ZLI level), the periodic task uses priority 1, so
+the control task can always preempt the periodic task, but never the other
+way around.
+
+![task priority](images/task_priority.svg)
+
+!!! warning
+    This relies on the ARM Cortex-M NVIC priority mechanism, not on
+    subpriority: only priority levels give real preemption. Enabling the
+    periodic task also reserves the `TIM7` global interrupt vector
+    (`TIM7_DAC_IRQn`) as a software-triggered interrupt line: `TIM7` can no
+    longer be used through the generic timer driver at the same time.
+
+### Initialization sequence
+
+!!! note
+    1\. Create and start the control task first, as usual.
+    [`task.createCritical(...)`](https://owntech-foundation.github.io/Documentation/core/docs/scheduling/#function-createcritical)
+    2\. Create the periodic task and link it to the function to be
+    called. Its period must be a positive integer multiple of the control
+    task's period. `task.createPeriodic(periodic_function, period_us)`
+    3\. Start the periodic task. `task.startPeriodic(periodic_id)`
+
+!!! example
+    ```
+        task.createCritical(my_critical_function, 50, source_hrtim);
+        int8_t periodic_id = task.createPeriodic(my_periodic_function, 500);
+        task.startCritical();
+        task.startPeriodic(periodic_id);
+    ```
+    Here `my_periodic_function` runs every 10th execution of
+    `my_critical_function` (500µs / 50µs), and can be preempted by it at
+    any time.
+
 ::: doxy.powerAPI.class
 name: TaskAPI
