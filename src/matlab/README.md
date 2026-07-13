@@ -214,19 +214,31 @@ finished by inspecting the repo/hardware rather than trusting memory.
 - **Resume check**: `git log --oneline -- src/matlab/ShieldDevice.m` — if it returns a commit,
   this step is done; skip to Step 2.
 - **Do**:
-  - [ ] Create `classdef ShieldDevice` with constructor `ShieldDevice(port)` opening a
+  - [x] Create `classdef ShieldDevice` with constructor `ShieldDevice(port)` opening a
         `serialport` at 115200-8-N-1, 2 s timeout.
-  - [ ] Add the 16-field TWIST index map (`D1..RS`, see table above) as a property.
-  - [ ] Implement `sendMessage(msg)`: write in 10-char chunks with 0.1 s pauses, then `\r\n`.
-  - [ ] Implement `sendCommand(action, varargin)` using the command format table above,
+  - [x] Add the 16-field TWIST index map (`D1..RS`, see table above) as a property.
+  - [x] Implement `sendMessage(msg)`: write in 10-char chunks with 0.1 s pauses, then `\r\n`.
+  - [x] Implement `sendCommand(action, varargin)` using the command format table above,
         followed by the 0.2 s settle delay.
-  - [ ] Implement `getLine()`: read one line, split on `:`.
-  - [ ] Implement `getMeasurement(name)`: reset input buffer, loop `getLine()` discarding
+  - [x] Implement `getLine()`: read one line, split on `:`.
+  - [x] Implement `getMeasurement(name)`: reset input buffer, loop `getLine()` discarding
         anything that isn't 16 fields after stripping `{`/`}`, return the field as `double`.
 - **Definition of done**: in MATLAB, `d = ShieldDevice(anyValidPort); d.sendCommand('IDLE')`
   runs without error (board does not need to be attached yet for this step — class
   construction and message formatting can be unit-checked with a loopback port or by
   inspecting the built string before it's written).
+  - **Verified 2026-07-13** without real hardware, using a Python `pty`-based virtual serial
+    loopback (one end opened by `ShieldDevice`, the other end logging raw bytes and injecting
+    a synthetic 16-field telemetry frame): `checkcode` reported no issues; `sendCommand('LEG',
+    'LEG1','ON')` produced exactly `s_LEG1_l_on`, transmitted as `s_LEG1_l_o`/`n`/`\r\n` with
+    ~0.1 s gaps (10-char chunking confirmed) and a ~0.2 s gap before the next command (settle
+    delay confirmed); `sendCommand('REFERENCE','LEG1','V1',5)` produced
+    `s_LEG1_r_V1_5.00000`; `getMeasurement('V1')`/`getMeasurement('V2')` correctly skipped an
+    interleaved non-16-field debug line and returned the exact planted values, confirming the
+    field-count filter and index map; `sendCommand('BOGUS')` correctly threw
+    `ShieldDevice:InvalidAction`. **Still outstanding**: confirmation against the real board
+    (USB enumeration, actual firmware telemetry timing/format) — that's what Step 3's smoke
+    test is for.
 - **Commit**: `feat(matlab): add ShieldDevice class for Twist serial protocol`
 
 ### Step 2 — `findShieldDevicePort.m`
