@@ -23,6 +23,7 @@ A follow-up task should create the following files in `src/matlab/`:
 | `ShieldDevice.m` | `classdef` wrapping a `serialport` object. Methods: `sendCommand`, `sendMessage`, `getMeasurement`, `getLine`. Constructor defaults match `Shield_Class.__init__`: 115200 baud, 8 data bits, no parity, 1 stop bit, 2 s timeout. Holds the 16-field TWIST index map (see below) as a property. |
 | `findShieldDevicePort.m` | Device discovery helper, analogue of `find_devices.py`. See caveat below — MATLAB has no direct cross-platform VID/PID query like pyserial's `list_ports`, so this does best-effort OS-specific autodetection with a manual fallback. |
 | `comm_script.m` | Top-level script reproducing the exact command sequence and the real-time plot loop from `comm_script.py`. |
+| `test_connection.m` | Standalone smoke test — finds the board, opens it, and confirms `V1`/`V2` measurements can be read back. See "Test sequence" below. |
 | `README.md` | This document. |
 
 ### `findShieldDevicePort.m` — device discovery caveat
@@ -151,7 +152,143 @@ newline-terminated protocol.
 - Twist board flashed per the firmware setup in [`../README.md`](../README.md).
 - Board connected via USB.
 
+## Test sequence
+
+Goal: verify, independently of the full 200-frame demo, that the MATLAB port can (a) find the
+board and (b) retrieve valid measurements from it. This is what `test_connection.m` should do:
+
+1. **Discover the port** — call `findShieldDevicePort()`. Pass/fail: returns exactly one port
+   whose PnP ID matches `VID_2FE3&PID_0101` (or, on the manual fallback path, the user-selected
+   port responds at all in step 2). Fail if zero or more than one candidate port is found.
+2. **Open the device** — construct `ShieldDevice(port)`. Pass/fail: `serialport` opens without
+   error at 115200-8-N-1; no exception thrown.
+3. **Reach `POWER_ON`** — send `IDLE`, `BUCK LEG1 ON`, `LEG LEG1 ON`,
+   `REFERENCE LEG1 V1 5`, `POWER_ON` (the same setup subsequence `comm_script.m` uses before
+   its main loop, restricted to `LEG1` since that's all this smoke test needs). Pass/fail: each
+   `sendCommand` write completes without a serial timeout/error.
+4. **Read measurements** — call `getMeasurement('V1')` and `getMeasurement('V2')` 10 times in a
+   loop (roughly 1 read/second is enough given the ~100 ms telemetry rate). Pass/fail:
+   - Every call returns within the 2 s serial timeout (no hang).
+   - Every returned value is a finite double (not `NaN`, not empty, not a parse error) —
+     confirms the 16-field-line filter in `getLine`/`getMeasurement` is correctly discarding
+     interleaved debug output and locking onto real telemetry frames.
+   - `V1` values are in a plausible range for the bench setup (roughly 0–15 V given the demo's
+     reference range) rather than garbage from a mis-parsed field index.
+5. **Park the board** — send `IDLE` (in a `try`/`catch` `finally`-equivalent so this always
+   runs, matching `comm_script.m`'s cleanup). Pass/fail: command sent even if step 4 threw.
+
+Run this script manually with the board connected before relying on `comm_script.m` — it
+isolates connection/parsing bugs from the plotting/animation loop, which is harder to debug
+interactively.
+
+## Commit sequence
+
+This README documents the plan; a follow-up implementation task should land the `.m` files in
+small, independently-reviewable commits rather than one large drop:
+
+1. `ShieldDevice.m` — `feat(matlab): add ShieldDevice class for Twist serial protocol`
+2. `findShieldDevicePort.m` — `feat(matlab): add board auto-discovery by VID/PID`
+3. `test_connection.m` — `test(matlab): add smoke test for board discovery and measurement read-back`
+   — run this against real hardware before continuing; it's the checkpoint that the two
+   commits above actually work end-to-end.
+4. `comm_script.m` — `feat(matlab): add MATLAB port of comm_script.py demo loop`
+5. Any README corrections discovered while implementing/testing — `docs(matlab): correct README per implementation findings`
+
+Each commit should be buildable/runnable on its own (e.g. commit 1 alone lets you construct a
+`ShieldDevice` even before discovery is automated). Do not squash the smoke test in with
+`comm_script.m` — it needs to keep working standalone as a fast way to debug hardware
+connectivity issues separately from the plotting loop.
+
+## Work sequence (resumable, one block per commit)
+
+Each block below is self-contained: precondition, checklist, definition of done, and the
+commit to make once done. **To resume after a break, run `git log --oneline -- src/matlab/`,
+find the highest-numbered step whose commit message (from the table above) already exists,
+and start at the next block.** Tick the checkboxes off as you go within a session; if state is
+lost, the definition-of-done line tells you how to re-derive whether a step is actually
+finished by inspecting the repo/hardware rather than trusting memory.
+
+### Step 1 — `ShieldDevice.m`
+
+- **Precondition**: none (first step).
+- **Resume check**: `git log --oneline -- src/matlab/ShieldDevice.m` — if it returns a commit,
+  this step is done; skip to Step 2.
+- **Do**:
+  - [ ] Create `classdef ShieldDevice` with constructor `ShieldDevice(port)` opening a
+        `serialport` at 115200-8-N-1, 2 s timeout.
+  - [ ] Add the 16-field TWIST index map (`D1..RS`, see table above) as a property.
+  - [ ] Implement `sendMessage(msg)`: write in 10-char chunks with 0.1 s pauses, then `\r\n`.
+  - [ ] Implement `sendCommand(action, varargin)` using the command format table above,
+        followed by the 0.2 s settle delay.
+  - [ ] Implement `getLine()`: read one line, split on `:`.
+  - [ ] Implement `getMeasurement(name)`: reset input buffer, loop `getLine()` discarding
+        anything that isn't 16 fields after stripping `{`/`}`, return the field as `double`.
+- **Definition of done**: in MATLAB, `d = ShieldDevice(anyValidPort); d.sendCommand('IDLE')`
+  runs without error (board does not need to be attached yet for this step — class
+  construction and message formatting can be unit-checked with a loopback port or by
+  inspecting the built string before it's written).
+- **Commit**: `feat(matlab): add ShieldDevice class for Twist serial protocol`
+
+### Step 2 — `findShieldDevicePort.m`
+
+- **Precondition**: Step 1 committed.
+- **Resume check**: `git log --oneline -- src/matlab/findShieldDevicePort.m`.
+- **Do**:
+  - [ ] Implement the Linux path: scan `/dev/serial/by-id/*` for `2fe3`/`0101`.
+  - [ ] Implement the Windows path: `wmic path Win32_PnPEntity` (or registry) lookup for
+        `VID_2FE3&PID_0101`, resolve to a `COMx` port.
+  - [ ] Implement the manual fallback: list `serialportlist("available")`, prompt for a
+        choice, when autodetection finds zero or >1 candidates.
+- **Definition of done**: with the board plugged in, `findShieldDevicePort()` returns exactly
+  one port string, and it matches what `serialportlist("available")` shows for the board.
+- **Commit**: `feat(matlab): add board auto-discovery by VID/PID`
+
+### Step 3 — `test_connection.m`
+
+- **Precondition**: Steps 1–2 committed; board flashed and connected via USB (see
+  Prerequisites).
+- **Resume check**: `git log --oneline -- src/matlab/test_connection.m`.
+- **Do**: implement the 5 numbered steps from "Test sequence" above
+  (discover → open → reach `POWER_ON` → read 10x → park with `IDLE`), printing pass/fail for
+  each to the console.
+  - [ ] Step 1 (discover) implemented and passing.
+  - [ ] Step 2 (open) implemented and passing.
+  - [ ] Step 3 (reach `POWER_ON`) implemented and passing.
+  - [ ] Step 4 (read 10x, finite + plausible-range check) implemented and passing.
+  - [ ] Step 5 (park with `IDLE`, runs even on error) implemented and passing.
+- **Definition of done**: running `test_connection.m` against real hardware prints 5/5 pass
+  and returns the board to `IDLE`. **This is the hard checkpoint** — do not start Step 4 until
+  this genuinely passes against the physical board, since it's what proves Steps 1–2 work
+  end-to-end rather than just compiling.
+- **Commit**: `test(matlab): add smoke test for board discovery and measurement read-back`
+
+### Step 4 — `comm_script.m`
+
+- **Precondition**: Step 3 committed and passing against real hardware.
+- **Resume check**: `git log --oneline -- src/matlab/comm_script.m`.
+- **Do**:
+  - [ ] Port the setup sequence (`IDLE` → `BUCK`×2 → `LEG`×2 → `REFERENCE LEG1 V1 5` →
+        `POWER_ON`), reusing `ShieldDevice`/`findShieldDevicePort`.
+  - [ ] Implement the 200-frame loop: triangular reference (5, +0.5, wrap at 15), send
+        `REFERENCE` for both legs, 10 ms extra sleep, read `V1`/`V2`.
+  - [ ] Implement the live plot with `animatedline`/`drawnow limitrate`, resetting the window
+        every 200 frames.
+  - [ ] Wrap the loop in `try`/`catch` that always sends `IDLE` on exit.
+- **Definition of done**: running `comm_script.m` against real hardware shows a live-updating
+  V1/V2 plot tracking the triangular reference, and closing the figure (or Ctrl+C) leaves the
+  board in `IDLE`.
+- **Commit**: `feat(matlab): add MATLAB port of comm_script.py demo loop`
+
+### Step 5 — README corrections
+
+- **Precondition**: Steps 1–4 done.
+- **Do**: fix any discrepancy discovered during implementation/testing between this README and
+  the actual working `.m` files (e.g. a timing constant that needed tweaking on real hardware).
+- **Definition of done**: README matches the shipped code.
+- **Commit**: `docs(matlab): correct README per implementation findings`
+
 ## Next steps
 
-This README is the design plan only. `ShieldDevice.m`, `findShieldDevicePort.m`, and
-`comm_script.m` are a follow-up implementation task and are not part of this change.
+This README is the design plan only. `ShieldDevice.m`, `findShieldDevicePort.m`,
+`test_connection.m`, and `comm_script.m` are a follow-up implementation task and are not part
+of this change.
