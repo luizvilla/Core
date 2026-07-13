@@ -31,6 +31,7 @@
 #include "timer.h"
 #include "hrtim.h"
 #include "SpinAPI.h"
+#include "periodic_synchronous_task.h"
 
 #ifdef CONFIG_OWNTECH_SAFETY_API
 #include "safety_internal.h"
@@ -111,6 +112,12 @@ void user_task_proxy()
 	if (safety_task() != 0) safety_alert = true;
 
 #endif
+
+#ifdef CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS
+
+	scheduling_periodic_task_tick();
+
+#endif /* CONFIG_OWNTECH_TASK_ENABLE_PERIODIC_TASKS */
 
 	if (user_periodic_task == NULL) return;
 
