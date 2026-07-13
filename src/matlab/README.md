@@ -403,6 +403,19 @@ finished by inspecting the repo/hardware rather than trusting memory.
     analog measurement chain or control loop.** A follow-up run with the bench properly wired
     per `../README.md` (source + load) would be needed to confirm the values track a real
     voltage reference.
+  - **Re-verified 2026-07-13 with the bench powered** (30 Vdc source connected, per the
+    caveat above). Re-ran `test_connection.m` unchanged: 5/5 still passed.
+    `getMeasurement('V1')` returned `[5.17089, 4.86114, 5.12664, 4.90539, 4.94964, 5.08239,
+    4.94964, 4.99389, 4.72839, 4.86114]` — mean ≈ 4.96 V, tightly clustered around the
+    `REFERENCE LEG1 V1 5` command sent in the setup sequence. `getMeasurement('V2')` returned
+    values near 0 V (mean ≈ 0.2 V) as expected, since this smoke test only configures/drives
+    `LEG1` — `LEG2` was never given a reference or turned on. **This closes the gap the
+    unpowered run left open**: it confirms the analog measurement chain and the closed-loop
+    voltage regulation actually work, not just the serial protocol. The
+    plausible-voltage-range check dropped from the implementation earlier would now have
+    passed for `V1`; it's still not re-added to `test_connection.m` itself since the check's
+    validity depends on the bench being powered, which the script has no way to verify —
+    treat this real-hardware log as the range confirmation instead of a hardcoded assertion.
 - **Commit**: `test(matlab): add smoke test for board discovery and measurement read-back`
 
 ### Step 4 — `comm_script.m`
@@ -452,18 +465,17 @@ Progress against the Work sequence above:
   Step 3 the same physical board read `0x0101` again, so this looks like it can vary by mode/
   session rather than being a fixed hardware fact; treat it as a "check before assuming
   auto-detect will work," not a settled discrepancy.
-- [x] **Step 3** — `test_connection.m` implemented, `checkcode`-clean, and **run against the
-  real attached board with its DC supply intentionally unpowered** (a deliberate safety choice
-  — see Step 3's "Verified"/caveat notes): 5/5 checks passed, proving discovery, connection,
-  command formatting, and telemetry-frame parsing all work against real firmware. The
-  measurement *values* themselves (~−10 V/−11.8 V) are not meaningful with no supply connected
-  and were not validated for physical plausibility — that needs a follow-up run with the bench
-  properly wired.
-- [ ] **Step 4** — `comm_script.m`. **This is the next action.** Precondition (Step 3 passing
-  against real hardware) is now met, though note the caveat above: Step 3 validated the
-  protocol, not the analog measurement chain, so treat `comm_script.m`'s live plot as the first
-  point where the actual voltage-tracking behavior gets checked — ideally with the bench wired
-  per `../README.md` so the values mean something.
+- [x] **Step 3** — `test_connection.m` implemented, `checkcode`-clean, run twice against the
+  real attached board: first unpowered (5/5 passed, validated protocol/discovery/parsing but
+  not the measurement values), then **re-run powered at 30 Vdc** (5/5 passed, `V1` measured
+  ≈4.96 V mean against a `REFERENCE LEG1 V1 5` command — confirms the analog measurement chain
+  and closed-loop voltage regulation, not just the serial protocol). See Step 3's "Verified"/
+  "Re-verified" notes. Both the protocol and the control loop are now confirmed against real
+  hardware.
+- [ ] **Step 4** — `comm_script.m`. **This is the next action.** All preconditions are now
+  fully met, including the bench being powered — `comm_script.m`'s live 200-frame plot can be
+  meaningfully verified against real regulation behavior when implemented, not just
+  control-flow.
 - [ ] **Step 5** — reconcile any README/implementation drift found along the way.
 
 If resuming cold: run `git log --oneline -- src/matlab/` to see which of the files above
