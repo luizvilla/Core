@@ -148,3 +148,33 @@ Edit the port at the top of the script if your board doesn't enumerate as
 ```
 python3 thingset_example.py
 ```
+
+# MATLAB version (ThingSetTools.m, thingset_example.m)
+
+`ThingSetTools.m` is a MATLAB port of `thingset_tools.py` covering the same
+protocol handling and public API - `discover()`, `read()`/`write()`,
+`readAll()`, `writeValues()`, `fetchChildren()`, and port auto-detection via
+`findPorts()` - as a `handle` class (needs only base MATLAB, R2019b+, for
+`serialport`/`jsonencode`/`jsondecode`; no toolbox required). It does not
+port the Python `.objects` attribute-proxy tree (MATLAB struct field names
+can't hold arbitrary ThingSet names like `_Reporting` without mangling);
+use the methods instead, which MATLAB's own tab-completion already covers.
+
+```matlab
+ts = ThingSetTools();                       % port is optional: auto-detected
+                                             % by USB VID/PID + handshake probe
+tree = ts.discover();                       % walks the tree, writes thingset_objects.json
+ts.read("Measurements/rV1Low_V")
+ts.write("Config", struct("wBlinkPeriod_s", 0.2))
+```
+
+`thingset_example.m` mirrors `thingset_example.py`: it auto-builds a
+`containers.Map` of `{short_name: path}` for `Measurements`, reads one
+measurement by its short name, reads the whole group at once, and writes a
+`Config` value. Run it from this directory with `Home` tab or:
+
+```
+run('thingset_example.m')
+```
+
+or, from a shell, `matlab -batch "run('thingset_example.m')"`.
