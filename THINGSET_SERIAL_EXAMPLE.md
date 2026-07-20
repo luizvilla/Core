@@ -116,3 +116,32 @@ This was confirmed on the connected board using both the interactive shell and
 a short pyserial script; `old/old4/tools/thingset_autotest.py` (generic to the
 Text Mode protocol, not tied to `old4`'s specific data model) can also be
 pointed at the shell port for an automated read-only discovery smoke test.
+
+## `src/thingset_tools.py`
+
+A host-side helper (needs `pyserial`) that wraps the same protocol dialog
+behind a small `ThingSetTools` class, so poking at the device doesn't require
+remembering the `select thingset` step or the quote-escaping quirk above:
+
+```python
+from thingset_tools import ThingSetTools
+
+ts = ThingSetTools("/dev/ttyACM1")
+ts.discover()                              # walks the tree, writes thingset_objects.json
+ts.read("Measurements/rV1Low_V")
+ts.write("Config", {"wBlinkPeriod_s": 0.2})
+
+ts.objects.Measurements.rV1Low_V           # same read, as an attribute
+ts.objects.Config.wBlinkPeriod_s = 0.2     # same write, as an attribute
+```
+
+`discover()` classifies each item as a group or leaf by checking whether a
+plain GET on it returns a JSON object (group) or a scalar/array (leaf) — name
+prefixes alone aren't reliable, since reserved groups like `_Reporting` don't
+follow the `r`/`w`/`s`/`x`/`Capitalized` convention. `ts.objects` is populated
+from that tree and supports tab-completion in IPython/Jupyter. `read_all()`
+and `write_values()` operate on the whole discovered tree at once, the latter
+rejecting (client-side, before hitting the wire) any target that isn't
+classified writable. All of this was exercised against the connected board,
+including the nested `_Reporting/mLive/sEnable` case and rejection of a
+read-only write attempt.
