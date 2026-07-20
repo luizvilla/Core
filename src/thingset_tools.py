@@ -1,3 +1,24 @@
+#
+# Copyright (c) 2021-present LAAS-CNRS
+#
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 2 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# @author Luiz Villa <luiz.villa@laas.fr>
+#
+
 """
 thingset_tools.py
 
@@ -10,7 +31,11 @@ Quick start:
 
     from thingset_tools import ThingSetTools
 
-    ts = ThingSetTools("/dev/ttyACM1")
+    ts = ThingSetTools()                       # port is optional: auto-
+                                                # detected by USB VID/PID,
+                                                # then a handshake probe
+                                                # (pass a port string to
+                                                # skip auto-detection)
     ts.discover()                              # walks the tree, writes
                                                 # thingset_objects.json
 
@@ -23,6 +48,13 @@ Quick start:
 `ts.objects` is populated by discover() and supports tab-completion in an
 interactive session (IPython/Jupyter): `ts.objects.<TAB>` lists groups,
 `ts.objects.Measurements.<TAB>` lists that group's items, etc.
+
+Auto-detection (see find_ports()) first tries ports matching OwnTech's USB
+vendor ID, falling back to every serial port on the system if none match.
+Since a board's console and ThingSet-shell ports share the same VID/PID,
+each candidate is actually opened and sent the `select thingset` handshake
+- only the shell port responds - so this is more than a simple VID/PID
+filter.
 """
 
 import json
@@ -76,18 +108,70 @@ class ThingSetError(Exception):
         )
 
 
+# OwnTech boards' USB vendor ID. Both the console and the ThingSet-shell
+# CDC-ACM ports of the same board share this VID (and usually the same
+# PID too), so it narrows the search but doesn't single out the shell
+# port by itself - see the handshake-probing loop in __init__ below.
+# Adapted from old/old4/find_devices.py.
+OWNTECH_USB_VID = 0x2FE3
+
+
 class ThingSetTools:
     """Talks ThingSet Text Mode to a device over its dedicated shell UART."""
 
-    def __init__(self, port, baudrate=115200, timeout=1.0):
-        self.port = port
-        self.ser = serial.Serial(port, baudrate, timeout=timeout)
+    def __init__(self, port=None, baudrate=115200, timeout=1.0,
+                 vid=OWNTECH_USB_VID, pid=None):
+        """Connect to a ThingSet-over-shell device.
+
+        If `port` is omitted, candidate ports are found by USB `vid`/`pid`
+        (see `find_ports()`), falling back to every serial port on the
+        system if none match. Each candidate is tried in turn - opened,
+        and handed the `select thingset` handshake - since the console
+        and shell ports of the same board share the same VID/PID and only
+        the shell one will actually respond. The first one that works is
+        used; RuntimeError is raised if none do.
+        """
         self._tree = None
         self.objects = None
-        time.sleep(0.3)
-        self.ser.reset_input_buffer()
-        self._transact("")
-        self._transact("select thingset")
+
+        if port is not None:
+            self.port = port
+            self.ser = serial.Serial(port, baudrate, timeout=timeout)
+            time.sleep(0.3)
+            self.ser.reset_input_buffer()
+            self._transact("")
+            self._transact("select thingset")
+            self.get("")
+            return
+
+        candidates = self.find_ports(vid=vid, pid=pid)
+        if not candidates:
+            from serial.tools import list_ports
+
+            candidates = [info.device for info in list_ports.comports()]
+        for device in candidates:
+            try:
+                self.__init__(device, baudrate=baudrate, timeout=timeout)
+                return
+            except Exception:
+                continue
+        raise RuntimeError(
+            f"no ThingSet-over-shell device found (tried {len(candidates)} "
+            "candidate port(s))"
+        )
+
+    @staticmethod
+    def find_ports(vid=OWNTECH_USB_VID, pid=None):
+        """List serial ports matching a USB vendor ID (and optionally a
+        specific product ID). Defaults to OwnTech's VID. Adapted from
+        old/old4/find_devices.py."""
+        from serial.tools import list_ports
+
+        return [
+            info.device
+            for info in list_ports.comports()
+            if info.vid == vid and (pid is None or info.pid == pid)
+        ]
 
     def close(self):
         self.ser.close()
@@ -100,21 +184,6 @@ class ThingSetTools:
 
     def __repr__(self):
         return f"<ThingSetTools {self.port}>"
-
-    @classmethod
-    def autoconnect(cls, baudrate=115200, timeout=1.0):
-        """Scan serial ports and return an instance connected to the first
-        one that answers a ThingSet root GET."""
-        import serial.tools.list_ports
-
-        for info in serial.tools.list_ports.comports():
-            try:
-                candidate = cls(info.device, baudrate=baudrate, timeout=timeout)
-                candidate.get("")
-                return candidate
-            except Exception:
-                continue
-        raise RuntimeError("no ThingSet-over-shell device found")
 
     # ---- low-level transport -------------------------------------------
 
@@ -371,7 +440,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    ts = ThingSetTools(args.port, baudrate=args.baud) if args.port else ThingSetTools.autoconnect(baudrate=args.baud)
+    ts = ThingSetTools(args.port, baudrate=args.baud)
     print(f"Connected to {ts.port}")
 
     tree = ts.discover(json_path=args.json)
