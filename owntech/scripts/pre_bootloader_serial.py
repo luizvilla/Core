@@ -33,9 +33,37 @@ mcumgr_path = os.path.join(third_party_dir, mcumgr_executable)
 
 ################## Determine port ##################
 
+def _usb_interface_number(port):
+	# port.location looks like "3-4:1.0" (bus-port:config.interface).
+	# The Spin board exposes several USB CDC-ACM interfaces (console/upload,
+	# ThingSet shell, ...) that share the same VID and serial number, so we
+	# use the interface number to tell them apart. The console is always the
+	# lowest-numbered interface.
+	if port.location and "." in port.location:
+		try:
+			return int(port.location.rsplit(".", 1)[-1])
+		except ValueError:
+			pass
+	return 0
+
 def find_spin_port(env):
 	# List all connected Spin boards
-	available_ports = list(serial.tools.list_ports.grep("2FE3"))
+	all_ports = list(serial.tools.list_ports.grep("2FE3"))
+	if len(all_ports) == 0:
+		return None
+
+	# Each physical board can expose multiple CDC-ACM ports (console/upload,
+	# ThingSet shell, ...) sharing the same VID and serial number. Keep only
+	# the lowest-numbered USB interface per board, which is the console port
+	# used for upload, so extra ports (e.g. ThingSet) don't show up as
+	# separate "boards" to choose from.
+	best_port_by_serial = {}
+	for port in all_ports:
+		key = port.serial_number
+		current_best = best_port_by_serial.get(key)
+		if current_best is None or _usb_interface_number(port) < _usb_interface_number(current_best):
+			best_port_by_serial[key] = port
+	available_ports = list(best_port_by_serial.values())
 	if len(available_ports) == 0:
 		return None
 
