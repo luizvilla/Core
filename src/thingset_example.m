@@ -26,14 +26,10 @@
 % group, reads a single measurement and the whole group, and writes a
 % Config value.
 
-%% clear
-
-clear all
-
-%% code start
 MEAS = "Measurements";
 
-ts = ThingSetTools("COM38");
+ts = ThingSetTools("", 115200, 1.0, "2FE3", "", true); 
+%ts = ThingSetTools();
 ts.discover();
 
 % Auto-build {short_name: full_path} for every measurement, e.g.
@@ -54,18 +50,6 @@ disp(ts.read(measurements("V1Low")));
 % Flush all measurements and their current values at once.
 disp(ts.read(MEAS));
 
+ts.write("Config", struct("wBlinkPeriod_s", 0.5));
 
-%% commands
-
-disp(measurements.keys);
-disp(measurements.values);
-
-disp(ts.read(measurements("V1Low")));
-
-% Flush all measurements and their current values at once.
-disp(ts.read(MEAS));
-
-ts.write("Config", struct("wBlinkPeriod_s", 0.1));
-
-%% close connection
 ts.close();
