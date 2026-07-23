@@ -651,13 +651,11 @@ void loop_application_task()
         if (mode_asked == POWERMODE) {
             mode = POWERMODE;
         }
-        spin.led.turnOn();
         break;
     case POWERMODE:
         if (mode_asked == IDLEMODE) {
             mode = IDLEMODE;
         }
-        spin.led.toggle();
         break;
     case ERRORMODE:
         break;
@@ -740,7 +738,7 @@ void loop_critical_task()
 
     } else {
         stop_pwm_outputs();
-        spin.led.turnOff();
+        // spin.led.turnOff();
     }
 
     state_mode_scope = static_cast<float32_t>(mode);
