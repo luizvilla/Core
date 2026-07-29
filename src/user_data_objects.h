@@ -28,6 +28,7 @@
 #define ID_CONFIG              0x06
 #define ID_CONFIG_BLINK_PERIOD 0x60
 #define ID_CONFIG_MODE         0x61
+#define ID_CONFIG_FREQ         0x62
 #define ID_CONFIG_LEG1         0x70
 #define ID_CONFIG_LEG1_ENABLE  0x701
 #define ID_CONFIG_LEG1_BUCK    0x702
@@ -35,6 +36,11 @@
 #define ID_CONFIG_LEG1_DUTY    0x704
 #define ID_CONFIG_LEG1_REF     0x705
 #define ID_CONFIG_LEG1_TRACK   0x706
+#define ID_CONFIG_LEG1_CAPA    0x707
+#define ID_CONFIG_LEG1_DRIVER  0x708
+#define ID_CONFIG_LEG1_PHASE   0x709
+#define ID_CONFIG_LEG1_DT_RISE 0x70A
+#define ID_CONFIG_LEG1_DT_FALL 0x70B
 #define ID_CONFIG_LEG2         0x80
 #define ID_CONFIG_LEG2_ENABLE  0x801
 #define ID_CONFIG_LEG2_BUCK    0x802
@@ -42,6 +48,11 @@
 #define ID_CONFIG_LEG2_DUTY    0x804
 #define ID_CONFIG_LEG2_REF     0x805
 #define ID_CONFIG_LEG2_TRACK   0x806
+#define ID_CONFIG_LEG2_CAPA    0x807
+#define ID_CONFIG_LEG2_DRIVER  0x808
+#define ID_CONFIG_LEG2_PHASE   0x809
+#define ID_CONFIG_LEG2_DT_RISE 0x80A
+#define ID_CONFIG_LEG2_DT_FALL 0x80B
 
 #define SUBSET_SER (1U << 0)
 #define POWER_LEG_COUNT 2
@@ -59,6 +70,7 @@ extern float temp_2_value;
 extern float meas_data;
 
 extern float blink_period_s;
+extern uint32_t switching_frequency_hz;
 
 typedef struct
 {
@@ -84,6 +96,11 @@ typedef struct
     float reference_value;
     float *tracking_var;
     char tracking_name[TRACKING_NAME_SIZE];
+    bool capacitor;
+    bool driver;
+    int16_t phase_shift;
+    uint16_t dead_time_rising_ns;
+    uint16_t dead_time_falling_ns;
 } power_leg_t;
 
 typedef struct
@@ -98,6 +115,8 @@ extern power_leg_t power_legs[POWER_LEG_COUNT];
 extern const tracking_variable_t tracking_variables[TRACKING_VAR_COUNT];
 
 void conf_mode_cb(enum thingset_callback_reason reason);
+void conf_freq_cb(enum thingset_callback_reason reason);
+void conf_config_cb(enum thingset_callback_reason reason);
 void conf_leg_cb_0(enum thingset_callback_reason reason);
 void conf_leg_cb_1(enum thingset_callback_reason reason);
 
