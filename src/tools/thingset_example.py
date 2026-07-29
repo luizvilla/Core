@@ -6,55 +6,99 @@
 #   the Free Software Foundation, either version 2 of the License, or
 #   (at your option) any later version.
 #
-#   This program is distributed in the hope that it will be useful,
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#   GNU General Public License for more details.
-#
-#   You should have received a copy of the GNU General Public License
-#   along with this program.  If not, see <https://www.gnu.org/licenses/>.
-#
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# @author Luiz Villa <luiz.villa@laas.fr>
-#
 
-"""
-thingset_example.py
+"""Safe-by-default command-line example for the ThingSet power test bench."""
 
-Usage example for thingset_tools.ThingSetTools: discovers the device's
-ThingSet objects, auto-builds a {short_name: path} dict for the
-Measurements group, reads a single measurement and the whole group, and
-writes a Config value both via write() and via the attribute proxy.
-"""
+import argparse
+import json
+import time
 
-import re
-
+from power_test_bench import PowerTestBench
 from thingset_tools import ThingSetTools
 
-MEAS = "Measurements"
 
-ts = ThingSetTools()
-ts.discover()
+def build_parser():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", help="serial port, e.g. /dev/ttyACM1")
+    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--leg", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--duty", type=float, default=0.1)
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=1.0,
+        help="powered duration in seconds (only with --enable-power)",
+    )
+    parser.add_argument(
+        "--enable-power",
+        action="store_true",
+        help="explicitly allow the selected leg to enter POWER_ON",
+    )
+    parser.add_argument(
+        "--connect-driver",
+        action="store_true",
+        help="connect the selected gate driver during powered operation",
+    )
+    parser.add_argument(
+        "--connect-capacitor",
+        action="store_true",
+        help="connect the selected capacitor during powered operation",
+    )
+    parser.add_argument(
+        "--json",
+        default="thingset_objects.json",
+        help="discovery output file; pass an empty string to disable",
+    )
+    return parser
 
-# Auto-build {short_name: full_path} for every measurement, e.g.
-# "rV1Low_V" -> name "V1Low" (between the leading "r" and the "_V" unit).
-measurements = {}
-for name in ts.fetch_children(MEAS):
-    match = re.match(r"^r(.+)_(\w+)$", name)
-    if match:
-        short_name, unit = match.groups()
-        measurements[short_name] = f"{MEAS}/{name}"
 
-print(measurements)
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.duration < 0:
+        parser.error("--duration must be non-negative")
+    if not args.enable_power and (
+        args.connect_driver or args.connect_capacitor
+    ):
+        parser.error(
+            "--connect-driver and --connect-capacitor require --enable-power"
+        )
 
-print(ts.read(measurements["V1Low"]))
-print(ts.read(measurements["V2Low"]))
-print(ts.read(measurements["VHigh"]))
+    with ThingSetTools(args.port, baudrate=args.baud) as client:
+        client.discover(json_path=args.json or None)
+        bench = PowerTestBench(client)
 
-# Flush all measurements and their current values at once.
-print(ts.read(MEAS))
+        # Establish the safe baseline before applying any requested duty.
+        bench.shutdown()
+        bench.configure_leg(args.leg, duty_cycle=args.duty)
 
-ts.write("Config", {"wBlinkPeriod_s": 0.5})
+        print("Converter metadata:")
+        print(json.dumps(bench.read_metadata(), indent=2))
+        print("Measurements:")
+        print(json.dumps(bench.read_measurements(), indent=2))
 
-ts.objects.Config.wBlinkPeriod_s = 1.0
+        if not args.enable_power:
+            print("Power remains OFF; pass --enable-power to energize one leg.")
+            return
+
+        disconnect_afterward = args.connect_driver or args.connect_capacitor
+        try:
+            bench.power_on(
+                args.leg,
+                connect_driver=args.connect_driver,
+                connect_capacitor=args.connect_capacitor,
+                duty_cycle=args.duty,
+            )
+            print(
+                f"Leg {args.leg} is powered for {args.duration:.3f} seconds."
+            )
+            time.sleep(args.duration)
+            print(json.dumps(bench.read_measurements(), indent=2))
+        finally:
+            bench.shutdown(disconnect_hardware=disconnect_afterward)
+
+
+if __name__ == "__main__":
+    main()
