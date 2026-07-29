@@ -284,9 +284,9 @@ it before use.
 
 | Phase | Status | Baseline / result | Gate and evidence | Next action |
 |---:|---|---|---|---|
-| 0. Plan and global convention | PASS | Baseline `069248a` | Global rule created; Commit 0 staged-file gate pending | Commit only this plan |
-| 1. Data-port viability | NOT_STARTED | — | Probe and port isolation pending | Add `?` probe |
-| 2. Decimated acquisition | NOT_STARTED | — | Build and state tests pending | Add ScopeMimicry state machine |
+| 0. Plan and global convention | PASS | Commit `a6ca0f7` | Global rule created; staged-file gate passed | Complete |
+| 1. Data-port viability | PASS | Based on `a6ca0f7` | Build 41.4% RAM; upload selected `5843500300470047`; 3 probes, unknown command, `/Converter`, and isolation passed | Complete |
+| 2. Decimated acquisition | IN_PROGRESS | Phase 1 implementation pending commit | Build and state tests pending | Add ScopeMimicry state machine |
 | 3. Bounded download | NOT_STARTED | — | Complete legacy dump pending | Add `D` transfer |
 | 4. Python client | NOT_STARTED | — | Python tests pending | Add Python scope transport |
 | 5. MATLAB client | NOT_STARTED | — | MATLAB tests pending | Add MATLAB scope transport |
@@ -306,6 +306,11 @@ Incident log:
    fallback models for ChatGPT-account compatibility. The instruction file was
    verified directly at `/home/luiz-villa/.codex/AGENTS.md`; upgrading the CLI
    is outside this repository's scope.
+2. `2026-07-29` — The first data-port probe read the configured delayed-boot
+   banner instead of the application acknowledgement. After allowing the
+   1.5-second startup delay and draining console text, three consecutive `?`
+   probes returned `SCOPE-DATA/1 OK`. The retry also verified the unknown
+   command response, `/Converter` on `if02`, and zero cross-port bytes.
 
 ## Phases and Commit Sequence
 
