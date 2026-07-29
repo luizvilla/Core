@@ -25,9 +25,11 @@ While the project contains many folders and files, all your code goes to the `sr
 In the this folder, the file `main.cpp` is the entry point of the application.
 Aditionally, some configuration can be done in the `platformio.ini` file.
 
-This branch contains a ThingSet-controlled power test bench example. Its
-object tree, control behavior, and serial-shell usage are documented in
-[`src/README.md`](src/README.md).
+This branch contains a ThingSet-controlled power test bench with a decimated
+1,024-by-8 software scope. ThingSet control uses the board's `if02` USB-CDC
+shell while frozen scope captures are downloaded over the separate `if00`
+data interface. Its object tree, dual-serial protocol, safe examples, and
+Python/MATLAB APIs are documented in [`src/README.md`](src/README.md).
 
 Other folders and files are used to configure the underlying Zephyr OS and PlatformIO, and are hidden by default.
 
@@ -47,9 +49,12 @@ owntech_power_api
 |  └─>user_data_objects.h
 |  └─>user_data_objects.cpp
 |  └─>thingset_callbacks.cpp
+|  └─>scope_capture.h / scope_capture.cpp
+|  └─>scope_data_port.h / scope_data_port.cpp
 |  └─ tools
 |     └─>thingset_tools.py / ThingSetTools.m
 |     └─>power_test_bench.py / PowerTestBench.m
+|     └─>scope_serial.py / ScopeSerial.m
 └─ zephyr
 |  └─ boards
 |  └─ dts
