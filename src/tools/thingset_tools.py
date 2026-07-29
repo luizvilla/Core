@@ -92,6 +92,10 @@ _LEAF_TYPES = {
     "x": "executable",
 }
 _WRITABLE_TYPES = ("writable", "writable-setting")
+_ACCESS_OVERRIDES = {
+    "Config/Mode": "writable",
+    "Config/Frequency_Hz": "writable",
+}
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _PROMPT_RE = re.compile(r"[A-Za-z0-9_-]+:~\$\s*")
@@ -254,7 +258,10 @@ class ThingSetTools:
     # ---- discovery --------------------------------------------------------
 
     @staticmethod
-    def _classify_leaf(name):
+    def _classify_leaf(name, path=""):
+        normalized_path = path.lstrip("/")
+        if normalized_path in _ACCESS_OVERRIDES:
+            return _ACCESS_OVERRIDES[normalized_path]
         if not name:
             return "unknown"
         return _LEAF_TYPES.get(name[0], "informational")
@@ -276,7 +283,7 @@ class ThingSetTools:
                 }
             else:
                 tree[name] = {
-                    "type": self._classify_leaf(name),
+                    "type": self._classify_leaf(name, child_path),
                     "path": child_path,
                 }
         return tree
