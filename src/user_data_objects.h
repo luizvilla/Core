@@ -7,6 +7,11 @@
 #ifndef USER_DATA_OBJECTS_H_
 #define USER_DATA_OBJECTS_H_
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <thingset.h>
+
 /* ThingSet object IDs. Existing IDs are kept stable for client compatibility. */
 #define ID_ROOT 0x00
 
@@ -22,8 +27,14 @@
 
 #define ID_CONFIG              0x06
 #define ID_CONFIG_BLINK_PERIOD 0x60
+#define ID_CONFIG_MODE         0x61
+#define ID_CONFIG_LEG1         0x70
+#define ID_CONFIG_LEG1_ENABLE  0x701
+#define ID_CONFIG_LEG2         0x80
+#define ID_CONFIG_LEG2_ENABLE  0x801
 
 #define SUBSET_SER (1U << 0)
+#define POWER_LEG_COUNT 2
 
 extern float V1_low_value;
 extern float V2_low_value;
@@ -36,5 +47,31 @@ extern float temp_2_value;
 extern float meas_data;
 
 extern float blink_period_s;
+
+typedef struct
+{
+    const char *name;
+    uint8_t value;
+} ModeDef;
+
+typedef enum : uint8_t
+{
+    IDLE = 0,
+    POWER_OFF,
+    POWER_ON,
+    NUM_OF_MODES
+} tester_state_t;
+
+typedef struct
+{
+    bool enable;
+    bool running;
+} power_leg_t;
+
+extern const ModeDef modes[NUM_OF_MODES];
+extern uint8_t mode;
+extern power_leg_t power_legs[POWER_LEG_COUNT];
+
+void conf_mode_cb(enum thingset_callback_reason reason);
 
 #endif /* USER_DATA_OBJECTS_H_ */

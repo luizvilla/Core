@@ -21,6 +21,15 @@ float meas_data;
 
 float blink_period_s = 1.0f;
 
+const ModeDef modes[NUM_OF_MODES] = {
+    { "IDLE", IDLE },
+    { "POWER_OFF", POWER_OFF },
+    { "POWER_ON", POWER_ON },
+};
+
+uint8_t mode = IDLE;
+power_leg_t power_legs[POWER_LEG_COUNT] = {};
+
 THINGSET_ADD_GROUP(ID_ROOT, ID_MEAS, "Measurements", THINGSET_NO_CALLBACK);
 
 THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_V1_LOW, "rV1Low_V", &V1_low_value, 2,
@@ -40,6 +49,16 @@ THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_TEMP1, "rTemp1_degC", &temp_1_value, 2,
 THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_TEMP2, "rTemp2_degC", &temp_2_value, 2,
                         THINGSET_ANY_R, SUBSET_SER);
 
-THINGSET_ADD_GROUP(ID_ROOT, ID_CONFIG, "Config", THINGSET_NO_CALLBACK);
+THINGSET_ADD_GROUP(ID_ROOT, ID_CONFIG, "Config", &conf_mode_cb);
 THINGSET_ADD_ITEM_FLOAT(ID_CONFIG, ID_CONFIG_BLINK_PERIOD, "wBlinkPeriod_s",
                         &blink_period_s, 2, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT8(ID_CONFIG, ID_CONFIG_MODE, "Mode", &mode,
+                        THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG1, "Leg1", THINGSET_NO_CALLBACK);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_ENABLE, "wEnable",
+                       &power_legs[0].enable, THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG2, "Leg2", THINGSET_NO_CALLBACK);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_ENABLE, "wEnable",
+                       &power_legs[1].enable, THINGSET_ANY_RW, SUBSET_SER);

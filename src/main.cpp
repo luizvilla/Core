@@ -34,7 +34,8 @@ void loop_critical_task();
 
 void setup_routine()
 {
-    shield.power.initBuck(ALL);
+    shield.power.initBuck(LEG1);
+    shield.power.initBuck(LEG2);
     shield.sensors.enableDefaultTwistSensors();
 
     uint32_t background_task_number = task.createBackground(loop_background_task);
@@ -74,6 +75,24 @@ void loop_critical_task()
     if (meas_data != NO_VALUE) I_high_value = meas_data;
     meas_data = shield.sensors.getLatestValue(V_HIGH);
     if (meas_data != NO_VALUE) V_high_value = meas_data;
+
+    if (mode == POWER_ON && power_legs[0].enable && !power_legs[0].running) {
+        shield.power.start(LEG1);
+        power_legs[0].running = true;
+    }
+    if ((mode != POWER_ON || !power_legs[0].enable) && power_legs[0].running) {
+        shield.power.stop(LEG1);
+        power_legs[0].running = false;
+    }
+
+    if (mode == POWER_ON && power_legs[1].enable && !power_legs[1].running) {
+        shield.power.start(LEG2);
+        power_legs[1].running = true;
+    }
+    if ((mode != POWER_ON || !power_legs[1].enable) && power_legs[1].running) {
+        shield.power.stop(LEG2);
+        power_legs[1].running = false;
+    }
 }
 
 int main(void)
