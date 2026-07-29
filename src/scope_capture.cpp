@@ -172,3 +172,66 @@ void scope_config_cb(enum thingset_callback_reason reason)
             break;
     }
 }
+
+bool scope_capture_begin_stream(void)
+{
+    if (scope_state != SCOPE_STATE_READY) {
+        return false;
+    }
+
+    scope_state = SCOPE_STATE_STREAMING;
+    scope_last_error = SCOPE_ERROR_NONE;
+    return true;
+}
+
+void scope_capture_end_stream(bool success)
+{
+    if (scope_state != SCOPE_STATE_STREAMING) {
+        scope_state = SCOPE_STATE_ERROR;
+        scope_last_error = SCOPE_ERROR_INTERNAL;
+        return;
+    }
+
+    if (success) {
+        scope_state = SCOPE_STATE_READY;
+    }
+    else {
+        scope_state = SCOPE_STATE_ERROR;
+        scope_last_error = SCOPE_ERROR_TRANSFER;
+    }
+}
+
+const uint8_t *scope_capture_buffer(void)
+{
+    return scope.get_buffer();
+}
+
+uint16_t scope_capture_buffer_size(void)
+{
+    return scope.get_buffer_size();
+}
+
+const char *scope_capture_channel_name(uint16_t index)
+{
+    return scope.get_channel_name(index);
+}
+
+const char *scope_capture_state_name(void)
+{
+    switch (scope_state) {
+        case SCOPE_STATE_IDLE:
+            return "IDLE";
+        case SCOPE_STATE_ARMED:
+            return "ARMED";
+        case SCOPE_STATE_TRIGGERED:
+            return "TRIGGERED";
+        case SCOPE_STATE_READY:
+            return "READY";
+        case SCOPE_STATE_STREAMING:
+            return "STREAMING";
+        case SCOPE_STATE_ERROR:
+            return "ERROR";
+        default:
+            return "ERROR";
+    }
+}
