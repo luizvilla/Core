@@ -68,6 +68,8 @@ static void update_leg_duty(power_leg_t &leg, leg_t hardware_leg, Pid &pid)
 
 void setup_routine()
 {
+    load_converter_metadata();
+
     shield.power.initBuck(LEG1);
     shield.power.initBuck(LEG2);
     shield.sensors.enableDefaultTwistSensors();
