@@ -289,8 +289,8 @@ it before use.
 | 1A. Upload isolation remediation | PASS | Based on `b1bfe77` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot; Python compilation passed | Complete |
 | 2. Decimated acquisition | BLOCKED | Commit `feat: add decimated ThingSet scope acquisition` | Clean build passed at 41.7% reported RAM with 4 KiB system heap; hardware state gate awaits a physical TWIST reset | Rerun hardware state gate after target recovery |
 | 3. Bounded download | BLOCKED | Commit `feat: stream scope captures on the data serial port` | Build passed at 41.7% RAM; source emits exact header, all 32,768 buffer bytes as 8,192 hex lines, and returns `STREAMING` to `READY`; live download gate awaits target recovery | Rerun hardware transfer gate after target recovery |
-| 4. Python client | IN_PROGRESS | Based on Phase 3 implementation | Python tests pending | Add Python scope transport |
-| 5. MATLAB client | NOT_STARTED | — | MATLAB tests pending | Add MATLAB scope transport |
+| 4. Python client | PASS | Commit `feat: add Python decimated scope capture interface` | `compileall` and 23 `unittest` cases pass, including bounded parsing, rotation, malformed input, scope validation, readback rejection, sequencing, and missing transport | Complete |
+| 5. MATLAB client | IN_PROGRESS | Based on Python interface | MATLAB tests pending | Add matched MATLAB scope transport |
 | 6. Documentation and acceptance | NOT_STARTED | — | Full gates pending | Run final acceptance |
 
 Only one phase may be `IN_PROGRESS`. Before and after each phase, update its
