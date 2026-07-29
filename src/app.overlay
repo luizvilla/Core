@@ -1,0 +1,17 @@
+/*
+ * The board's default chosen (zephyr,console and thingset,can) are already
+ * set in spin.dts. Here we only add a second USB-CDC-ACM UART instance and
+ * route the ThingSet shell to it, so it doesn't collide with the console.
+ */
+
+/ {
+	chosen {
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+};
+
+&usb {
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
