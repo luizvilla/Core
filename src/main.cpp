@@ -70,6 +70,7 @@ static void print_help()
            "|     ------- spin.metaData TEST MENU ---------  |\n"
            "|     press h : print this help menu             |\n"
            "|     press w : write canned test values         |\n"
+           "|     press b : attempt undersized writes        |\n"
            "|     press r : read back all metadata fields    |\n"
            "|     press c : clear all metadata fields        |\n"
            "|     press f : print free NVS space             |\n"
@@ -80,10 +81,12 @@ static void write_all_fields()
 {
     int8_t ret;
 
-    ret = spin.metaData.setSpinSerialNumber(TEST_SPIN_SERIAL);
+    ret = spin.metaData.setSpinSerialNumber(TEST_SPIN_SERIAL,
+                                             sizeof(TEST_SPIN_SERIAL) - 1);
     printk("SPIN_SERIAL=%s\n", (ret == 0) ? "OK" : "ERR");
 
-    ret = spin.metaData.setShieldSerialNumber(TEST_SHIELD_SERIAL);
+    ret = spin.metaData.setShieldSerialNumber(TEST_SHIELD_SERIAL,
+                                               sizeof(TEST_SHIELD_SERIAL) - 1);
     printk("SHIELD_SERIAL=%s\n", (ret == 0) ? "OK" : "ERR");
 
     ret = spin.metaData.setSpinVersion(TEST_SPIN_VERSION[0],
@@ -96,7 +99,8 @@ static void write_all_fields()
                                           TEST_SHIELD_VERSION[2]);
     printk("SHIELD_VERSION=%s\n", (ret == 0) ? "OK" : "ERR");
 
-    ret = spin.metaData.setShieldPassword(TEST_SHIELD_PASSWORD);
+    ret = spin.metaData.setShieldPassword(TEST_SHIELD_PASSWORD,
+                                           sizeof(TEST_SHIELD_PASSWORD) - 1);
     printk("SHIELD_PASSWORD=%s\n", (ret == 0) ? "OK" : "ERR");
 
     for (uint8_t i = 0 ; i < METADATA_EXTRA_COUNT ; i++)
@@ -108,6 +112,27 @@ static void write_all_fields()
     }
 
     printk("END_WRITE\n");
+}
+
+/**
+ * @brief Attempt to write each fixed-length field with fewer bytes than
+ *        required, to verify the size check rejects them (-2) instead of
+ *        reading past the end of the caller's buffer.
+ */
+static void write_undersized_fields()
+{
+    int8_t ret;
+
+    ret = spin.metaData.setSpinSerialNumber("ABC", 3);
+    printk("SPIN_SERIAL_BADSIZE=%d\n", ret);
+
+    ret = spin.metaData.setShieldSerialNumber("XY", 2);
+    printk("SHIELD_SERIAL_BADSIZE=%d\n", ret);
+
+    ret = spin.metaData.setShieldPassword("Z", 1);
+    printk("SHIELD_PASSWORD_BADSIZE=%d\n", ret);
+
+    printk("END_BADSIZE\n");
 }
 
 static void read_all_fields()
@@ -202,6 +227,9 @@ void loop_communication_task()
         break;
     case 'w':
         write_all_fields();
+        break;
+    case 'b':
+        write_undersized_fields();
         break;
     case 'r':
         read_all_fields();

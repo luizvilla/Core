@@ -238,6 +238,46 @@ def check_all_cleared(fields):
     return ok
 
 
+EXPECTED_BADSIZE_RESULTS = {
+    "SPIN_SERIAL_BADSIZE":     "-2",
+    "SHIELD_SERIAL_BADSIZE":   "-2",
+    "SHIELD_PASSWORD_BADSIZE": "-2",
+}
+
+
+def check_all_rejected(results):
+    rows = [
+        (key, expected, results.get(key))
+        for key, expected in EXPECTED_BADSIZE_RESULTS.items()
+    ]
+    field_width = max(len("FIELD"), *(len(key) for key, _, _ in rows))
+    expected_width = max(
+        len("EXPECTED"), *(len(expected) for _, expected, _ in rows)
+    )
+    actual_width = max(
+        len("ACTUAL"), *(len(actual or "") for _, _, actual in rows)
+    )
+
+    print(
+        f"  {'FIELD':<{field_width}}  "
+        f"{'EXPECTED':<{expected_width}}  "
+        f"{'ACTUAL':<{actual_width}}  RESULT"
+    )
+
+    ok = True
+    for key, expected, actual in rows:
+        matches = actual == expected
+        print(
+            f"  {key:<{field_width}}  "
+            f"{expected:<{expected_width}}  "
+            f"{(actual or ''):<{actual_width}}  "
+            f"{'OK' if matches else 'REJECTED-MISMATCH'}"
+        )
+        ok = ok and matches
+
+    return ok
+
+
 def touch_reset(port):
     """Enter MCUboot using the 1200-baud-touch convention."""
     reset_ser = serial.Serial(port, 1200, timeout=1)
@@ -409,32 +449,46 @@ def main():
     ser = open_serial_with_retry(port)
     time.sleep(0.5)
 
-    print("[1/6] Clearing all metadata fields...")
+    print("[1/8] Clearing all metadata fields...")
     print("  " + send_singleline_command(ser, "c"))
 
-    print("[2/6] Reading back (expect all fields empty/ERR)...")
+    print("[2/8] Reading back (expect all fields empty/ERR)...")
     fields = parse_kv_lines(send_multiline_command(ser, "r", "END_READ"))
     if not check_all_cleared(fields):
         print("FAIL: fields were not empty after clear")
         return 1
 
-    print("[3/6] Checking free NVS space (baseline)...")
+    print("[3/8] Attempting undersized writes (expect all rejected)...")
+    badsize_results = parse_kv_lines(
+        send_multiline_command(ser, "b", "END_BADSIZE")
+    )
+    if not check_all_rejected(badsize_results):
+        print("FAIL: an undersized write was not rejected with -2")
+        return 1
+
+    print("[4/8] Reading back (expect fields still empty/ERR)...")
+    fields = parse_kv_lines(send_multiline_command(ser, "r", "END_READ"))
+    if not check_all_cleared(fields):
+        print("FAIL: an undersized write corrupted storage")
+        return 1
+
+    print("[5/8] Checking free NVS space (baseline)...")
     print("  " + send_singleline_command(ser, "f"))
 
-    print("[4/6] Writing canned test values...")
+    print("[6/8] Writing canned test values...")
     write_lines = send_multiline_command(ser, "w", "END_WRITE")
     if any("ERR" in line for line in write_lines):
         print("FAIL: at least one field failed to write")
         print("\n".join(write_lines))
         return 1
 
-    print("[5/6] Reading back immediately (same-boot sanity check)...")
+    print("[7/8] Reading back immediately (same-boot sanity check)...")
     fields = parse_kv_lines(send_multiline_command(ser, "r", "END_READ"))
     if not check_all_present(fields):
         print("FAIL: values do not match right after writing")
         return 1
 
-    print("[6/6] Resetting board and re-reading (persistence check)...")
+    print("[8/8] Resetting board and re-reading (persistence check)...")
     ser.close()
     ser, port = reset_and_reconnect(port, board_id)
 
