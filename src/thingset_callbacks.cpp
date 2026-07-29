@@ -137,9 +137,9 @@ static void conf_leg_cb(enum thingset_callback_reason reason, uint8_t leg_index)
             if (strncmp(leg.tracking_name, previous.tracking_name,
                         TRACKING_NAME_SIZE) != 0) {
                 bool found = false;
-                for (uint8_t i = 0; i < TRACKING_VAR_COUNT; ++i) {
-                    if (strcmp(leg.tracking_name, tracking_variables[i].name) == 0) {
-                        leg.tracking_var = tracking_variables[i].address;
+                for (uint8_t i = 0; i < CALIBRATION_CHANNEL_COUNT; ++i) {
+                    if (strcmp(leg.tracking_name, calibration_channels[i].name) == 0) {
+                        leg.tracking_var = calibration_channels[i].address;
                         found = true;
                         break;
                     }
@@ -166,4 +166,76 @@ void conf_leg_cb_0(enum thingset_callback_reason reason)
 void conf_leg_cb_1(enum thingset_callback_reason reason)
 {
     conf_leg_cb(reason, 1);
+}
+
+typedef struct
+{
+    float gain;
+    float offset;
+    bool store;
+} calibration_shadow_t;
+
+static calibration_shadow_t previous_calibration[CALIBRATION_CHANNEL_COUNT];
+
+static void cal_channel_cb(enum thingset_callback_reason reason, uint8_t index)
+{
+    calibration_channel_t &channel = calibration_channels[index];
+    calibration_shadow_t &previous = previous_calibration[index];
+
+    switch (reason) {
+        case THINGSET_CALLBACK_PRE_WRITE:
+            previous.gain = channel.gain;
+            previous.offset = channel.offset;
+            previous.store = channel.store;
+            break;
+
+        case THINGSET_CALLBACK_POST_WRITE: {
+            const sensor_t sensor = static_cast<sensor_t>(channel.sensor);
+
+            if (channel.gain != previous.gain || channel.offset != previous.offset) {
+                shield.sensors.setConversionParametersLinear(
+                    sensor, channel.gain, channel.offset);
+            }
+
+            if (channel.store && !previous.store) {
+                shield.sensors.storeParametersInMemory(sensor);
+                shield.sensors.retrieveParametersFromMemory(sensor);
+                channel.store = false;
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+void cal_channel_cb_0(enum thingset_callback_reason reason)
+{
+    cal_channel_cb(reason, 0);
+}
+
+void cal_channel_cb_1(enum thingset_callback_reason reason)
+{
+    cal_channel_cb(reason, 1);
+}
+
+void cal_channel_cb_2(enum thingset_callback_reason reason)
+{
+    cal_channel_cb(reason, 2);
+}
+
+void cal_channel_cb_3(enum thingset_callback_reason reason)
+{
+    cal_channel_cb(reason, 3);
+}
+
+void cal_channel_cb_4(enum thingset_callback_reason reason)
+{
+    cal_channel_cb(reason, 4);
+}
+
+void cal_channel_cb_5(enum thingset_callback_reason reason)
+{
+    cal_channel_cb(reason, 5);
 }

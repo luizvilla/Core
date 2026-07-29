@@ -9,6 +9,8 @@
 #include <thingset.h>
 #include <thingset/sdk.h>
 
+#include "ShieldAPI.h"
+
 float V1_low_value;
 float V2_low_value;
 float V_high_value;
@@ -30,13 +32,13 @@ const ModeDef modes[NUM_OF_MODES] = {
 
 uint8_t mode = IDLE;
 
-const tracking_variable_t tracking_variables[TRACKING_VAR_COUNT] = {
-    { "V1", &V1_low_value },
-    { "V2", &V2_low_value },
-    { "VH", &V_high_value },
-    { "I1", &I1_low_value },
-    { "I2", &I2_low_value },
-    { "IH", &I_high_value },
+calibration_channel_t calibration_channels[CALIBRATION_CHANNEL_COUNT] = {
+    { "V1", &V1_low_value, V1_LOW, 1.0f, 0.0f, false },
+    { "V2", &V2_low_value, V2_LOW, 1.0f, 0.0f, false },
+    { "VH", &V_high_value, V_HIGH, 1.0f, 0.0f, false },
+    { "I1", &I1_low_value, I1_LOW, 1.0f, 0.0f, false },
+    { "I2", &I2_low_value, I2_LOW, 1.0f, 0.0f, false },
+    { "IH", &I_high_value, I_HIGH, 1.0f, 0.0f, false },
 };
 
 power_leg_t power_legs[POWER_LEG_COUNT] = {
@@ -126,3 +128,53 @@ THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DT_RISE,
 THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DT_FALL,
                          "wDeadTimeFalling_ns", &power_legs[1].dead_time_falling_ns,
                          THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_ROOT, ID_CALIBRATION, "Calibration", THINGSET_NO_CALLBACK);
+
+THINGSET_ADD_GROUP(ID_CALIBRATION, ID_CAL_V1, "V1", &cal_channel_cb_0);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_V1, ID_CAL_V1_GAIN, "wGain",
+                        &calibration_channels[0].gain, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_V1, ID_CAL_V1_OFFSET, "wOffset",
+                        &calibration_channels[0].offset, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CAL_V1, ID_CAL_V1_STORE, "wStore",
+                       &calibration_channels[0].store, THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CALIBRATION, ID_CAL_V2, "V2", &cal_channel_cb_1);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_V2, ID_CAL_V2_GAIN, "wGain",
+                        &calibration_channels[1].gain, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_V2, ID_CAL_V2_OFFSET, "wOffset",
+                        &calibration_channels[1].offset, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CAL_V2, ID_CAL_V2_STORE, "wStore",
+                       &calibration_channels[1].store, THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CALIBRATION, ID_CAL_VH, "VH", &cal_channel_cb_2);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_VH, ID_CAL_VH_GAIN, "wGain",
+                        &calibration_channels[2].gain, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_VH, ID_CAL_VH_OFFSET, "wOffset",
+                        &calibration_channels[2].offset, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CAL_VH, ID_CAL_VH_STORE, "wStore",
+                       &calibration_channels[2].store, THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CALIBRATION, ID_CAL_I1, "I1", &cal_channel_cb_3);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_I1, ID_CAL_I1_GAIN, "wGain",
+                        &calibration_channels[3].gain, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_I1, ID_CAL_I1_OFFSET, "wOffset",
+                        &calibration_channels[3].offset, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CAL_I1, ID_CAL_I1_STORE, "wStore",
+                       &calibration_channels[3].store, THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CALIBRATION, ID_CAL_I2, "I2", &cal_channel_cb_4);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_I2, ID_CAL_I2_GAIN, "wGain",
+                        &calibration_channels[4].gain, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_I2, ID_CAL_I2_OFFSET, "wOffset",
+                        &calibration_channels[4].offset, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CAL_I2, ID_CAL_I2_STORE, "wStore",
+                       &calibration_channels[4].store, THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_CALIBRATION, ID_CAL_IH, "IH", &cal_channel_cb_5);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_IH, ID_CAL_IH_GAIN, "wGain",
+                        &calibration_channels[5].gain, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CAL_IH, ID_CAL_IH_OFFSET, "wOffset",
+                        &calibration_channels[5].offset, 6, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CAL_IH, ID_CAL_IH_STORE, "wStore",
+                       &calibration_channels[5].store, THINGSET_ANY_RW, SUBSET_SER);
