@@ -75,6 +75,20 @@
 
 #define ID_CALIBRATION 0x09
 
+#define ID_DEBUG                     0x0A
+#define ID_DEBUG_SCOPE               0xA0
+#define ID_SCOPE_ARM                 0xA01
+#define ID_SCOPE_TRIGGER             0xA02
+#define ID_SCOPE_PRETRIGGER_RATIO    0xA03
+#define ID_SCOPE_DECIMATION          0xA04
+#define ID_SCOPE_STATE               0xA05
+#define ID_SCOPE_SAMPLE_COUNT        0xA06
+#define ID_SCOPE_CHANNEL_COUNT       0xA07
+#define ID_SCOPE_SAMPLE_PERIOD_US    0xA08
+#define ID_SCOPE_CAPTURE_DURATION_MS 0xA09
+#define ID_SCOPE_FINAL_INDEX         0xA0A
+#define ID_SCOPE_LAST_ERROR          0xA0B
+
 #define ID_CAL_V1        0x90
 #define ID_CAL_V1_GAIN   0x901
 #define ID_CAL_V1_OFFSET 0x902

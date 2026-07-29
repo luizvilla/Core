@@ -10,6 +10,7 @@
 #include <thingset/sdk.h>
 
 #include "ShieldAPI.h"
+#include "scope_capture.h"
 
 float V1_low_value;
 float V2_low_value;
@@ -72,6 +73,34 @@ THINGSET_ADD_ITEM_STRING(ID_CONVERTER, ID_CONVERTER_FIRMWARE_VERSION,
                          "wFirmwareVersion", converter_metadata.firmware_version,
                          CONVERTER_FIRMWARE_VERSION_SIZE,
                          THINGSET_ANY_RW, SUBSET_SER);
+
+THINGSET_ADD_GROUP(ID_ROOT, ID_DEBUG, "Debug", THINGSET_NO_CALLBACK);
+THINGSET_ADD_GROUP(ID_DEBUG, ID_DEBUG_SCOPE, "Scope", &scope_config_cb);
+THINGSET_ADD_ITEM_BOOL(ID_DEBUG_SCOPE, ID_SCOPE_ARM, "wArm",
+                       &scope_arm_request, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_DEBUG_SCOPE, ID_SCOPE_TRIGGER, "wTrigger",
+                       &scope_trigger_request, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_DEBUG_SCOPE, ID_SCOPE_PRETRIGGER_RATIO,
+                        "wPretriggerRatio", &scope_pretrigger_ratio, 3,
+                        THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_DEBUG_SCOPE, ID_SCOPE_DECIMATION, "wDecimation",
+                         &scope_decimation, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT8(ID_DEBUG_SCOPE, ID_SCOPE_STATE, "rState",
+                        &scope_state, THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_DEBUG_SCOPE, ID_SCOPE_SAMPLE_COUNT, "rSampleCount",
+                         &scope_sample_count, THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_DEBUG_SCOPE, ID_SCOPE_CHANNEL_COUNT, "rChannelCount",
+                         &scope_channel_count, THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT32(ID_DEBUG_SCOPE, ID_SCOPE_SAMPLE_PERIOD_US,
+                         "rSamplePeriod_us", &scope_sample_period_us,
+                         THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_DEBUG_SCOPE, ID_SCOPE_CAPTURE_DURATION_MS,
+                        "rCaptureDuration_ms", &scope_capture_duration_ms, 1,
+                        THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_DEBUG_SCOPE, ID_SCOPE_FINAL_INDEX, "rFinalIndex",
+                         &scope_final_index, THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT8(ID_DEBUG_SCOPE, ID_SCOPE_LAST_ERROR, "rLastError",
+                        &scope_last_error, THINGSET_ANY_R, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_MEAS, "Measurements", THINGSET_NO_CALLBACK);
 

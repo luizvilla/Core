@@ -27,6 +27,7 @@
 #include "ShieldAPI.h"
 #include "SpinAPI.h"
 #include "pid.h"
+#include "scope_capture.h"
 #include "scope_data_port.h"
 #include "user_data_objects.h"
 
@@ -74,6 +75,7 @@ void setup_routine()
     shield.power.initBuck(LEG1);
     shield.power.initBuck(LEG2);
     shield.sensors.enableDefaultTwistSensors();
+    scope_capture_init();
 
     uint32_t background_task_number = task.createBackground(loop_background_task);
     uint32_t scope_data_task_number =
@@ -148,6 +150,8 @@ void loop_critical_task()
     if (power_legs[1].running && V2_low_value > power_legs[1].v_max) {
         power_legs[1].v_max = V2_low_value;
     }
+
+    scope_capture_process();
 }
 
 int main(void)
