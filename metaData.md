@@ -21,7 +21,7 @@ landed.
   (`SpinAPI.h`, `SpinAPI.cpp`, `zephyr/modules/owntech_spin_api/zephyr/CMakeLists.txt`)
 - [x] **Commit 4** — test harness `main.cpp` with serial command menu
   (`h`/`w`/`r`/`c`/`f`) (`src/main.cpp`)
-- [ ] **Commit 5** — automated `pyserial` test script
+- [x] **Commit 5** — automated `pyserial` test script
   (`owntech/scripts/test_metadata_nvs.py`)
 
 ## Status log
@@ -72,3 +72,23 @@ files touched, any deviation from the plan.)
   `BOARD_METADATA | field_id` enum arithmetic (same idiom already
   compiling elsewhere in this codebase). This has **not** been
   hardware/compiler verified yet — do that before relying on it.
+- **Commit 5 done**: added `owntech/scripts/test_metadata_nvs.py`, a
+  standalone pyserial script that drives the `main.cpp` menu through
+  clear → read (expect empty) → write → read (same-boot) → reset (via
+  the 1200bps-touch convention already used by this project's own
+  `pre_bootloader_serial.py`/`env.TouchSerialPort`) → read (persistence
+  check), plus an optional `--reflash` step that runs
+  `platformio run -t upload` and re-reads to prove the storage partition
+  survives a firmware update. Verified: `python3 -m py_compile` passes,
+  `import serial` works with the system's pyserial 3.5. Not yet run
+  against real hardware. No deviation from plan.
+
+## Feature complete
+
+All 5 planned commits have landed. Before treating this as production-
+ready: (1) get an actual `platformio run` build passing — this session's
+system `platformio` CLI was broken by an unrelated Python environment
+issue (see Commit 4 entry above) so the C++ has only been manually
+reviewed, not compiler-verified; (2) run `test_metadata_nvs.py` against
+real Spin hardware and record the free-space (`f`) readings as the
+empirical answer to the memory-viability question from the plan.
