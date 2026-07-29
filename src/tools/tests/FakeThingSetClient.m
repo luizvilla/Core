@@ -45,6 +45,18 @@ classdef FakeThingSetClient < handle
                 "wBoardVersion", "v1.4.2", ...
                 "wSerialNumber", "UNSET", ...
                 "wFirmwareVersion", "1.0.0");
+            obj.State('Debug/Scope') = struct( ...
+                "wArm", false, ...
+                "wTrigger", false, ...
+                "wPretriggerRatio", 0.2, ...
+                "wDecimation", 1, ...
+                "rState", 0, ...
+                "rSampleCount", 1024, ...
+                "rChannelCount", 8, ...
+                "rSamplePeriod_us", 100, ...
+                "rCaptureDuration_ms", 102.4, ...
+                "rFinalIndex", 0, ...
+                "rLastError", 0);
         end
 
         function value = read(obj, path)
@@ -82,6 +94,23 @@ classdef FakeThingSetClient < handle
                     current.(name) = obj.RestoreValues(restoreKey);
                 end
             end
+            if strcmp(key, 'Debug/Scope') && ...
+                    isfield(values, "wArm") && values.wArm
+                current.wArm = false;
+                current.rState = 1;
+                current.rSamplePeriod_us = 100 * current.wDecimation;
+                current.rCaptureDuration_ms = ...
+                    1024 * current.rSamplePeriod_us / 1000;
+                current.rFinalIndex = 0;
+                current.rLastError = 0;
+            end
+            if strcmp(key, 'Debug/Scope') && ...
+                    isfield(values, "wTrigger") && values.wTrigger
+                current.wTrigger = false;
+                if current.rState == 1
+                    current.rState = 2;
+                end
+            end
             obj.State(key) = current;
         end
 
@@ -95,6 +124,10 @@ classdef FakeThingSetClient < handle
 
         function value = getState(obj, path)
             value = obj.State(char(path));
+        end
+
+        function setState(obj, path, value)
+            obj.State(char(path)) = value;
         end
     end
 end
