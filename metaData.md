@@ -82,13 +82,23 @@ files touched, any deviation from the plan.)
   survives a firmware update. Verified: `python3 -m py_compile` passes,
   `import serial` works with the system's pyserial 3.5. Not yet run
   against real hardware. No deviation from plan.
+- **Hardware validation done**: ran `test_metadata_nvs.py` against Spin
+  board `423250070031003C` with the Twist 1.4.2 test firmware. All ten
+  fields passed the clear, same-boot readback, and reset-persistence
+  checks. Free NVS space was 2008 bytes after clearing and 1832 bytes
+  after writing the canned values (176 bytes consumed including NVS
+  overhead). The initial 1200-baud reset implementation issued DTR/RTS
+  ioctls after the firmware had begun disconnecting USB, causing a
+  `BrokenPipeError`; it also reconnected to MCUboot rather than the
+  application. The test now performs the project's complete reset flow:
+  a plain 1200-baud touch to enter MCUboot, followed by `mcumgr reset`
+  back into the application before checking persistence. The optional
+  `--reflash` path was not exercised in this validation.
 
 ## Feature complete
 
-All 5 planned commits have landed. Before treating this as production-
-ready: (1) get an actual `platformio run` build passing — this session's
-system `platformio` CLI was broken by an unrelated Python environment
-issue (see Commit 4 entry above) so the C++ has only been manually
-reviewed, not compiler-verified; (2) run `test_metadata_nvs.py` against
-real Spin hardware and record the free-space (`f`) readings as the
-empirical answer to the memory-viability question from the plan.
+All 5 planned commits have landed. The test firmware has now been built
+and exercised on real Spin hardware: the default six-stage metadata test
+passes, including persistence across a reset, with 1832 bytes of free NVS
+space remaining after all ten canned fields are written. The optional
+full-reflash persistence check remains available through `--reflash`.
