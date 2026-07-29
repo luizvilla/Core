@@ -184,9 +184,30 @@ classdef ThingSetTools < handle
         function write(obj, path, values)
             % UPDATE `path` with `values` (a scalar struct of
             % item_name -> value). Handles the Zephyr shell's
-            % unescaped-double-quote stripping automatically.
-            payload = strrep(jsonencode(values), '"', '\"');
-            obj.parseResponse(obj.transact("=" + path + " " + payload, 3));
+            % unescaped-double-quote stripping automatically. Multi-item
+            % updates are staged as individual requests because supported
+            % firmware may have a smaller serial receive ring than its
+            % ThingSet command buffer.
+            if ~isstruct(values) || ~isscalar(values)
+                error("ThingSetTools:invalidValues", ...
+                    "values must be a scalar struct");
+            end
+            names = fieldnames(values);
+            if isempty(names)
+                updates = {values};
+            else
+                updates = cell(1, numel(names));
+                for i = 1:numel(names)
+                    update = struct();
+                    update.(names{i}) = values.(names{i});
+                    updates{i} = update;
+                end
+            end
+            for i = 1:numel(updates)
+                payload = strrep(jsonencode(updates{i}), '"', '\"');
+                obj.parseResponse(obj.transact( ...
+                    "=" + path + " " + payload, 3));
+            end
         end
 
         % ---- discovery -------------------------------------------------
@@ -608,7 +629,15 @@ classdef ThingSetTools < handle
         function body = transact(obj, cmd, timeoutSeconds)
             flush(obj.Serial);
             obj.log("TX: %s", cmd);
-            write(obj.Serial, uint8([char(cmd) 13 10]), "uint8");
+            wireData = uint8([char(cmd) 13 10]);
+            chunkSize = 32;
+            for offset = 1:chunkSize:numel(wireData)
+                last = min(offset + chunkSize - 1, numel(wireData));
+                write(obj.Serial, wireData(offset:last), "uint8");
+                if last < numel(wireData)
+                    pause(0.005);
+                end
+            end
 
             ansiPat = [char(27) '\[[0-9;]*m'];
             promptPat = '[A-Za-z0-9_-]+:~\$\s*';
