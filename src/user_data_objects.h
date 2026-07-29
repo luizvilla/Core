@@ -30,11 +30,23 @@
 #define ID_CONFIG_MODE         0x61
 #define ID_CONFIG_LEG1         0x70
 #define ID_CONFIG_LEG1_ENABLE  0x701
+#define ID_CONFIG_LEG1_BUCK    0x702
+#define ID_CONFIG_LEG1_BOOST   0x703
+#define ID_CONFIG_LEG1_DUTY    0x704
+#define ID_CONFIG_LEG1_REF     0x705
+#define ID_CONFIG_LEG1_TRACK   0x706
 #define ID_CONFIG_LEG2         0x80
 #define ID_CONFIG_LEG2_ENABLE  0x801
+#define ID_CONFIG_LEG2_BUCK    0x802
+#define ID_CONFIG_LEG2_BOOST   0x803
+#define ID_CONFIG_LEG2_DUTY    0x804
+#define ID_CONFIG_LEG2_REF     0x805
+#define ID_CONFIG_LEG2_TRACK   0x806
 
 #define SUBSET_SER (1U << 0)
 #define POWER_LEG_COUNT 2
+#define TRACKING_VAR_COUNT 6
+#define TRACKING_NAME_SIZE 8
 
 extern float V1_low_value;
 extern float V2_low_value;
@@ -57,8 +69,8 @@ typedef struct
 typedef enum : uint8_t
 {
     IDLE = 0,
-    POWER_OFF,
     POWER_ON,
+    POWER_OFF,
     NUM_OF_MODES
 } tester_state_t;
 
@@ -66,12 +78,27 @@ typedef struct
 {
     bool enable;
     bool running;
+    bool buck;
+    bool boost;
+    float duty_cycle;
+    float reference_value;
+    float *tracking_var;
+    char tracking_name[TRACKING_NAME_SIZE];
 } power_leg_t;
+
+typedef struct
+{
+    const char *name;
+    float *address;
+} tracking_variable_t;
 
 extern const ModeDef modes[NUM_OF_MODES];
 extern uint8_t mode;
 extern power_leg_t power_legs[POWER_LEG_COUNT];
+extern const tracking_variable_t tracking_variables[TRACKING_VAR_COUNT];
 
 void conf_mode_cb(enum thingset_callback_reason reason);
+void conf_leg_cb_0(enum thingset_callback_reason reason);
+void conf_leg_cb_1(enum thingset_callback_reason reason);
 
 #endif /* USER_DATA_OBJECTS_H_ */
