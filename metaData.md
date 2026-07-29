@@ -19,7 +19,7 @@ landed.
   (`zephyr/modules/owntech_spin_api/zephyr/src/MetaDataAPI.h`, `.cpp`)
 - [x] **Commit 3** — wire `MetaDataAPI` into `SpinAPI` as `spin.metaData`
   (`SpinAPI.h`, `SpinAPI.cpp`, `zephyr/modules/owntech_spin_api/zephyr/CMakeLists.txt`)
-- [ ] **Commit 4** — test harness `main.cpp` with serial command menu
+- [x] **Commit 4** — test harness `main.cpp` with serial command menu
   (`h`/`w`/`r`/`c`/`f`) (`src/main.cpp`)
 - [ ] **Commit 5** — automated `pyserial` test script
   (`owntech/scripts/test_metadata_nvs.py`)
@@ -56,3 +56,19 @@ files touched, any deviation from the plan.)
   `CONFIG_OWNTECH_FLASH`). Left the pre-existing, unrelated local
   modification to the top-level `zephyr/CMakeLists.txt` untouched. No
   deviation from plan.
+- **Commit 4 done**: replaced `src/main.cpp` with a serial-menu test
+  harness (`h`/`w`/`r`/`c`/`f`) exercising all 10 `spin.metaData` fields
+  plus `nvs_storage_get_free_space()`. **Deviation from plan**: could not
+  verify with an actual `platformio run` build — the system's
+  `platformio` CLI (and an isolated venv reinstall attempt) hit
+  pre-existing, unrelated Python environment breakage (`click`
+  8.1 removed the API `platformio` 4.3.4 needs; pinning `click` surfaced
+  a `marshmallow`/`distutils` incompatibility with Python 3.12; fixing
+  that chain is out of scope for this change). Instead did a careful
+  manual cross-check of every new/changed file: field-length constants,
+  NVS store/retrieve byte-size semantics (verified against
+  `data_conversion.cpp`'s established read-twice/re-read pattern in
+  `nvs_storage.c`), buffer bounds for all `get*` calls, and the
+  `BOARD_METADATA | field_id` enum arithmetic (same idiom already
+  compiling elsewhere in this codebase). This has **not** been
+  hardware/compiler verified yet — do that before relying on it.

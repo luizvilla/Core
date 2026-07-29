@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-present LAAS-CNRS
+ * Copyright (c) 2026-present LAAS-CNRS
  *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU Lesser General Public License as published by
@@ -18,90 +18,206 @@
  */
 
 /**
- * @brief  This example shows how to blink the onboard LED of the Spin board.
+ * @brief  Manual/scripted test harness for spin.metaData: write canned
+ *         values to flash, reset or reflash the board, then read them
+ *         back over serial to verify persistence.
  *
- * @author Clément Foucher <clement.foucher@laas.fr>
  * @author Luiz Villa <luiz.villa@laas.fr>
- * @author Ayoub Farah Hassan <ayoub.farah-hassan@laas.fr>
  */
+
+/* --------------Zephyr---------------------------------------- */
+#include <zephyr/console/console.h>
+#include <string.h>
 
 /* --------------OWNTECH APIs---------------------------------- */
 #include "SpinAPI.h"
 #include "TaskAPI.h"
+#include "nvs_storage.h"
 
 /* --------------SETUP FUNCTIONS DECLARATION------------------- */
-
-/* Setups the hardware and software of the system */
 void setup_routine();
 
 /* --------------LOOP FUNCTIONS DECLARATION-------------------- */
-
-/* Code to be executed in the background task */
-void loop_background_task();
-/* Code to be executed in real time in the critical task */
-void loop_critical_task();
+void loop_communication_task();
 
 /* --------------USER VARIABLES DECLARATIONS------------------- */
+uint8_t received_serial_char;
 
-
+/* Canned test values written by the 'w' command and expected back by 'r' */
+static const char TEST_SPIN_SERIAL[]     = "SPIN000000001"; /* 13 chars */
+static const char TEST_SHIELD_SERIAL[]   = "SHLD000000001"; /* 13 chars */
+static const char TEST_SHIELD_PASSWORD[] = "abc";           /* 3 chars */
+static const uint8_t TEST_SPIN_VERSION[3]   = {9, 9, 9};
+static const uint8_t TEST_SHIELD_VERSION[3] = {8, 8, 8};
+static const char* TEST_EXTRA[METADATA_EXTRA_COUNT] =
+{
+    "EXTRA0", "EXTRA1", "EXTRA2", "EXTRA3", "EXTRA4"
+};
 
 /* --------------SETUP FUNCTIONS------------------------------- */
 
-/**
- * This is the setup routine.
- * It is used to call functions that will initialize your spin, power shields
- * and tasks.
- *
- * In this example, we spawn a background task.
- * An optional critical task can be initialized by uncommenting the two
- * commented lines.
- */
 void setup_routine()
 {
-    /* Declare task */
-    uint32_t background_task_number =
-                            task.createBackground(loop_background_task);
-
-    /* Uncomment following line if you use the critical task */
-    /* task.createCritical(loop_critical_task, 500); */
-
-    /* Finally, start tasks */
-    task.startBackground(background_task_number);
-    /* Uncomment following line if you use the critical task */
-    /* task.startCritical(); */
+    uint32_t com_task_number = task.createBackground(loop_communication_task);
+    task.startBackground(com_task_number);
 }
 
 /* --------------LOOP FUNCTIONS-------------------------------- */
 
-/**
- * This is the code loop of the background task
- * It runs perpetually. Here a `suspendBackgroundMs` is used to pause during
- * 1000ms between each LED toggles.
- * Hence we expect the LED to blink each second.
- */
-void loop_background_task()
+static void print_help()
 {
-    /* Task content */
-    spin.led.toggle();
-
-    /* Pause between two runs of the task */
-    task.suspendBackgroundMs(1000);
+    printk(" ________________________________________________ \n"
+           "|     ------- spin.metaData TEST MENU ---------  |\n"
+           "|     press h : print this help menu             |\n"
+           "|     press w : write canned test values         |\n"
+           "|     press r : read back all metadata fields    |\n"
+           "|     press c : clear all metadata fields        |\n"
+           "|     press f : print free NVS space             |\n"
+           "|_________________________________________________|\n\n");
 }
 
-/**
- * Uncomment lines in setup_routine() to use critical task.
- *
- * This is the code loop of the critical task
- * It is executed every 500 micro-seconds defined in the setup_software
- * function. You can use it to execute an ultra-fast code with
- * the highest priority which cannot be interrupted by the background tasks.
- *
- * In the critical task, you can implement your control algorithm that will
- * run in Real Time and control your power flow.
- */
-void loop_critical_task()
+static void write_all_fields()
 {
+    int8_t ret;
 
+    ret = spin.metaData.setSpinSerialNumber(TEST_SPIN_SERIAL);
+    printk("SPIN_SERIAL=%s\n", (ret == 0) ? "OK" : "ERR");
+
+    ret = spin.metaData.setShieldSerialNumber(TEST_SHIELD_SERIAL);
+    printk("SHIELD_SERIAL=%s\n", (ret == 0) ? "OK" : "ERR");
+
+    ret = spin.metaData.setSpinVersion(TEST_SPIN_VERSION[0],
+                                        TEST_SPIN_VERSION[1],
+                                        TEST_SPIN_VERSION[2]);
+    printk("SPIN_VERSION=%s\n", (ret == 0) ? "OK" : "ERR");
+
+    ret = spin.metaData.setShieldVersion(TEST_SHIELD_VERSION[0],
+                                          TEST_SHIELD_VERSION[1],
+                                          TEST_SHIELD_VERSION[2]);
+    printk("SHIELD_VERSION=%s\n", (ret == 0) ? "OK" : "ERR");
+
+    ret = spin.metaData.setShieldPassword(TEST_SHIELD_PASSWORD);
+    printk("SHIELD_PASSWORD=%s\n", (ret == 0) ? "OK" : "ERR");
+
+    for (uint8_t i = 0 ; i < METADATA_EXTRA_COUNT ; i++)
+    {
+        ret = spin.metaData.setExtraData(i,
+                                          (const uint8_t*)TEST_EXTRA[i],
+                                          (uint8_t)strlen(TEST_EXTRA[i]));
+        printk("EXTRA_%u=%s\n", i, (ret == 0) ? "OK" : "ERR");
+    }
+
+    printk("END_WRITE\n");
+}
+
+static void read_all_fields()
+{
+    int8_t ret;
+
+    char serial_buf[SPIN_SERIAL_LEN + 1];
+    ret = spin.metaData.getSpinSerialNumber(serial_buf, sizeof(serial_buf));
+    if (ret >= 0)
+    {
+        serial_buf[SPIN_SERIAL_LEN] = '\0';
+        printk("SPIN_SERIAL=%s\n", serial_buf);
+    }
+    else
+    {
+        printk("SPIN_SERIAL=ERR:%d\n", ret);
+    }
+
+    char shield_serial_buf[SHIELD_SERIAL_LEN + 1];
+    ret = spin.metaData.getShieldSerialNumber(shield_serial_buf,
+                                               sizeof(shield_serial_buf));
+    if (ret >= 0)
+    {
+        shield_serial_buf[SHIELD_SERIAL_LEN] = '\0';
+        printk("SHIELD_SERIAL=%s\n", shield_serial_buf);
+    }
+    else
+    {
+        printk("SHIELD_SERIAL=ERR:%d\n", ret);
+    }
+
+    uint8_t spin_major, spin_minor, spin_rev;
+    ret = spin.metaData.getSpinVersion(&spin_major, &spin_minor, &spin_rev);
+    if (ret == 0)
+    {
+        printk("SPIN_VERSION=%u.%u.%u\n", spin_major, spin_minor, spin_rev);
+    }
+    else
+    {
+        printk("SPIN_VERSION=ERR:%d\n", ret);
+    }
+
+    uint8_t shield_major, shield_minor, shield_rev;
+    ret = spin.metaData.getShieldVersion(&shield_major, &shield_minor, &shield_rev);
+    if (ret == 0)
+    {
+        printk("SHIELD_VERSION=%u.%u.%u\n", shield_major, shield_minor, shield_rev);
+    }
+    else
+    {
+        printk("SHIELD_VERSION=ERR:%d\n", ret);
+    }
+
+    char password_buf[SHIELD_PASSWORD_LEN + 1];
+    ret = spin.metaData.getShieldPassword(password_buf, sizeof(password_buf));
+    if (ret >= 0)
+    {
+        password_buf[SHIELD_PASSWORD_LEN] = '\0';
+        printk("SHIELD_PASSWORD=%s\n", password_buf);
+    }
+    else
+    {
+        printk("SHIELD_PASSWORD=ERR:%d\n", ret);
+    }
+
+    for (uint8_t i = 0 ; i < METADATA_EXTRA_COUNT ; i++)
+    {
+        char extra_buf[METADATA_EXTRA_MAX_LEN + 1];
+        ret = spin.metaData.getExtraData(i, (uint8_t*)extra_buf,
+                                          METADATA_EXTRA_MAX_LEN);
+        if (ret >= 0)
+        {
+            extra_buf[ret] = '\0';
+            printk("EXTRA_%u=%s\n", i, extra_buf);
+        }
+        else
+        {
+            printk("EXTRA_%u=ERR:%d\n", i, ret);
+        }
+    }
+
+    printk("END_READ\n");
+}
+
+void loop_communication_task()
+{
+    received_serial_char = console_getchar();
+    switch (received_serial_char)
+    {
+    case 'h':
+        print_help();
+        break;
+    case 'w':
+        write_all_fields();
+        break;
+    case 'r':
+        read_all_fields();
+        break;
+    case 'c':
+    {
+        int8_t ret = spin.metaData.clearAllMetaData();
+        printk("CLEAR=%s\n", (ret == 0) ? "OK" : "ERR");
+        break;
+    }
+    case 'f':
+        printk("FREE_SPACE=%d\n", nvs_storage_get_free_space());
+        break;
+    default:
+        break;
+    }
 }
 
 /**
