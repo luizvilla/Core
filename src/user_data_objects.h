@@ -24,6 +24,10 @@
 #define ID_MEAS_I_HIGH 0x55
 #define ID_MEAS_TEMP1  0x56
 #define ID_MEAS_TEMP2  0x57
+#define ID_MEAS_V1_MAX 0x58
+#define ID_MEAS_V2_MAX 0x59
+#define ID_MEAS_DUTY1  0x5A
+#define ID_MEAS_DUTY2  0x5B
 
 #define ID_CONFIG              0x06
 #define ID_CONFIG_BLINK_PERIOD 0x60
@@ -133,6 +137,8 @@ typedef struct
     int16_t phase_shift;
     uint16_t dead_time_rising_ns;
     uint16_t dead_time_falling_ns;
+    float v_max;
+    float duty_readback;
 } power_leg_t;
 
 typedef struct

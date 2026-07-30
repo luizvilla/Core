@@ -43,9 +43,9 @@ calibration_channel_t calibration_channels[CALIBRATION_CHANNEL_COUNT] = {
 
 power_leg_t power_legs[POWER_LEG_COUNT] = {
     { false, false, false, false, 0.1f, 0.0f, &V1_low_value, "V1",
-      false, false, 0, 100, 100 },
+      false, false, 0, 100, 100, 0.0f, 0.0f },
     { false, false, false, false, 0.1f, 0.0f, &V2_low_value, "V2",
-      false, false, 0, 100, 100 },
+      false, false, 0, 100, 100, 0.0f, 0.0f },
 };
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_MEAS, "Measurements", THINGSET_NO_CALLBACK);
@@ -65,6 +65,16 @@ THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_I_HIGH, "rIHigh_A", &I_high_value, 2,
 THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_TEMP1, "rTemp1_degC", &temp_1_value, 2,
                         THINGSET_ANY_R, SUBSET_SER);
 THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_TEMP2, "rTemp2_degC", &temp_2_value, 2,
+                        THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_V1_MAX, "rV1Max_V",
+                        &power_legs[0].v_max, 2, THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_V2_MAX, "rV2Max_V",
+                        &power_legs[1].v_max, 2, THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_DUTY1, "rDuty1",
+                        &power_legs[0].duty_readback, 3,
+                        THINGSET_ANY_R, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_DUTY2, "rDuty2",
+                        &power_legs[1].duty_readback, 3,
                         THINGSET_ANY_R, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_CONFIG, "Config", &conf_config_cb);

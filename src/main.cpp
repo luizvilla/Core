@@ -63,6 +63,7 @@ static void update_leg_duty(power_leg_t &leg, leg_t hardware_leg, Pid &pid)
     }
 
     shield.power.setDutyCycle(hardware_leg, duty);
+    leg.duty_readback = duty;
 }
 
 void setup_routine()
@@ -119,6 +120,7 @@ void loop_critical_task()
     if ((mode != POWER_ON || !power_legs[0].enable) && power_legs[0].running) {
         shield.power.stop(LEG1);
         power_legs[0].running = false;
+        power_legs[0].v_max = 0.0f;
     }
 
     if (mode == POWER_ON && power_legs[1].enable && !power_legs[1].running) {
@@ -128,10 +130,18 @@ void loop_critical_task()
     if ((mode != POWER_ON || !power_legs[1].enable) && power_legs[1].running) {
         shield.power.stop(LEG2);
         power_legs[1].running = false;
+        power_legs[1].v_max = 0.0f;
     }
 
     update_leg_duty(power_legs[0], LEG1, pid_leg1);
     update_leg_duty(power_legs[1], LEG2, pid_leg2);
+
+    if (power_legs[0].running && V1_low_value > power_legs[0].v_max) {
+        power_legs[0].v_max = V1_low_value;
+    }
+    if (power_legs[1].running && V2_low_value > power_legs[1].v_max) {
+        power_legs[1].v_max = V2_low_value;
+    }
 }
 
 int main(void)
