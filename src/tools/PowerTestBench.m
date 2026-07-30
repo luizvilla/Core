@@ -17,6 +17,11 @@ classdef PowerTestBench < handle
 
     properties (SetAccess = private)
         Client
+        ScopeClient
+    end
+
+    properties (Access = private)
+        ArmedPretriggerRatio = NaN
     end
 
     properties (Constant)
@@ -26,12 +31,20 @@ classdef PowerTestBench < handle
     end
 
     methods
-        function obj = PowerTestBench(client)
-            if nargin ~= 1 || ~ismethod(client, "read") || ~ismethod(client, "write")
+        function obj = PowerTestBench(client, scopeClient)
+            if nargin < 1 || nargin > 2 || ...
+                    ~ismethod(client, "read") || ~ismethod(client, "write")
                 error("PowerTestBench:invalidClient", ...
                     "client must provide read(path) and write(path, values)");
             end
+            if nargin < 2
+                scopeClient = [];
+            elseif ~isempty(scopeClient) && ~ismethod(scopeClient, "download")
+                error("PowerTestBench:invalidClient", ...
+                    "scopeClient must provide download(metadata)");
+            end
             obj.Client = client;
+            obj.ScopeClient = scopeClient;
         end
 
         function modeValue = setMode(obj, mode)
@@ -234,6 +247,256 @@ classdef PowerTestBench < handle
             metadata = PowerTestBench.metadataFromReadback(raw);
         end
 
+        function status = readScopeStatus(obj)
+            % Read and validate the complete Debug/Scope status object.
+            raw = obj.readObject("Debug/Scope", "scope status");
+            required = [ ...
+                "wArm", "wTrigger", "wPretriggerRatio", "wDecimation", ...
+                "rState", "rSampleCount", "rChannelCount", ...
+                "rSamplePeriod_us", "rCaptureDuration_ms", ...
+                "rFinalIndex", "rLastError"];
+            missing = required(~isfield(raw, cellstr(required)));
+            if ~isempty(missing)
+                error("PowerTestBench:readback", ...
+                    "scope status is missing: %s", strjoin(missing, ", "));
+            end
+
+            stateNames = [ ...
+                "IDLE", "ARMED", "TRIGGERED", ...
+                "READY", "STREAMING", "ERROR"];
+            errorNames = [ ...
+                "NONE", "INVALID_STATE", "INVALID_DECIMATION", ...
+                "TRANSFER", "INTERNAL"];
+            stateCode = raw.rState;
+            errorCode = raw.rLastError;
+            if ~PowerTestBench.isIntegerInRange( ...
+                    stateCode, 0, numel(stateNames) - 1)
+                error("PowerTestBench:readback", ...
+                    "invalid scope state code");
+            end
+            if ~PowerTestBench.isIntegerInRange( ...
+                    errorCode, 0, numel(errorNames) - 1)
+                error("PowerTestBench:readback", ...
+                    "invalid scope error code");
+            end
+
+            configuredDecimation = raw.wDecimation;
+            sampleCount = raw.rSampleCount;
+            channelCount = raw.rChannelCount;
+            samplePeriodUs = raw.rSamplePeriod_us;
+            finalIndex = raw.rFinalIndex;
+            pretriggerRatio = raw.wPretriggerRatio;
+            durationMs = raw.rCaptureDuration_ms;
+            if ~PowerTestBench.isIntegerInRange( ...
+                    configuredDecimation, 1, 100) || ...
+                    ~PowerTestBench.isIntegerInRange(sampleCount, 1, Inf) || ...
+                    ~PowerTestBench.isIntegerInRange(channelCount, 1, Inf) || ...
+                    ~PowerTestBench.isIntegerInRange(samplePeriodUs, 1, Inf) || ...
+                    ~PowerTestBench.isIntegerInRange(finalIndex, 0, Inf) || ...
+                    ~PowerTestBench.isFiniteScalar(pretriggerRatio) || ...
+                    ~PowerTestBench.isFiniteScalar(durationMs)
+                error("PowerTestBench:readback", ...
+                    "scope status contains invalid numeric values");
+            end
+            if pretriggerRatio < 0 || pretriggerRatio > 0.9
+                error("PowerTestBench:readback", ...
+                    "scope pre-trigger ratio is outside 0.0 to 0.9");
+            end
+            if sampleCount ~= ScopeSerial.SampleCount
+                error("PowerTestBench:readback", ...
+                    "scope reports %d samples, expected %d", ...
+                    sampleCount, ScopeSerial.SampleCount);
+            end
+            if channelCount ~= numel(ScopeSerial.ChannelNames)
+                error("PowerTestBench:readback", ...
+                    "scope reports %d channels, expected %d", ...
+                    channelCount, numel(ScopeSerial.ChannelNames));
+            end
+            if mod(samplePeriodUs, 100) ~= 0
+                error("PowerTestBench:readback", ...
+                    "scope sample period is not a multiple of 100 us");
+            end
+            activeDecimation = samplePeriodUs / 100;
+            if activeDecimation < 1 || activeDecimation > 100
+                error("PowerTestBench:readback", ...
+                    "scope active decimation is invalid");
+            end
+            expectedDurationMs = sampleCount * samplePeriodUs / 1000;
+            if abs(durationMs - expectedDurationMs) > 0.05
+                error("PowerTestBench:readback", ...
+                    "scope duration does not match the sample timing");
+            end
+            if finalIndex >= sampleCount
+                error("PowerTestBench:readback", ...
+                    "scope final index is out of range");
+            end
+
+            status = struct( ...
+                "state", stateNames(stateCode + 1), ...
+                "stateCode", double(stateCode), ...
+                "lastError", errorNames(errorCode + 1), ...
+                "lastErrorCode", double(errorCode), ...
+                "configuredDecimation", double(configuredDecimation), ...
+                "activeDecimation", double(activeDecimation), ...
+                "pretriggerRatio", double(pretriggerRatio), ...
+                "sampleCount", double(sampleCount), ...
+                "channelCount", double(channelCount), ...
+                "samplePeriodUs", double(samplePeriodUs), ...
+                "durationMs", double(durationMs), ...
+                "finalIndex", double(finalIndex));
+        end
+
+        function status = armScope(obj, options)
+            % Configure and arm one capture with verified readback.
+            arguments
+                obj
+                options.PretriggerRatio = 0.2
+                options.Decimation = 1
+            end
+            pretriggerRatio = PowerTestBench.validateFinite( ...
+                "PretriggerRatio", options.PretriggerRatio);
+            if pretriggerRatio < 0 || pretriggerRatio > 0.9
+                error("PowerTestBench:validation", ...
+                    "PretriggerRatio must be between 0.0 and 0.9");
+            end
+            decimation = PowerTestBench.validateInteger( ...
+                "Decimation", options.Decimation, 1, 100);
+
+            obj.writeAndVerify( ...
+                "Debug/Scope", ...
+                struct( ...
+                    "wPretriggerRatio", pretriggerRatio, ...
+                    "wDecimation", decimation), ...
+                5e-4);
+            obj.writeAndVerify( ...
+                "Debug/Scope", struct("wArm", true), 0, ...
+                struct("wArm", false));
+            obj.ArmedPretriggerRatio = pretriggerRatio;
+            status = obj.waitForScopeStates( ...
+                ["ARMED", "TRIGGERED", "READY"], 1.0);
+            if status.activeDecimation ~= decimation
+                error("PowerTestBench:readback", ...
+                    "firmware armed with the wrong decimation");
+            end
+        end
+
+        function status = triggerScope(obj)
+            % Queue a one-shot software trigger while armed.
+            status = obj.readScopeStatus();
+            if status.state ~= "ARMED"
+                error("PowerTestBench:scopeState", ...
+                    "scope trigger requires ARMED, got %s", status.state);
+            end
+            obj.writeAndVerify( ...
+                "Debug/Scope", struct("wTrigger", true), 0, ...
+                struct("wTrigger", false));
+            status = obj.waitForScopeStates( ...
+                ["TRIGGERED", "READY"], 1.0);
+        end
+
+        function status = waitScopeReady(obj, options)
+            % Wait for READY with a capture-duration-aware timeout.
+            arguments
+                obj
+                options.Timeout = NaN
+                options.PollInterval = 0.02
+            end
+            pollInterval = PowerTestBench.validateFinite( ...
+                "PollInterval", options.PollInterval);
+            if pollInterval <= 0
+                error("PowerTestBench:validation", ...
+                    "PollInterval must be positive");
+            end
+
+            status = obj.readScopeStatus();
+            if isnumeric(options.Timeout) && isscalar(options.Timeout) && ...
+                    isnan(options.Timeout)
+                pretriggerRatio = obj.ArmedPretriggerRatio;
+                if isnan(pretriggerRatio)
+                    pretriggerRatio = status.pretriggerRatio;
+                end
+                timeout = status.sampleCount * status.samplePeriodUs * ...
+                    (1 - pretriggerRatio) / 1e6 + 2.0;
+            else
+                timeout = PowerTestBench.validateFinite( ...
+                    "Timeout", options.Timeout);
+                if timeout <= 0
+                    error("PowerTestBench:validation", ...
+                        "Timeout must be positive");
+                end
+            end
+
+            started = tic;
+            while true
+                if status.state == "READY"
+                    return
+                elseif status.state == "ERROR"
+                    error("PowerTestBench:scopeState", ...
+                        "scope entered ERROR: %s", status.lastError);
+                elseif ~any(status.state == ["ARMED", "TRIGGERED"])
+                    error("PowerTestBench:scopeState", ...
+                        "scope wait requires ARMED, TRIGGERED, or READY");
+                elseif toc(started) >= timeout
+                    error("PowerTestBench:scopeTimeout", ...
+                        "scope was not READY within %g seconds", timeout);
+                end
+                pause(pollInterval);
+                status = obj.readScopeStatus();
+            end
+        end
+
+        function capture = downloadScope(obj, options)
+            % Download the frozen READY capture through the data port.
+            arguments
+                obj
+                options.Timeout = 15.0
+            end
+            timeout = PowerTestBench.validateFinite( ...
+                "Timeout", options.Timeout);
+            if timeout <= 0
+                error("PowerTestBench:validation", ...
+                    "Timeout must be positive");
+            end
+            if isempty(obj.ScopeClient)
+                error("PowerTestBench:scopeTransport", ...
+                    "scope data transport is not configured");
+            end
+            status = obj.readScopeStatus();
+            if status.state ~= "READY"
+                error("PowerTestBench:scopeState", ...
+                    "scope download requires READY, got %s", status.state);
+            end
+            pretriggerRatio = obj.ArmedPretriggerRatio;
+            if isnan(pretriggerRatio)
+                pretriggerRatio = status.pretriggerRatio;
+            end
+            metadata = struct( ...
+                "decimation", status.activeDecimation, ...
+                "samplePeriodUs", status.samplePeriodUs, ...
+                "durationMs", status.durationMs, ...
+                "pretriggerRatio", pretriggerRatio);
+            try
+                capture = obj.ScopeClient.download( ...
+                    metadata, Timeout=timeout);
+            catch ME
+                error("PowerTestBench:scopeDownload", ...
+                    "scope download failed: %s", ME.message);
+            end
+            if ~isequal(capture.channelNames, ScopeSerial.ChannelNames)
+                error("PowerTestBench:readback", ...
+                    "scope download channel order mismatch");
+            end
+            if ~isequal(size(capture.samples), ...
+                    [status.sampleCount, status.channelCount])
+                error("PowerTestBench:readback", ...
+                    "scope download dimensions mismatch");
+            end
+            if capture.finalIndex ~= status.finalIndex
+                error("PowerTestBench:readback", ...
+                    "scope download final index does not match ThingSet");
+            end
+        end
+
         function powerOn(obj, leg, settings, options)
             % Safely configure and energize exactly one selected leg.
             arguments
@@ -307,6 +570,25 @@ classdef PowerTestBench < handle
     end
 
     methods (Access = private)
+        function status = waitForScopeStates(obj, states, timeout)
+            started = tic;
+            while true
+                status = obj.readScopeStatus();
+                if any(status.state == states)
+                    return
+                end
+                if status.state == "ERROR"
+                    error("PowerTestBench:scopeState", ...
+                        "scope entered ERROR: %s", status.lastError);
+                end
+                if toc(started) >= timeout
+                    error("PowerTestBench:scopeTimeout", ...
+                        "scope did not enter the requested state");
+                end
+                pause(0.01);
+            end
+        end
+
         function value = readObject(obj, path, label)
             try
                 value = obj.Client.read(path);
@@ -360,6 +642,17 @@ classdef PowerTestBench < handle
     end
 
     methods (Static, Access = private)
+        function valid = isFiniteScalar(value)
+            valid = isnumeric(value) && ~islogical(value) && ...
+                isscalar(value) && isreal(value) && isfinite(value);
+        end
+
+        function valid = isIntegerInRange(value, minimum, maximum)
+            valid = PowerTestBench.isFiniteScalar(value) && ...
+                fix(double(value)) == double(value) && ...
+                value >= minimum && value <= maximum;
+        end
+
         function legNumber = normalizeLeg(leg)
             if isnumeric(leg) && isscalar(leg) && isreal(leg) && ...
                     isfinite(leg) && fix(double(leg)) == double(leg) && ...

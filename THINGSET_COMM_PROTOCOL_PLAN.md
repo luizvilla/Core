@@ -290,8 +290,8 @@ it before use.
 | 2. Decimated acquisition | BLOCKED | Commit `feat: add decimated ThingSet scope acquisition` | Clean build passed at 41.7% reported RAM with 4 KiB system heap; hardware state gate awaits a physical TWIST reset | Rerun hardware state gate after target recovery |
 | 3. Bounded download | BLOCKED | Commit `feat: stream scope captures on the data serial port` | Build passed at 41.7% RAM; source emits exact header, all 32,768 buffer bytes as 8,192 hex lines, and returns `STREAMING` to `READY`; live download gate awaits target recovery | Rerun hardware transfer gate after target recovery |
 | 4. Python client | PASS | Commit `feat: add Python decimated scope capture interface` | `compileall` and 23 `unittest` cases pass, including bounded parsing, rotation, malformed input, scope validation, readback rejection, sequencing, and missing transport | Complete |
-| 5. MATLAB client | IN_PROGRESS | Based on Python interface | MATLAB tests pending | Add matched MATLAB scope transport |
-| 6. Documentation and acceptance | NOT_STARTED | — | Full gates pending | Run final acceptance |
+| 5. MATLAB client | PASS | Commit `feat: add MATLAB decimated scope capture interface` | `checkcode` reports zero issues and all 19 `matlab.unittest` cases pass, including matched parser, scope validation, sequencing, and transport cleanup | Complete |
+| 6. Documentation and acceptance | IN_PROGRESS | Based on completed host interfaces | Documentation and aggregate offline gates pending; live gates remain blocked by target recovery | Update READMEs and test record |
 
 Only one phase may be `IN_PROGRESS`. Before and after each phase, update its
 status and record command results, identity evidence, incidents, recovery
@@ -339,6 +339,10 @@ Incident log:
    to `OWNVERTER_V1_1_0` without being opened, reset, or probed by this test.
    The TWIST application remained wedged, and its 1200-baud callback could not
    be reached; its hardware gate therefore awaits a physical target reset.
+7. `2026-07-29` — The first MATLAB parser test run failed because the fake
+   transport converted double-quoted `sprintf` strings directly to `uint8`,
+   which MATLAB rejects. The fixtures were changed to character output; the
+   rerun passed all 19 tests with no `checkcode` findings.
 
 ## Phases and Commit Sequence
 

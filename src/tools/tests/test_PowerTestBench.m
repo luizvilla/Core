@@ -124,5 +124,81 @@ classdef test_PowerTestBench < matlab.unittest.TestCase
             testCase.verifyFalse(leg2.wDriver);
             testCase.verifyFalse(leg2.wCapa);
         end
+
+        function scopeControlSequenceAndDownload(testCase)
+            scopeClient = FakeScopeClient();
+            bench = PowerTestBench(testCase.Client, scopeClient);
+
+            armed = bench.armScope( ...
+                PretriggerRatio=0.25, Decimation=10);
+            testCase.verifyEqual(armed.state, "ARMED");
+            testCase.verifyEqual(armed.samplePeriodUs, 1000);
+            testCase.verifyEqual(armed.durationMs, 1024);
+
+            triggered = bench.triggerScope();
+            testCase.verifyEqual(triggered.state, "TRIGGERED");
+            raw = testCase.Client.getState("Debug/Scope");
+            raw.rState = 3;
+            raw.rFinalIndex = 17;
+            testCase.Client.setState("Debug/Scope", raw);
+
+            ready = bench.waitScopeReady( ...
+                Timeout=0.1, PollInterval=0.001);
+            testCase.verifyEqual(ready.state, "READY");
+            capture = bench.downloadScope(Timeout=4);
+            testCase.verifyEqual(capture.decimation, 10);
+            testCase.verifySize(capture.samples, [1024, 8]);
+            testCase.verifyEqual( ...
+                scopeClient.Calls{1}.metadata.pretriggerRatio, 0.25);
+            testCase.verifyEqual(scopeClient.Calls{1}.timeout, 4);
+        end
+
+        function scopeValidationAndRestoredWrite(testCase)
+            invalid = {false, 1.5, 0, 101, NaN, Inf};
+            for i = 1:numel(invalid)
+                value = invalid{i};
+                testCase.verifyError( ...
+                    @() testCase.Bench.armScope(Decimation=value), ...
+                    "PowerTestBench:validation");
+            end
+            for value = [1, 10, 100]
+                status = testCase.Bench.armScope(Decimation=value);
+                testCase.verifyEqual(status.activeDecimation, value);
+            end
+            invalidPretrigger = {-0.1, 0.91, NaN, Inf};
+            for i = 1:numel(invalidPretrigger)
+                value = invalidPretrigger{i};
+                testCase.verifyError( ...
+                    @() testCase.Bench.armScope( ...
+                        PretriggerRatio=value), ...
+                    "PowerTestBench:validation");
+            end
+
+            testCase.Client.setRestoreValue( ...
+                "Debug/Scope", "wDecimation", 1);
+            testCase.verifyError( ...
+                @() testCase.Bench.armScope(Decimation=10), ...
+                "PowerTestBench:readback");
+        end
+
+        function scopeRequiresTransportAndReadyState(testCase)
+            testCase.verifyError( ...
+                @() testCase.Bench.downloadScope(), ...
+                "PowerTestBench:scopeTransport");
+
+            bench = PowerTestBench(testCase.Client, FakeScopeClient());
+            testCase.verifyError( ...
+                @() bench.downloadScope(), ...
+                "PowerTestBench:scopeState");
+        end
+
+        function scopeStatusRejectsMetadataMismatch(testCase)
+            raw = testCase.Client.getState("Debug/Scope");
+            raw.rChannelCount = 7;
+            testCase.Client.setState("Debug/Scope", raw);
+            testCase.verifyError( ...
+                @() testCase.Bench.readScopeStatus(), ...
+                "PowerTestBench:readback");
+        end
     end
 end
