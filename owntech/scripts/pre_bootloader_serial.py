@@ -56,20 +56,28 @@ def find_spin_port(env):
 		print(f"  Board {port_number}: Found Spin board on port {comport} with unique ID {unique_id}")
 		port_number +=1
 		if unique_id == preferred_board_id:
-			preferred_board_port = comport
+			# Composite USB applications expose more than one CDC interface.
+			# The interface ending in ".0" is the console which implements the
+			# 1200-baud bootloader request.
+			if preferred_board_port is None or (
+				port.location is not None and port.location.endswith(":1.0")
+			):
+				preferred_board_port = comport
 
 	# Preferred board was found: use it for upload
 	if preferred_board_port != None:
 		print(f"Board with unique ID {preferred_board_id} was found and selected for upload")
 		return (preferred_board_port, preferred_board_id)
 
+	# An explicitly configured board ID is an isolation requirement. Never
+	# fall back to another attached board when that target is absent.
+	if preferred_board_id != None:
+		print(f"Error! Board with unique ID {preferred_board_id} was not found.")
+		return None
+
 	# Preferred board was not found (or no preferred board), but only one board connected: use it for upload
 	if len(available_ports) == 1:
-		if preferred_board_id != None:
-			print(f"Board with unique ID {preferred_board_id} not found")
-			print(f"WARNING: Board ID does not match preferred ID set in platformio.ini file. Uploading to board ID {available_ports[0].serial_number}")
-		else:
-			print(f"Uploading to board with ID {available_ports[0].serial_number}")
+		print(f"Uploading to board with ID {available_ports[0].serial_number}")
 		return (available_ports[0].device, available_ports[0].serial_number)
 
 	# Multiple boards connected, not including preferred board (or no preferred board): ask user for which one to use
@@ -102,6 +110,17 @@ def get_port_from_id(id_to_find):
 	# Port not found
 	return None
 
+def get_bootloader_port_from_id(id_to_find):
+	# Do not accept the still-enumerated application CDC interface. Waiting for
+	# the selected serial number to identify itself as MCUboot prevents a stale
+	# /dev/ttyACM number from being rebound to another attached board.
+	available_ports = list(serial.tools.list_ports.grep("2FE3"))
+	for port in available_ports:
+		if port.serial_number == id_to_find and port.product == "MCUBOOT":
+			return port.device
+
+	return None
+
 ################### Pre function ###################
 
 def upload_pre(source, target, env):
@@ -123,14 +142,15 @@ def upload_pre(source, target, env):
 
 	env.TouchSerialPort(spin_port, 1200)
 
-	# Wait for board to reboot in bootloader mode
+	# Wait for the selected board to reboot in bootloader mode
 	print("Rebooting board in bootloader mode...")
 	elapsed=0
 	port_found = False
 	while elapsed < 10 and port_found == False:
-		spin_port = get_port_from_id(spin_id)
+		spin_port = get_bootloader_port_from_id(spin_id)
 		if spin_port != None:
 			port_found = True
+			break
 		sleep(0.25)
 		elapsed += 0.25
 
