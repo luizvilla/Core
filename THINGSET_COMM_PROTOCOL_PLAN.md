@@ -39,8 +39,8 @@ compatible.
 | Power-off configuration frame | `frame_POWER_OFF()` prints factory-test flags and every leg's state, duty, reference, and tracking selection in one line | `/Config`, `/Config/LegN`, and `/Measurements` provide typed on-demand reads | Generic reads plus `read_leg`/`readLeg` | **Partial / replaced** — converter configuration is available, but there is no single legacy frame and no RS485/sync/analog/CAN result block |
 | Power-on telemetry frame | `frame_POWER_ON()` prints duty, voltages, currents, peaks, temperatures, high-side values, and factory-test fields | `/Measurements` exposes V1/V2/VH, I1/I2/IH, both temperatures, V1/V2 peaks, and both duty readbacks | `read_measurements`/`readMeasurements` | **Partial / replaced** — TWIST converter telemetry is present; the diagnostic tail and optional Leg 3 telemetry are missing |
 | Automatic/push telemetry | Legacy code can emit fixed-format power-on and power-off lines without a structured request | Current serial API is request/read based; no application telemetry stream or report schedule is defined for these objects | Wrappers poll measurements explicitly | **Missing** if legacy push/stream behavior is required |
-| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Partial** — firmware and fake-client gates pass; live `ARMED`→`TRIGGERED`→`READY` transitions verified against TWIST `5843500300470047` at decimation 1 (2026-07-30, three duty-driven captures) and again at decimations 1/10/100 with measured trigger-to-`READY` latency inside every documented window and the no-load `POWER_OFF` baseline passing (2026-07-30, `scope_duty_cycle_test.py`); MATLAB live acquisition remains unverified |
-| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Partial** — bounded parsing, rotation, and malformed-input handling pass offline; live Python download against real hardware passed at decimations 1, 10, and 100 (2026-07-30, six total captures across two sessions) with correct header/dimensions/final-index rotation each time; repeated download from one `READY` capture, shell responsiveness *during* transfer, and MATLAB live download remain unverified |
+| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Present** — firmware and fake-client gates pass; live `ARMED`→`TRIGGERED`→`READY` transitions verified against TWIST `5843500300470047` from both Python and MATLAB, at decimations 1/10/100 with measured trigger-to-`READY` latency inside every documented window, and the no-load `POWER_OFF` baseline passing (2026-07-30, `scope_duty_cycle_test.py` and a live MATLAB `armScope`/`triggerScope`/`waitScopeReady` run). Follow-up: MATLAB's default `downloadScope` timeout (15 s) is shorter than its own observed transfer time (~20.6 s) — see the buffer-download row |
+| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Present** — bounded parsing, rotation, and malformed-input handling pass offline; live download against real hardware passed at decimations 1, 10, and 100 from Python, and once from MATLAB (2026-07-30); a second Python download of the same still-`READY` MATLAB-captured buffer decoded identically (channels, dimensions, final index, decimation, sample period, and all 8,192 values matching to float32 precision), proving both repeated-download and Python/MATLAB cross-decoding; a shell read issued during that transfer completed without error but was delayed for the transfer's full ~1.3 s (serialized, not concurrent). **Known follow-up:** MATLAB's `ScopeSerial.readLine` reads one byte per call against a single 15 s deadline for the whole ~82 KB payload; the real transfer took 20.6 s, so the default times out — needs either a longer default `Timeout` or a batched read loop |
 | RS485 slave response | `slave_reception_function()` echoes and increments the RS485 test data, adds sync/CAN/analog fields, and starts transmission | The repository contains communication drivers, but this application does not configure or expose this factory-test transaction | No wrapper method | **Missing** |
 | RS485/CAN/sync/analog master verification | `master_reception_function()` evaluates the returned fields and latches `RS485_success`, `Sync_success`, `Analog_success`, and `Can_success` | No application state, callback, or ThingSet object implements this diagnostic workflow | No wrapper method | **Missing** |
 | Conditional Ownverter support | Compile-time Leg 3, V3/I3 tracking, V3/I3/temperature/peak telemetry | `POWER_LEG_COUNT` is 2 and `CALIBRATION_CHANNEL_COUNT` is 6; object IDs are explicitly defined for two legs | Both wrappers reject Leg 3 and V3/I3 | **Missing** |
@@ -61,12 +61,14 @@ If full `old4` parity is required, the priority order is:
    `shield.power.setFrequency()`.
 2. Correct `PowerAPI::disconnectDriver()` and verify physical driver-off
    readback or behavior.
-3. Complete the remaining live scope acceptance: repeated download from a
+3. Live scope acceptance is complete (2026-07-30, commits `73b66c4`,
+   `5909092`, and the MATLAB/cross-decode run below): decimation 1/10/100
+   timing, the no-load `POWER_OFF` baseline, repeated download from a
    single `READY` capture, shell responsiveness during a transfer, and
-   MATLAB live download. The TWIST target is recovered; decimation-1 live
-   acquisition/download (2026-07-30, commit `73b66c4`) and decimation
-   10/100 timing plus the no-load `POWER_OFF` baseline capture (2026-07-30,
-   commit `5909092`) already passed via `src/tools/scope_duty_cycle_test.py`.
+   MATLAB live acquisition/download all passed. Remaining follow-up (not a
+   parity gap): raise MATLAB `ScopeSerial`'s default download timeout past
+   15 s, or make its byte-at-a-time read loop faster — the real transfer
+   took 20.6 s.
 4. Decide whether the RS485/CAN/sync/analog factory-test workflow belongs in
    this application; if so, expose its commands, status, and failure details as
    typed objects.
@@ -202,9 +204,12 @@ The fixed design is:
 - No scope-port auto-detection, frequency writes, or power-supply control
   during acceptance.
 
-The two scope entries in the old4 comparison above are implemented and remain
-**Partial pending hardware acceptance** until the blocked Phase 2/3 live gates
-and final Phase 6 acceptance are complete.
+The two scope entries in the old4 comparison above are implemented and, as of
+2026-07-30, **Present** — Phases 2, 3, and 6 all passed live acceptance,
+including decimation 1/10/100 timing, the no-load `POWER_OFF` baseline,
+repeated download, shell responsiveness during a transfer, and MATLAB live
+acquisition/download with Python cross-decode parity. One follow-up remains
+(MATLAB's default download timeout), tracked separately and not blocking.
 
 ## Public Interface and Protocol
 
@@ -293,11 +298,11 @@ it before use.
 | 0. Plan and global convention | PASS | Commit `a6ca0f7` | Global rule created; staged-file gate passed | Complete |
 | 1. Data-port viability | PASS | Based on `a6ca0f7` | Build 41.4% RAM; upload selected `5843500300470047`; 3 probes, unknown command, `/Converter`, and isolation passed | Complete |
 | 1A. Upload isolation remediation | PASS | Commits `a47a096`, `88d7ba0` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot and stores its stable by-id path; Python compilation passed | Complete |
-| 2. Decimated acquisition | PARTIAL | Commit `feat: add decimated ThingSet scope acquisition`; live-tested 2026-07-30 via commits `73b66c4` and `5909092` | Build passes at 41.7% reported RAM with 4 KiB system heap; TWIST `5843500300470047` recovered, reflashed, and confirmed responsive; decimation-1 `ARMED`→`TRIGGERED`→`READY` transitions verified live across three duty-driven captures, then decimations 1/10/100 verified live in `POWER_OFF` with measured trigger-to-`READY` latency of 0.152 s / 1.075 s / 10.308 s, each inside its documented window (0.08-0.25 s / 0.9-1.2 s / 9.8-10.7 s); no `ERROR` state, no interlock trip | Exercise decimations live against MATLAB |
-| 3. Bounded download | PARTIAL | Commit `feat: stream scope captures on the data serial port`; live-tested 2026-07-30 via commits `73b66c4` and `5909092` | Build passes at 41.7% RAM/81.6% flash; live Python download succeeded six times total (decimation 1 x3, then 1/10/100 x1 each) with correct header, 8,192-value payload, and final-index rotation every time; `if02` responded normally to a fresh read immediately after each run | Verify repeated download from a single `READY` capture, shell responsiveness *during* a transfer, and MATLAB live download of the same buffer |
+| 2. Decimated acquisition | PASS | Commit `feat: add decimated ThingSet scope acquisition`; live-tested 2026-07-30 via commits `73b66c4`, `5909092`, and a MATLAB live run | Build passes at 41.7% reported RAM with 4 KiB system heap; TWIST `5843500300470047` recovered, reflashed, and confirmed responsive; decimation-1 `ARMED`→`TRIGGERED`→`READY` transitions verified live across three duty-driven captures, decimations 1/10/100 verified live in `POWER_OFF` with measured trigger-to-`READY` latency of 0.152 s / 1.075 s / 10.308 s each inside its documented window, and MATLAB independently armed/triggered/reached `READY` at decimation 10; no `ERROR` state, no interlock trip | Complete |
+| 3. Bounded download | PASS | Commit `feat: stream scope captures on the data serial port`; live-tested 2026-07-30 via commits `73b66c4`, `5909092`, and a MATLAB/cross-decode run | Build passes at 41.7% RAM/81.6% flash; live Python download succeeded six times total (decimation 1 x3, then 1/10/100 x1 each) with correct header, 8,192-value payload, and final-index rotation every time; MATLAB downloaded the same decimation-10 buffer once (20.6 s, past its own 15 s default timeout), then Python downloaded that same still-`READY` buffer a second time and decoded it identically to MATLAB's saved capture (all 8,192 values matching to float32 precision), proving repeated download and cross-decoding together; a shell read issued during that second transfer returned successfully but was delayed for the transfer's full ~1.3 s rather than serviced concurrently | Complete; consider fixing MATLAB's default download timeout as a follow-up |
 | 4. Python client | PASS | Commit `feat: add Python decimated scope capture interface` | `compileall` and 23 `unittest` cases pass, including bounded parsing, rotation, malformed input, scope validation, readback rejection, sequencing, and missing transport | Complete |
-| 5. MATLAB client | PASS | Commit `feat: add MATLAB decimated scope capture interface` | `checkcode` reports zero issues and all 19 `matlab.unittest` cases pass, including matched parser, scope validation, sequencing, and transport cleanup | Complete |
-| 6. Documentation and acceptance | PARTIAL | Commit `docs: document and validate decimated scope capture`; live runs 2026-07-30 via commits `73b66c4` and `5909092` | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; decimation 1/10/100 live acceptance and the no-load `POWER_OFF` baseline now pass (see Phase 2/3) | Complete repeated-download, shell-responsiveness-during-transfer, and MATLAB live gates, then mark scope parity fully present |
+| 5. MATLAB client | PASS (with a live-only follow-up) | Commit `feat: add MATLAB decimated scope capture interface`; live-tested 2026-07-30 | `checkcode` reports zero issues and all 19 `matlab.unittest` cases pass, including matched parser, scope validation, sequencing, and transport cleanup; live against real hardware, `armScope`/`triggerScope`/`waitScopeReady`/`downloadScope` all completed correctly and decoded identically to Python, but the default `downloadScope` `Timeout` (15 s) was shorter than the observed real transfer time (20.6 s) because `ScopeSerial.readLine` reads one byte per call — the fake-transport tests can't catch this since fakes return instantly | Raise the default timeout or batch-read in `readLine`, as a follow-up; not required for scope parity |
+| 6. Documentation and acceptance | PASS | Commit `docs: document and validate decimated scope capture`; live runs 2026-07-30 via commits `73b66c4`, `5909092`, and a MATLAB/cross-decode run | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; decimation 1/10/100 live acceptance, the no-load `POWER_OFF` baseline, repeated download, shell responsiveness during transfer, and MATLAB live acquisition/download with cross-decode parity all now pass (see Phase 2/3/5) | Complete; update the old4 comparison rows to Present (done) and consider the MATLAB timeout follow-up separately |
 
 Only one phase may be `IN_PROGRESS`. Before and after each phase, update its
 status and record command results, identity evidence, incidents, recovery
@@ -395,6 +400,37 @@ Incident log:
    timestamp was unchanged throughout. Still open: repeated download from a
    single `READY` capture, shell responsiveness during a transfer, and
    MATLAB live download of the same buffer.
+10. `2026-07-30` — The three items left open by incident 9 were closed in
+    one coordinated live run, entirely in `POWER_OFF` (no power was
+    applied). A MATLAB script (`armScope(Decimation=10,
+    PretriggerRatio=0.2)` → `triggerScope` → `waitScopeReady` →
+    `downloadScope`) reached `READY` correctly, but `downloadScope`'s
+    default `Timeout` (15 s) proved shorter than MATLAB's own actual
+    transfer time; `ScopeSerial.readLine` reads one byte per `read()` call
+    against a single deadline for the whole ~82 KB payload, and the real
+    transfer took 20.6 s. With an explicit longer timeout the download
+    completed and was saved to a file. A Python script then read the
+    still-`READY` status (unchanged: decimation 10, same final index),
+    downloaded that same buffer a second time in 1.27 s, and compared its
+    decode against MATLAB's saved capture: channel names, dimensions, final
+    index, decimation, and sample period matched exactly, and all 8,192
+    decoded values matched to within 5e-14 (float32 rounding noise) —
+    closing both repeated-download and Python/MATLAB cross-decoding. The
+    same Python script also read `Measurements` over `if02` from a
+    background thread while the download ran on `if00`; an earlier attempt
+    at this crashed because it shared one `ThingSetTools`/`pyserial`
+    connection between the background thread and
+    `PowerTestBench.download_scope()`'s own internal status read — a
+    Python-level race, not a device one. Corrected to call
+    `ScopeSerial.download()` directly during the transfer so only the
+    background thread touched `if02` at that moment: the read completed
+    without error but took the transfer's full ~1.3 s, indicating `if02`
+    and `if00` are serviced serially rather than concurrently, not that
+    `if02` becomes unavailable. TWIST `5843500300470047` never left
+    `POWER_OFF`/both-legs-disabled for this entire incident, and the
+    protected OWNVERTER's link timestamp was unchanged. Remaining follow-up
+    (not a scope-parity gap): fix MATLAB's default download timeout or its
+    per-byte read loop.
 
 ## Phases and Commit Sequence
 
@@ -533,7 +569,12 @@ controls the external supply.
 Required coverage includes:
 
 - State transitions, invalid ordering, invalid decimation, active-write
-  rejection, re-arm, repeated download, and shell responsiveness.
+  rejection, and re-arm (offline); repeated download and shell
+  responsiveness **verified live 2026-07-30**: a second Python download of
+  a buffer MATLAB had already downloaded once succeeded in 1.27 s with
+  identical decoded data, and a shell (`if02`) read issued during that
+  transfer completed without error but was delayed for the transfer's full
+  ~1.3 s rather than serviced concurrently.
 - Python and MATLAB decimation validation for booleans, non-integers, 0, 1,
   10, 100, 101, NaN, and infinity.
 - Valid, wrapped, truncated, malformed, non-hex, wrong-count, wrong-channel,
@@ -553,7 +594,10 @@ Required coverage includes:
   all samples finite, all current channels under the 0.5 A ceiling.
 - Download the same buffer with Python and MATLAB and require identical
   channels, dimensions, final index, active decimation, sample period, and
-  decoded samples.
+  decoded samples. **Verified live 2026-07-30:** MATLAB downloaded a
+  decimation-10 buffer, Python downloaded the same still-`READY` buffer
+  without re-arming, and every field matched exactly (all 8,192 values
+  agreeing to within 5e-14, i.e. float32 rounding noise).
 - Perform no frequency write and do not make the known frequency issue part of
   scope acceptance.
 - Verify OWNVERTER remains unchanged after the test.
@@ -580,6 +624,21 @@ decimation 10/100 timing and no-load `POWER_OFF` baseline gaps. Still open
 from the list above: repeated download from a single `READY` capture, shell
 responsiveness during a transfer, and MATLAB live download/cross-decoding of
 the same buffer.
+
+**2026-07-30 final follow-up:** the three remaining items above were closed
+in one coordinated live run, still entirely in `POWER_OFF`. MATLAB armed,
+triggered, waited for `READY`, and downloaded a decimation-10 capture live
+(with an explicit longer `Timeout`, after discovering its default 15 s is
+shorter than the real ~20.6 s transfer — see the old4 comparison table and
+Phase 5 in the progress ledger for that follow-up). Python then read the
+still-`READY` status, downloaded the same buffer a second time in 1.27 s,
+and its decode matched MATLAB's saved capture exactly. A `Measurements` read
+issued on `if02` during that second transfer completed successfully but was
+delayed for the transfer's full duration rather than serviced concurrently.
+Every item in the "Required coverage" list above is now verified live except
+the MATLAB timeout, which is tracked as a follow-up rather than an
+acceptance gap. The dual-serial scope feature's live acceptance is
+considered complete.
 
 ## Scope Assumptions
 
