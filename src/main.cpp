@@ -146,6 +146,7 @@ void setup_routine()
 
     /* Buck voltage mode */
     shield.power.initBuck(ALL);
+    shield.power.setPhaseShift(LEG2,90);
 
     shield.sensors.enableDefaultTwistSensors();
 
@@ -223,9 +224,11 @@ void loop_communication_task()
             break;
         case 'r':
             is_downloading = true;
+            enable_acq = false;
             break;
         case 'a':
-            enable_acq = !(enable_acq);
+            enable_acq = true;
+            scope.start();
             break;
         case 'c':
             num_trig_ratio_point = (num_trig_ratio_point + 1) % NB_DATAS;
@@ -260,6 +263,9 @@ void loop_application_task()
     printk("% 7d:", num_trig_ratio_point);
     printk("% 7.2f:", (double)V_high);
     printk("% 7.2f:", (double)V1_low_value);
+    printk("% 7.2f:", (double)V2_low_value);
+    printk("% 7.2f:", (double)I2_low_value);
+    printk("% 7.2f:", (double)I1_low_value);
     printk("\n");
 
     task.suspendBackgroundMs(100);
@@ -317,6 +323,7 @@ void loop_critical_task()
                 trig_ratio = begin_trig_ratio;
             }
             shield.power.setTriggerValue(LEG1, trig_ratio);
+            shield.power.setTriggerValue(LEG2, trig_ratio);
         }
         scope.acquire();
     }
