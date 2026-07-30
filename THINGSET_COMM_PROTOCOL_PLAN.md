@@ -39,8 +39,8 @@ compatible.
 | Power-off configuration frame | `frame_POWER_OFF()` prints factory-test flags and every leg's state, duty, reference, and tracking selection in one line | `/Config`, `/Config/LegN`, and `/Measurements` provide typed on-demand reads | Generic reads plus `read_leg`/`readLeg` | **Partial / replaced** — converter configuration is available, but there is no single legacy frame and no RS485/sync/analog/CAN result block |
 | Power-on telemetry frame | `frame_POWER_ON()` prints duty, voltages, currents, peaks, temperatures, high-side values, and factory-test fields | `/Measurements` exposes V1/V2/VH, I1/I2/IH, both temperatures, V1/V2 peaks, and both duty readbacks | `read_measurements`/`readMeasurements` | **Partial / replaced** — TWIST converter telemetry is present; the diagnostic tail and optional Leg 3 telemetry are missing |
 | Automatic/push telemetry | Legacy code can emit fixed-format power-on and power-off lines without a structured request | Current serial API is request/read based; no application telemetry stream or report schedule is defined for these objects | Wrappers poll measurements explicitly | **Missing** if legacy push/stream behavior is required |
-| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Partial** — firmware and fake-client gates pass; decimation-1 live `ARMED`→`TRIGGERED`→`READY` transitions verified 2026-07-30 against TWIST `5843500300470047` (three captures, no `ERROR` state); decimations 10/100 and the dedicated `POWER_OFF`/no-load baseline capture remain unexercised live |
-| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Partial** — bounded parsing, rotation, and malformed-input handling pass offline; live Python download against real hardware passed 2026-07-30 (decimation 1, three captures, correct header/dimensions/final-index rotation); repeated download from one `READY` capture, shell responsiveness *during* transfer, and MATLAB live download remain unverified |
+| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Partial** — firmware and fake-client gates pass; live `ARMED`→`TRIGGERED`→`READY` transitions verified against TWIST `5843500300470047` at decimation 1 (2026-07-30, three duty-driven captures) and again at decimations 1/10/100 with measured trigger-to-`READY` latency inside every documented window and the no-load `POWER_OFF` baseline passing (2026-07-30, `scope_duty_cycle_test.py`); MATLAB live acquisition remains unverified |
+| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Partial** — bounded parsing, rotation, and malformed-input handling pass offline; live Python download against real hardware passed at decimations 1, 10, and 100 (2026-07-30, six total captures across two sessions) with correct header/dimensions/final-index rotation each time; repeated download from one `READY` capture, shell responsiveness *during* transfer, and MATLAB live download remain unverified |
 | RS485 slave response | `slave_reception_function()` echoes and increments the RS485 test data, adds sync/CAN/analog fields, and starts transmission | The repository contains communication drivers, but this application does not configure or expose this factory-test transaction | No wrapper method | **Missing** |
 | RS485/CAN/sync/analog master verification | `master_reception_function()` evaluates the returned fields and latches `RS485_success`, `Sync_success`, `Analog_success`, and `Can_success` | No application state, callback, or ThingSet object implements this diagnostic workflow | No wrapper method | **Missing** |
 | Conditional Ownverter support | Compile-time Leg 3, V3/I3 tracking, V3/I3/temperature/peak telemetry | `POWER_LEG_COUNT` is 2 and `CALIBRATION_CHANNEL_COUNT` is 6; object IDs are explicitly defined for two legs | Both wrappers reject Leg 3 and V3/I3 | **Missing** |
@@ -61,12 +61,12 @@ If full `old4` parity is required, the priority order is:
    `shield.power.setFrequency()`.
 2. Correct `PowerAPI::disconnectDriver()` and verify physical driver-off
    readback or behavior.
-3. Complete the remaining live scope acceptance: decimation 10/100 timing
-   windows, repeated download from a single `READY` capture, shell
-   responsiveness during a transfer, MATLAB live download, and the dedicated
-   `POWER_OFF`/no-load baseline capture. The TWIST target is recovered and
-   decimation-1 live acquisition/download already passed via
-   `src/tools/scope_duty_cycle_test.py` (2026-07-30, commit `73b66c4`).
+3. Complete the remaining live scope acceptance: repeated download from a
+   single `READY` capture, shell responsiveness during a transfer, and
+   MATLAB live download. The TWIST target is recovered; decimation-1 live
+   acquisition/download (2026-07-30, commit `73b66c4`) and decimation
+   10/100 timing plus the no-load `POWER_OFF` baseline capture (2026-07-30,
+   commit `5909092`) already passed via `src/tools/scope_duty_cycle_test.py`.
 4. Decide whether the RS485/CAN/sync/analog factory-test workflow belongs in
    this application; if so, expose its commands, status, and failure details as
    typed objects.
@@ -293,11 +293,11 @@ it before use.
 | 0. Plan and global convention | PASS | Commit `a6ca0f7` | Global rule created; staged-file gate passed | Complete |
 | 1. Data-port viability | PASS | Based on `a6ca0f7` | Build 41.4% RAM; upload selected `5843500300470047`; 3 probes, unknown command, `/Converter`, and isolation passed | Complete |
 | 1A. Upload isolation remediation | PASS | Commits `a47a096`, `88d7ba0` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot and stores its stable by-id path; Python compilation passed | Complete |
-| 2. Decimated acquisition | PARTIAL | Commit `feat: add decimated ThingSet scope acquisition`; live-tested 2026-07-30 via commit `73b66c4` | Build passes at 41.7% reported RAM with 4 KiB system heap; TWIST `5843500300470047` recovered, reflashed, and confirmed responsive; decimation-1 `ARMED`→`TRIGGERED`→`READY` transitions verified live across three captures (Leg1-only, Leg2-only, both legs), no `ERROR` state, no interlock trip | Exercise decimations 10 and 100 live; add the dedicated `POWER_OFF`/no-load baseline capture |
-| 3. Bounded download | PARTIAL | Commit `feat: stream scope captures on the data serial port`; live-tested 2026-07-30 via commit `73b66c4` | Build passes at 41.7% RAM/81.6% flash; live Python download succeeded three times (decimation 1) with correct header, 8,192-value payload, and final-index rotation; `if02` responded normally to a fresh read immediately after the run | Verify repeated download from a single `READY` capture, shell responsiveness *during* a transfer, and MATLAB live download of the same buffer |
+| 2. Decimated acquisition | PARTIAL | Commit `feat: add decimated ThingSet scope acquisition`; live-tested 2026-07-30 via commits `73b66c4` and `5909092` | Build passes at 41.7% reported RAM with 4 KiB system heap; TWIST `5843500300470047` recovered, reflashed, and confirmed responsive; decimation-1 `ARMED`→`TRIGGERED`→`READY` transitions verified live across three duty-driven captures, then decimations 1/10/100 verified live in `POWER_OFF` with measured trigger-to-`READY` latency of 0.152 s / 1.075 s / 10.308 s, each inside its documented window (0.08-0.25 s / 0.9-1.2 s / 9.8-10.7 s); no `ERROR` state, no interlock trip | Exercise decimations live against MATLAB |
+| 3. Bounded download | PARTIAL | Commit `feat: stream scope captures on the data serial port`; live-tested 2026-07-30 via commits `73b66c4` and `5909092` | Build passes at 41.7% RAM/81.6% flash; live Python download succeeded six times total (decimation 1 x3, then 1/10/100 x1 each) with correct header, 8,192-value payload, and final-index rotation every time; `if02` responded normally to a fresh read immediately after each run | Verify repeated download from a single `READY` capture, shell responsiveness *during* a transfer, and MATLAB live download of the same buffer |
 | 4. Python client | PASS | Commit `feat: add Python decimated scope capture interface` | `compileall` and 23 `unittest` cases pass, including bounded parsing, rotation, malformed input, scope validation, readback rejection, sequencing, and missing transport | Complete |
 | 5. MATLAB client | PASS | Commit `feat: add MATLAB decimated scope capture interface` | `checkcode` reports zero issues and all 19 `matlab.unittest` cases pass, including matched parser, scope validation, sequencing, and transport cleanup | Complete |
-| 6. Documentation and acceptance | PARTIAL | Commit `docs: document and validate decimated scope capture`; live run 2026-07-30 via commit `73b66c4` | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; decimation-1 live acceptance now passes (see Phase 2/3) | Complete decimation 10/100, repeated-download, shell-responsiveness-during-transfer, MATLAB live, and no-load `POWER_OFF` gates, then mark scope parity fully present |
+| 6. Documentation and acceptance | PARTIAL | Commit `docs: document and validate decimated scope capture`; live runs 2026-07-30 via commits `73b66c4` and `5909092` | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; decimation 1/10/100 live acceptance and the no-load `POWER_OFF` baseline now pass (see Phase 2/3) | Complete repeated-download, shell-responsiveness-during-transfer, and MATLAB live gates, then mark scope parity fully present |
 
 Only one phase may be `IN_PROGRESS`. Before and after each phase, update its
 status and record command results, identity evidence, incidents, recovery
@@ -369,6 +369,32 @@ Incident log:
    10/100 timing, repeated download from a single `READY` capture, shell
    responsiveness during a transfer, MATLAB live download of the same
    buffer, and the dedicated `POWER_OFF`/no-load baseline capture.
+9. `2026-07-30` — `scope_duty_cycle_test.py` was extended (commit
+   `5909092`) with a decimation-sweep phase (`decimation_1`,
+   `decimation_10`, `decimation_100` by default) that runs in `POWER_OFF`
+   with both legs disabled and pre-trigger ratio `0.0`, checking the armed
+   `sample_period_us`/`duration_ms`, the measured trigger-to-`READY`
+   latency against the documented window, and a no-load `VHigh`/current
+   baseline. Before it could be run live, TWIST `5843500300470047`'s `if02`
+   (ThingSet shell) stopped enumerating; investigation found two `pio
+   device monitor` processes neither started by nor known to this test, one
+   attached to the TWIST's `if00` and one attached to what currently
+   resolves as the protected OWNVERTER's `if00`. Neither was touched. The
+   user confirmed they had reflashed the target with unrelated,
+   non-ThingSet firmware they were testing separately, explaining both the
+   missing `if02` and the second monitor. After that was clarified, the
+   target was rebuilt (81.6% flash / 41.7% RAM, identical firmware hash to
+   incident 8) and reflashed with `board_id` pinned; both interfaces
+   returned. The full sweep then ran live: decimations 1/10/100 all
+   passed, with measured trigger-to-`READY` latency of 0.152 s / 1.075 s /
+   10.308 s against documented windows of 0.08-0.25 s / 0.9-1.2 s /
+   9.8-10.7 s, and the no-load baseline (`VHigh_V` within 5% of 30 V, all
+   currents under 0.5 A) passed at every decimation. The three duty-driven
+   power phases then passed again as in incident 8. The board ended in
+   `POWER_OFF` with both legs disabled, and the protected OWNVERTER's link
+   timestamp was unchanged throughout. Still open: repeated download from a
+   single `READY` capture, shell responsiveness during a transfer, and
+   MATLAB live download of the same buffer.
 
 ## Phases and Commit Sequence
 
@@ -513,15 +539,18 @@ Required coverage includes:
 - Valid, wrapped, truncated, malformed, non-hex, wrong-count, wrong-channel,
   timeout, and probe-mismatch parsing.
 - Missing-scope-client errors and cleanup after exceptions.
-- Pre-trigger-zero timing:
+- Pre-trigger-zero timing (verified live 2026-07-30, commit `5909092`):
   - decimation 1: 100 us period, 102.4 ms nominal duration, ready in
-    0.08-0.25 s;
-  - decimation 10: 1000 us, 1.024 s, ready in 0.9-1.2 s;
-  - decimation 100: 10000 us, 10.24 s, ready in 9.8-10.7 s.
+    0.08-0.25 s — measured 0.152 s;
+  - decimation 10: 1000 us, 1.024 s, ready in 0.9-1.2 s — measured 1.075 s;
+  - decimation 100: 10000 us, 10.24 s, ready in 9.8-10.7 s — measured
+    10.308 s.
 - Trigger requests between acquisition ticks latch until the next sample.
 - At the user-provided 30 V input with no load, keep `POWER_OFF` and both legs
   disabled; require finite samples, mean VHigh within 5% of 30 V, and current
-  magnitudes below 0.5 A.
+  magnitudes below 0.5 A. **Verified live 2026-07-30** (commit `5909092`) at
+  decimations 1, 10, and 100: `VHigh_V` means 29.995 V / 30.006 V / 30.007 V,
+  all samples finite, all current channels under the 0.5 A ceiling.
 - Download the same buffer with Python and MATLAB and require identical
   channels, dimensions, final index, active decimation, sample period, and
   decoded samples.
@@ -537,10 +566,20 @@ voltage/current interlock in place of an external load. All three completed
 `IDLE`→`ARMED`→`TRIGGERED`→`READY` and downloaded successfully with correct
 channel order, 1,024-sample dimensions, and final-index rotation; `VHigh_V`
 held at ~30 V and no interlock tripped. OWNVERTER (`584350030047002D`) was
-confirmed unchanged. Still open from the list above: decimation 10/100 timing,
-repeated download from a single `READY` capture, shell responsiveness during a
-transfer, the dedicated `POWER_OFF`/no-load baseline capture, and MATLAB live
-download/cross-decoding of the same buffer.
+confirmed unchanged.
+
+**2026-07-30 follow-up (commit `5909092`):** the script gained a
+decimation-sweep phase that runs in `POWER_OFF` with both legs disabled and
+pre-trigger ratio `0.0`. Live against the same TWIST target, decimations 1,
+10, and 100 each passed: armed `sample_period_us`/`duration_ms` matched
+exactly, measured trigger-to-`READY` latency (0.152 s / 1.075 s / 10.308 s)
+landed inside every documented window, and the no-load baseline (`VHigh_V`
+within 5% of 30 V, all currents under 0.5 A) passed at every decimation. The
+three duty-driven power phases then passed again unchanged. This closes the
+decimation 10/100 timing and no-load `POWER_OFF` baseline gaps. Still open
+from the list above: repeated download from a single `READY` capture, shell
+responsiveness during a transfer, and MATLAB live download/cross-decoding of
+the same buffer.
 
 ## Scope Assumptions
 
