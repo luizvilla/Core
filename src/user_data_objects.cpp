@@ -20,6 +20,7 @@ float temp_2_value;
 float meas_data;
 
 float blink_period_s = 1.0f;
+uint32_t switching_frequency_hz = 200000;
 
 const ModeDef modes[NUM_OF_MODES] = {
     { "IDLE", IDLE },
@@ -39,8 +40,10 @@ const tracking_variable_t tracking_variables[TRACKING_VAR_COUNT] = {
 };
 
 power_leg_t power_legs[POWER_LEG_COUNT] = {
-    { false, false, false, false, 0.1f, 0.0f, &V1_low_value, "V1" },
-    { false, false, false, false, 0.1f, 0.0f, &V2_low_value, "V2" },
+    { false, false, false, false, 0.1f, 0.0f, &V1_low_value, "V1",
+      false, false, 0, 100, 100 },
+    { false, false, false, false, 0.1f, 0.0f, &V2_low_value, "V2",
+      false, false, 0, 100, 100 },
 };
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_MEAS, "Measurements", THINGSET_NO_CALLBACK);
@@ -62,11 +65,13 @@ THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_TEMP1, "rTemp1_degC", &temp_1_value, 2,
 THINGSET_ADD_ITEM_FLOAT(ID_MEAS, ID_MEAS_TEMP2, "rTemp2_degC", &temp_2_value, 2,
                         THINGSET_ANY_R, SUBSET_SER);
 
-THINGSET_ADD_GROUP(ID_ROOT, ID_CONFIG, "Config", &conf_mode_cb);
+THINGSET_ADD_GROUP(ID_ROOT, ID_CONFIG, "Config", &conf_config_cb);
 THINGSET_ADD_ITEM_FLOAT(ID_CONFIG, ID_CONFIG_BLINK_PERIOD, "wBlinkPeriod_s",
                         &blink_period_s, 2, THINGSET_ANY_RW, SUBSET_SER);
 THINGSET_ADD_ITEM_UINT8(ID_CONFIG, ID_CONFIG_MODE, "Mode", &mode,
                         THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT32(ID_CONFIG, ID_CONFIG_FREQ, "Frequency_Hz",
+                         &switching_frequency_hz, THINGSET_ANY_RW, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG1, "Leg1", &conf_leg_cb_0);
 THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_ENABLE, "wEnable",
@@ -82,6 +87,18 @@ THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG1, ID_CONFIG_LEG1_REF, "wReferenceValue",
 THINGSET_ADD_ITEM_STRING(ID_CONFIG_LEG1, ID_CONFIG_LEG1_TRACK, "wTrackingVar",
                          power_legs[0].tracking_name, TRACKING_NAME_SIZE,
                          THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_CAPA, "wCapa",
+                       &power_legs[0].capacitor, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_DRIVER, "wDriver",
+                       &power_legs[0].driver, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_INT16(ID_CONFIG_LEG1, ID_CONFIG_LEG1_PHASE, "wPhaseShift",
+                        &power_legs[0].phase_shift, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG1, ID_CONFIG_LEG1_DT_RISE,
+                         "wDeadTimeRising_ns", &power_legs[0].dead_time_rising_ns,
+                         THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG1, ID_CONFIG_LEG1_DT_FALL,
+                         "wDeadTimeFalling_ns", &power_legs[0].dead_time_falling_ns,
+                         THINGSET_ANY_RW, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG2, "Leg2", &conf_leg_cb_1);
 THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_ENABLE, "wEnable",
@@ -96,4 +113,16 @@ THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG2, ID_CONFIG_LEG2_REF, "wReferenceValue",
                         &power_legs[1].reference_value, 3, THINGSET_ANY_RW, SUBSET_SER);
 THINGSET_ADD_ITEM_STRING(ID_CONFIG_LEG2, ID_CONFIG_LEG2_TRACK, "wTrackingVar",
                          power_legs[1].tracking_name, TRACKING_NAME_SIZE,
+                         THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_CAPA, "wCapa",
+                       &power_legs[1].capacitor, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DRIVER, "wDriver",
+                       &power_legs[1].driver, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_INT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_PHASE, "wPhaseShift",
+                        &power_legs[1].phase_shift, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DT_RISE,
+                         "wDeadTimeRising_ns", &power_legs[1].dead_time_rising_ns,
+                         THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DT_FALL,
+                         "wDeadTimeFalling_ns", &power_legs[1].dead_time_falling_ns,
                          THINGSET_ANY_RW, SUBSET_SER);
