@@ -27,6 +27,7 @@
 #include "ShieldAPI.h"
 #include "SpinAPI.h"
 #include "pid.h"
+#include "scope_data_port.h"
 #include "user_data_objects.h"
 
 void setup_routine();
@@ -75,12 +76,15 @@ void setup_routine()
     shield.sensors.enableDefaultTwistSensors();
 
     uint32_t background_task_number = task.createBackground(loop_background_task);
+    uint32_t scope_data_task_number =
+        task.createBackground(scope_data_port_task);
     task.createCritical(loop_critical_task, CONTROL_TASK_PERIOD_US);
 
     pid_leg1.init(pid_params);
     pid_leg2.init(pid_params);
 
     task.startBackground(background_task_number);
+    task.startBackground(scope_data_task_number);
     task.startCritical();
 }
 

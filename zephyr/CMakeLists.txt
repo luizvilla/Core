@@ -111,6 +111,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(owntech_power_api)
 target_sources(app PRIVATE ../src/main.cpp)
+target_sources(app PRIVATE ../src/scope_data_port.cpp)
 target_sources(app PRIVATE ../src/user_data_objects.cpp)
 target_sources(app PRIVATE ../src/thingset_callbacks.cpp)
 zephyr_include_directories(../src)
