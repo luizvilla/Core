@@ -56,8 +56,40 @@
 
 #define SUBSET_SER (1U << 0)
 #define POWER_LEG_COUNT 2
-#define TRACKING_VAR_COUNT 6
 #define TRACKING_NAME_SIZE 8
+#define CALIBRATION_CHANNEL_COUNT 6
+
+#define ID_CALIBRATION 0x09
+
+#define ID_CAL_V1        0x90
+#define ID_CAL_V1_GAIN   0x901
+#define ID_CAL_V1_OFFSET 0x902
+#define ID_CAL_V1_STORE  0x903
+
+#define ID_CAL_V2        0x91
+#define ID_CAL_V2_GAIN   0x911
+#define ID_CAL_V2_OFFSET 0x912
+#define ID_CAL_V2_STORE  0x913
+
+#define ID_CAL_VH        0x92
+#define ID_CAL_VH_GAIN   0x921
+#define ID_CAL_VH_OFFSET 0x922
+#define ID_CAL_VH_STORE  0x923
+
+#define ID_CAL_I1        0x93
+#define ID_CAL_I1_GAIN   0x931
+#define ID_CAL_I1_OFFSET 0x932
+#define ID_CAL_I1_STORE  0x933
+
+#define ID_CAL_I2        0x94
+#define ID_CAL_I2_GAIN   0x941
+#define ID_CAL_I2_OFFSET 0x942
+#define ID_CAL_I2_STORE  0x943
+
+#define ID_CAL_IH        0x95
+#define ID_CAL_IH_GAIN   0x951
+#define ID_CAL_IH_OFFSET 0x952
+#define ID_CAL_IH_STORE  0x953
 
 extern float V1_low_value;
 extern float V2_low_value;
@@ -107,17 +139,27 @@ typedef struct
 {
     const char *name;
     float *address;
-} tracking_variable_t;
+    uint8_t sensor;
+    float gain;
+    float offset;
+    bool store;
+} calibration_channel_t;
 
 extern const ModeDef modes[NUM_OF_MODES];
 extern uint8_t mode;
 extern power_leg_t power_legs[POWER_LEG_COUNT];
-extern const tracking_variable_t tracking_variables[TRACKING_VAR_COUNT];
+extern calibration_channel_t calibration_channels[CALIBRATION_CHANNEL_COUNT];
 
 void conf_mode_cb(enum thingset_callback_reason reason);
 void conf_freq_cb(enum thingset_callback_reason reason);
 void conf_config_cb(enum thingset_callback_reason reason);
 void conf_leg_cb_0(enum thingset_callback_reason reason);
 void conf_leg_cb_1(enum thingset_callback_reason reason);
+void cal_channel_cb_0(enum thingset_callback_reason reason);
+void cal_channel_cb_1(enum thingset_callback_reason reason);
+void cal_channel_cb_2(enum thingset_callback_reason reason);
+void cal_channel_cb_3(enum thingset_callback_reason reason);
+void cal_channel_cb_4(enum thingset_callback_reason reason);
+void cal_channel_cb_5(enum thingset_callback_reason reason);
 
 #endif /* USER_DATA_OBJECTS_H_ */
