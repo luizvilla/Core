@@ -39,8 +39,8 @@ compatible.
 | Power-off configuration frame | `frame_POWER_OFF()` prints factory-test flags and every leg's state, duty, reference, and tracking selection in one line | `/Config`, `/Config/LegN`, and `/Measurements` provide typed on-demand reads | Generic reads plus `read_leg`/`readLeg` | **Partial / replaced** — converter configuration is available, but there is no single legacy frame and no RS485/sync/analog/CAN result block |
 | Power-on telemetry frame | `frame_POWER_ON()` prints duty, voltages, currents, peaks, temperatures, high-side values, and factory-test fields | `/Measurements` exposes V1/V2/VH, I1/I2/IH, both temperatures, V1/V2 peaks, and both duty readbacks | `read_measurements`/`readMeasurements` | **Partial / replaced** — TWIST converter telemetry is present; the diagnostic tail and optional Leg 3 telemetry are missing |
 | Automatic/push telemetry | Legacy code can emit fixed-format power-on and power-off lines without a structured request | Current serial API is request/read based; no application telemetry stream or report schedule is defined for these objects | Wrappers poll measurements explicitly | **Missing** if legacy push/stream behavior is required |
-| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Partial pending hardware acceptance** — firmware and fake-client gates pass; live state/timing gates await recovery of the target board |
-| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Partial pending hardware acceptance** — bounded parsing, rotation, malformed-input handling, and wrapper parity pass offline; live transfer/repeated-download parity awaits target recovery |
+| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Partial** — firmware and fake-client gates pass; decimation-1 live `ARMED`→`TRIGGERED`→`READY` transitions verified 2026-07-30 against TWIST `5843500300470047` (three captures, no `ERROR` state); decimations 10/100 and the dedicated `POWER_OFF`/no-load baseline capture remain unexercised live |
+| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Partial** — bounded parsing, rotation, and malformed-input handling pass offline; live Python download against real hardware passed 2026-07-30 (decimation 1, three captures, correct header/dimensions/final-index rotation); repeated download from one `READY` capture, shell responsiveness *during* transfer, and MATLAB live download remain unverified |
 | RS485 slave response | `slave_reception_function()` echoes and increments the RS485 test data, adds sync/CAN/analog fields, and starts transmission | The repository contains communication drivers, but this application does not configure or expose this factory-test transaction | No wrapper method | **Missing** |
 | RS485/CAN/sync/analog master verification | `master_reception_function()` evaluates the returned fields and latches `RS485_success`, `Sync_success`, `Analog_success`, and `Can_success` | No application state, callback, or ThingSet object implements this diagnostic workflow | No wrapper method | **Missing** |
 | Conditional Ownverter support | Compile-time Leg 3, V3/I3 tracking, V3/I3/temperature/peak telemetry | `POWER_LEG_COUNT` is 2 and `CALIBRATION_CHANNEL_COUNT` is 6; object IDs are explicitly defined for two legs | Both wrappers reject Leg 3 and V3/I3 | **Missing** |
@@ -61,8 +61,12 @@ If full `old4` parity is required, the priority order is:
    `shield.power.setFrequency()`.
 2. Correct `PowerAPI::disconnectDriver()` and verify physical driver-off
    readback or behavior.
-3. Complete live timing, repeated-download, and cross-language acceptance for
-   the implemented dual-serial scope after the TWIST target is recovered.
+3. Complete the remaining live scope acceptance: decimation 10/100 timing
+   windows, repeated download from a single `READY` capture, shell
+   responsiveness during a transfer, MATLAB live download, and the dedicated
+   `POWER_OFF`/no-load baseline capture. The TWIST target is recovered and
+   decimation-1 live acquisition/download already passed via
+   `src/tools/scope_duty_cycle_test.py` (2026-07-30, commit `73b66c4`).
 4. Decide whether the RS485/CAN/sync/analog factory-test workflow belongs in
    this application; if so, expose its commands, status, and failure details as
    typed objects.
@@ -289,11 +293,11 @@ it before use.
 | 0. Plan and global convention | PASS | Commit `a6ca0f7` | Global rule created; staged-file gate passed | Complete |
 | 1. Data-port viability | PASS | Based on `a6ca0f7` | Build 41.4% RAM; upload selected `5843500300470047`; 3 probes, unknown command, `/Converter`, and isolation passed | Complete |
 | 1A. Upload isolation remediation | PASS | Commits `a47a096`, `88d7ba0` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot and stores its stable by-id path; Python compilation passed | Complete |
-| 2. Decimated acquisition | BLOCKED | Commit `feat: add decimated ThingSet scope acquisition` | Clean build passed at 41.7% reported RAM with 4 KiB system heap; hardware state gate awaits a physical TWIST reset | Rerun hardware state gate after target recovery |
-| 3. Bounded download | BLOCKED | Commit `feat: stream scope captures on the data serial port` | Build passed at 41.7% RAM; source emits exact header, all 32,768 buffer bytes as 8,192 hex lines, and returns `STREAMING` to `READY`; live download gate awaits target recovery | Rerun hardware transfer gate after target recovery |
+| 2. Decimated acquisition | PARTIAL | Commit `feat: add decimated ThingSet scope acquisition`; live-tested 2026-07-30 via commit `73b66c4` | Build passes at 41.7% reported RAM with 4 KiB system heap; TWIST `5843500300470047` recovered, reflashed, and confirmed responsive; decimation-1 `ARMED`→`TRIGGERED`→`READY` transitions verified live across three captures (Leg1-only, Leg2-only, both legs), no `ERROR` state, no interlock trip | Exercise decimations 10 and 100 live; add the dedicated `POWER_OFF`/no-load baseline capture |
+| 3. Bounded download | PARTIAL | Commit `feat: stream scope captures on the data serial port`; live-tested 2026-07-30 via commit `73b66c4` | Build passes at 41.7% RAM/81.6% flash; live Python download succeeded three times (decimation 1) with correct header, 8,192-value payload, and final-index rotation; `if02` responded normally to a fresh read immediately after the run | Verify repeated download from a single `READY` capture, shell responsiveness *during* a transfer, and MATLAB live download of the same buffer |
 | 4. Python client | PASS | Commit `feat: add Python decimated scope capture interface` | `compileall` and 23 `unittest` cases pass, including bounded parsing, rotation, malformed input, scope validation, readback rejection, sequencing, and missing transport | Complete |
 | 5. MATLAB client | PASS | Commit `feat: add MATLAB decimated scope capture interface` | `checkcode` reports zero issues and all 19 `matlab.unittest` cases pass, including matched parser, scope validation, sequencing, and transport cleanup | Complete |
-| 6. Documentation and acceptance | BLOCKED | Commit `docs: document and validate decimated scope capture` | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; live acceptance awaits physical target reset | Recover TWIST, rerun Phase 2/3 live gates, then mark scope parity present |
+| 6. Documentation and acceptance | PARTIAL | Commit `docs: document and validate decimated scope capture`; live run 2026-07-30 via commit `73b66c4` | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; decimation-1 live acceptance now passes (see Phase 2/3) | Complete decimation 10/100, repeated-download, shell-responsiveness-during-transfer, MATLAB live, and no-load `POWER_OFF` gates, then mark scope parity fully present |
 
 Only one phase may be `IN_PROGRESS`. Before and after each phase, update its
 status and record command results, identity evidence, incidents, recovery
@@ -346,6 +350,25 @@ Incident log:
    transport converted double-quoted `sprintf` strings directly to `uint8`,
    which MATLAB rejects. The fixtures were changed to character output; the
    rerun passed all 19 tests with no `checkcode` findings.
+8. `2026-07-30` — TWIST `5843500300470047` was rebuilt (81.6% flash / 41.7%
+   RAM, matching the prior recorded scope build) and reflashed with
+   `board_id` explicitly pinned; it enumerated normally on both interfaces
+   afterward and was no longer wedged. A new host script,
+   `src/tools/scope_duty_cycle_test.py` (commit `73b66c4`), then ran three
+   live decimation-1 captures against it — Leg1-only, Leg2-only, and both
+   legs together, each at a fixed open-loop duty of 0.3 with no PID feedback,
+   protected by a software voltage/current interlock instead of a closed
+   loop. All three passed: `IDLE`→`ARMED`→`TRIGGERED`→`READY`→download
+   completed with correct channel order, 1,024-sample dimensions, and
+   final-index rotation; no interlock tripped; `VHigh_V` held at ~30 V; and
+   `V1Low_V`/`V2Low_V` tracked the expected `duty * VHigh` ratio (~9-10 V).
+   The protected OWNVERTER (`584350030047002D`) was verified unchanged
+   throughout, and the board ended in `POWER_OFF` with both legs disabled.
+   Results (CSV/TXT/PNG per phase) are gitignored under
+   `src/tools/scope_test_results/`, not committed. Still open: decimation
+   10/100 timing, repeated download from a single `READY` capture, shell
+   responsiveness during a transfer, MATLAB live download of the same
+   buffer, and the dedicated `POWER_OFF`/no-load baseline capture.
 
 ## Phases and Commit Sequence
 
@@ -505,6 +528,19 @@ Required coverage includes:
 - Perform no frequency write and do not make the known frequency issue part of
   scope acceptance.
 - Verify OWNVERTER remains unchanged after the test.
+
+**2026-07-30 update:** `src/tools/scope_duty_cycle_test.py` (commit `73b66c4`,
+documented in `SCOPE_DUTY_CYCLE_TEST.md`) ran three live decimation-1
+acquisitions against TWIST `5843500300470047` — Leg1-only, Leg2-only, and both
+legs together, each at a fixed open-loop duty of 0.3 with a software
+voltage/current interlock in place of an external load. All three completed
+`IDLE`→`ARMED`→`TRIGGERED`→`READY` and downloaded successfully with correct
+channel order, 1,024-sample dimensions, and final-index rotation; `VHigh_V`
+held at ~30 V and no interlock tripped. OWNVERTER (`584350030047002D`) was
+confirmed unchanged. Still open from the list above: decimation 10/100 timing,
+repeated download from a single `READY` capture, shell responsiveness during a
+transfer, the dedicated `POWER_OFF`/no-load baseline capture, and MATLAB live
+download/cross-decoding of the same buffer.
 
 ## Scope Assumptions
 
