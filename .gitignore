@@ -8,3 +8,4 @@ src/Data_records/*
 __pycache__/
 *.pyc
 thingset_objects.json
+.claude/*

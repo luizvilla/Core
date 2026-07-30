@@ -44,6 +44,13 @@ classdef ThingSetTools < handle
         Tree            % struct built by discover(): name -> item/group metadata
     end
 
+    properties
+        % When true, every step (port candidates, connection attempts,
+        % raw bytes written/read, response parsing) is printed to stderr
+        % via log(). Toggle at any time: ts.Verbose = true;
+        Verbose (1,1) logical = false
+    end
+
     properties (Access = private)
         Serial          % underlying serialport object
         Discovered = false
@@ -74,42 +81,62 @@ classdef ThingSetTools < handle
     end
 
     methods
-        function obj = ThingSetTools(port, baudRate, timeoutSeconds, vid, pid)
+        function obj = ThingSetTools(port, baudRate, timeoutSeconds, vid, pid, verbose)
             % Connect to a ThingSet-over-shell device. If `port` is
             % omitted, candidates are found by USB `vid`/`pid` (see
             % findPorts), falling back to every serial port on the system
             % if none match, and each is tried in turn until one answers
             % the ThingSet handshake.
+            %
+            % Pass verbose=true (or set ts.Verbose=true afterwards) to
+            % print every step - candidate ports, connection attempts and
+            % why each one failed, raw serial traffic, response parsing -
+            % to stderr. Useful when the device is found on one machine
+            % but not another.
             arguments
                 port (1,1) string = ""
                 baudRate (1,1) double = 115200
                 timeoutSeconds (1,1) double = 1.0
                 vid (1,1) string = ThingSetTools.OwnTechUsbVid
                 pid string = ""
+                verbose (1,1) logical = false
             end
 
             obj.Tree = struct();
+            obj.Verbose = verbose;
+
+            obj.log("MATLAB %s, serialport function available: %d", ...
+                version(), exist("serialport", "file") > 0 || exist("serialport", "builtin") > 0);
 
             if strlength(port) > 0
+                obj.log("explicit port given: %s", port);
                 obj.connect(port, baudRate, timeoutSeconds);
                 return
             end
 
-            candidates = ThingSetTools.findPorts(vid, pid);
+            obj.log("searching for candidate ports (vid=%s, pid=%s)", vid, pid);
+            candidates = ThingSetTools.findPorts(vid, pid, verbose);
+            obj.log("VID/PID match: %d candidate(s): %s", numel(candidates), ...
+                strjoin(candidates, ", "));
             if isempty(candidates)
                 candidates = serialportlist("available");
+                obj.log("no VID/PID match, falling back to all available ports: %d found: %s", ...
+                    numel(candidates), strjoin(candidates, ", "));
             end
             for i = 1:numel(candidates)
+                obj.log("trying candidate %d/%d: %s", i, numel(candidates), candidates(i));
                 try
                     obj.connect(candidates(i), baudRate, timeoutSeconds);
+                    obj.log("connected on %s", candidates(i));
                     return
-                catch
-                    % try the next candidate
+                catch ME
+                    obj.log("candidate %s failed: [%s] %s", candidates(i), ME.identifier, ME.message);
                 end
             end
             error("ThingSetTools:notFound", ...
-                "no ThingSet-over-shell device found (tried %d candidate port(s))", ...
-                numel(candidates));
+                "no ThingSet-over-shell device found (tried %d candidate port(s)). " + ...
+                "Set verbose=true (e.g. ThingSetTools('', 115200, 1.0, '%s', '', true)) to see why each candidate failed.", ...
+                numel(candidates), vid);
         end
 
         function close(obj)
@@ -289,24 +316,44 @@ classdef ThingSetTools < handle
     end
 
     methods (Static)
-        function ports = findPorts(vid, pid)
+        function ports = findPorts(vid, pid, verbose)
             % List serial ports matching a USB vendor ID (and optionally
             % a specific product ID). Defaults to OwnTech's VID. Reads
-            % /sys/class/tty (Linux only); falls back to returning every
-            % available port elsewhere. Adapted from
-            % old/old4/find_devices.py.
+            % /sys/class/tty on Linux, WMI (Win32_PnPEntity) on Windows;
+            % falls back to returning every available port elsewhere
+            % (e.g. macOS). Adapted from old/old4/find_devices.py, whose
+            % Python pyserial `list_ports.comports()` gets VID/PID for
+            % free on all three platforms - this reimplements just the
+            % Linux and Windows cases.
+            %
+            % Pass verbose=true to print, per port, the VID/PID found (or
+            % why it couldn't be read) to stderr.
             arguments
                 vid (1,1) string = ThingSetTools.OwnTechUsbVid
                 pid string = ""
+                verbose (1,1) logical = false
             end
             allPorts = serialportlist("available");
+            if verbose
+                ThingSetTools.printLog("findPorts: %d port(s) reported by serialportlist: %s", ...
+                    numel(allPorts), strjoin(allPorts, ", "));
+            end
+            winMap = containers.Map("KeyType", "char", "ValueType", "any");
+            if ispc
+                winMap = ThingSetTools.readUsbIdsWindows(verbose);
+            end
             ports = string.empty;
             for i = 1:numel(allPorts)
-                info = ThingSetTools.readUsbIds(allPorts(i));
+                info = ThingSetTools.readUsbIds(allPorts(i), verbose, winMap);
                 if isempty(info)
                     continue
                 end
-                if strcmpi(info.vid, vid) && (strlength(pid) == 0 || strcmpi(info.pid, pid))
+                match = strcmpi(info.vid, vid) && (strlength(pid) == 0 || strcmpi(info.pid, pid));
+                if verbose
+                    ThingSetTools.printLog("findPorts: %s vid=%s pid=%s -> %s", ...
+                        allPorts(i), info.vid, info.pid, string(match));
+                end
+                if match
                     ports(end+1) = allPorts(i); %#ok<AGROW>
                 end
             end
@@ -314,21 +361,106 @@ classdef ThingSetTools < handle
     end
 
     methods (Static, Access = private)
-        function info = readUsbIds(portName)
-            % Best-effort USB VID/PID lookup via Linux sysfs. Returns []
-            % if unavailable (not Linux, or not a USB-CDC device).
+        function s = hexPreview(bytes)
+            % Render up to the first 64 received bytes as hex + a
+            % printable-ASCII rendering, for RX log lines. Long
+            % responses are truncated so the log stays readable.
+            n = numel(bytes);
+            shown = bytes(1:min(n, 64));
+            hexPart = strjoin(compose("%02X", shown), " ");
+            printable = shown;
+            printable(printable < 32 | printable > 126) = uint8('.');
+            asciiPart = string(char(printable));
+            s = hexPart + "  |" + asciiPart + "|";
+            if n > 64
+                s = s + sprintf(" (+%d more byte(s))", n - 64);
+            end
+        end
+
+        function printLog(fmt, varargin)
+            % Shared stderr-logging sink for both instance methods
+            % (via log()) and the Static discovery helpers, which have
+            % no `obj` to read Verbose from.
+            fprintf(2, "[ThingSetTools %s] " + fmt + "\n", ...
+                datestr(now, 'HH:MM:SS.FFF'), varargin{:}); %#ok<TNOW1,DATST>
+        end
+
+        function info = readUsbIds(portName, verbose, winMap)
+            % Best-effort USB VID/PID lookup: Linux sysfs, or a
+            % pre-fetched Windows WMI map (see readUsbIdsWindows).
+            % Returns [] if unavailable (unsupported platform, or not a
+            % USB-CDC device).
+            arguments
+                portName (1,1) string
+                verbose (1,1) logical = false
+                winMap = containers.Map("KeyType", "char", "ValueType", "any")
+            end
             info = [];
-            if ~isunix
+            if isunix
+                [~, devName] = fileparts(portName);
+                base = "/sys/class/tty/" + devName + "/device/../";
+                vidFile = base + "idVendor";
+                pidFile = base + "idProduct";
+                if isfile(vidFile) && isfile(pidFile)
+                    info = struct( ...
+                        "vid", strtrim(fileread(vidFile)), ...
+                        "pid", strtrim(fileread(pidFile)));
+                elseif verbose
+                    ThingSetTools.printLog("readUsbIds: %s has no %s/%s (not a USB-CDC port, or sysfs layout differs on this machine)", ...
+                        portName, vidFile, pidFile);
+                end
+            elseif ispc
+                key = char(portName);
+                if isKey(winMap, key)
+                    info = winMap(key);
+                elseif verbose
+                    ThingSetTools.printLog("readUsbIds: no USB VID/PID found for %s via WMI (not a USB-CDC device, or Win32_PnPEntity didn't report it)", ...
+                        portName);
+                end
+            elseif verbose
+                ThingSetTools.printLog("readUsbIds: VID/PID lookup not implemented on this platform (%s)", computer);
+            end
+        end
+
+        function map = readUsbIdsWindows(verbose)
+            % Query all USB-attached COM ports' VID/PID in one shot via
+            % WMI/PowerShell (one process launch for every port, not one
+            % per port - that would be far too slow). Windows has no
+            % sysfs equivalent: VID/PID lives inside the PnP DeviceID
+            % string, e.g. "USB\VID_2FE3&PID_0100\6&1234...".
+            arguments
+                verbose (1,1) logical = false
+            end
+            map = containers.Map("KeyType", "char", "ValueType", "any");
+            cmd = ['powershell -NoProfile -Command "Get-CimInstance Win32_PnPEntity | ' ...
+                'Where-Object { $_.Name -match ''\(COM[0-9]+\)'' } | ' ...
+                'Select-Object Name, DeviceID | ConvertTo-Json -Compress"'];
+            [status, out] = system(cmd);
+            if status ~= 0 || strlength(strtrim(string(out))) == 0
+                if verbose
+                    ThingSetTools.printLog("readUsbIdsWindows: WMI query failed (status=%d): %s", status, out);
+                end
                 return
             end
-            [~, devName] = fileparts(portName);
-            base = "/sys/class/tty/" + devName + "/device/../";
-            vidFile = base + "idVendor";
-            pidFile = base + "idProduct";
-            if isfile(vidFile) && isfile(pidFile)
-                info = struct( ...
-                    "vid", strtrim(fileread(vidFile)), ...
-                    "pid", strtrim(fileread(pidFile)));
+            try
+                entries = jsondecode(out);
+            catch ME
+                if verbose
+                    ThingSetTools.printLog("readUsbIdsWindows: failed to parse WMI output as JSON: %s", ME.message);
+                end
+                return
+            end
+            for i = 1:numel(entries)
+                e = entries(i);
+                nameTok = regexp(e.Name, '\((COM\d+)\)', 'tokens', 'once');
+                idTok = regexp(e.DeviceID, 'VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})', 'tokens', 'once');
+                if isempty(nameTok) || isempty(idTok)
+                    continue
+                end
+                map(nameTok{1}) = struct("vid", string(idTok{1}), "pid", string(idTok{2}));
+            end
+            if verbose
+                ThingSetTools.printLog("readUsbIdsWindows: found VID/PID for %d of the queried COM port(s)", map.Count);
             end
         end
 
@@ -348,14 +480,36 @@ classdef ThingSetTools < handle
     end
 
     methods (Access = private)
+        function log(obj, fmt, varargin)
+            % Print an instrumentation line to stderr when Verbose is
+            % on. Timestamped so serial-timing issues (slow USB
+            % enumeration, late device response) are visible.
+            if ~obj.Verbose
+                return
+            end
+            ThingSetTools.printLog(fmt, varargin{:});
+        end
+
         function connect(obj, port, baudRate, timeoutSeconds)
+            obj.log("opening %s at %d baud, timeout=%.2fs", port, baudRate, timeoutSeconds);
             obj.Port = port;
-            obj.Serial = serialport(port, baudRate, "Timeout", timeoutSeconds);
+            % FlowControl is pinned to "none" (not just left at its
+            % default) because some Windows COM ports - notably
+            % Bluetooth-over-serial and other virtual ports - can enable
+            % hardware flow control at the driver level. When that
+            % happens, write() blocks forever waiting for CTS that never
+            % comes, and MATLAB's Timeout property does not bound that
+            % wait (it only governs read()). Explicit "none" avoids the
+            % hang outright rather than relying on the port's default.
+            obj.Serial = serialport(port, baudRate, "Timeout", timeoutSeconds, "FlowControl", "none");
             pause(0.3);
             flush(obj.Serial);
+            obj.log("sending blank line to clear any partial input");
             obj.transact("", timeoutSeconds);
+            obj.log("sending handshake: select thingset");
             obj.transact("select thingset", timeoutSeconds);
             obj.get("");
+            obj.log("handshake ok, root GET succeeded");
         end
 
         function tree = discoverNode(obj, path)
@@ -441,6 +595,7 @@ classdef ThingSetTools < handle
 
         function body = transact(obj, cmd, timeoutSeconds)
             flush(obj.Serial);
+            obj.log("TX: %s", cmd);
             write(obj.Serial, uint8([char(cmd) 13 10]), "uint8");
 
             ansiPat = [char(27) '\[[0-9;]*m'];
@@ -453,7 +608,10 @@ classdef ThingSetTools < handle
             while toc(t0) < timeoutSeconds
                 n = obj.Serial.NumBytesAvailable;
                 if n > 0
-                    raw = [raw, read(obj.Serial, n, "uint8")]; %#ok<AGROW>
+                    chunk = read(obj.Serial, n, "uint8");
+                    obj.log("RX %d byte(s) after %.3fs: %s", n, toc(t0), ...
+                        ThingSetTools.hexPreview(chunk));
+                    raw = [raw, chunk]; %#ok<AGROW>
                     plainText = string(regexprep(char(raw), ansiPat, ''));
                     if ~isempty(regexp(plainText, promptPat, 'once'))
                         found = true;
@@ -464,8 +622,11 @@ classdef ThingSetTools < handle
                 end
             end
             if ~found
+                obj.log("TIMEOUT after %.2fs waiting for prompt matching /%s/; %d byte(s) received: %s", ...
+                    timeoutSeconds, promptPat, numel(raw), ThingSetTools.hexPreview(raw));
                 error("ThingSetTools:timeout", "no response to '%s' on %s", cmd, obj.Port);
             end
+            obj.log("prompt matched after %.3fs, %d byte(s) total", toc(t0), numel(raw));
 
             body = regexprep(plainText, promptPat, '');
             lines = strsplit(body, {char(13), newline});
@@ -478,6 +639,7 @@ classdef ThingSetTools < handle
                 end
             end
             body = strtrim(strjoin(keepLines, newline));
+            obj.log("RX body: %s", body);
         end
 
         function value = parseResponse(obj, body)
@@ -488,10 +650,12 @@ classdef ThingSetTools < handle
             % is no payload), so no optional wrapper is needed.
             tok = regexp(char(body), ':([0-9A-Fa-f]{2})\s*(.*)$', 'tokens', 'once');
             if isempty(tok)
+                obj.log("parseResponse: no status code found in body: %s", body);
                 error("ThingSetTools:badResponse", "unexpected response: %s", body);
             end
             code = hex2dec(tok{1});
             payloadStr = string(tok{2});
+            obj.log("parseResponse: status=0x%02X payload=%s", code, payloadStr);
             if code >= hex2dec('A0')
                 if isKey(obj.StatusCodes, code)
                     msg = obj.StatusCodes(code);
@@ -506,7 +670,8 @@ classdef ThingSetTools < handle
             end
             try
                 value = jsondecode(char(payloadStr));
-            catch
+            catch ME
+                obj.log("parseResponse: jsondecode failed (%s), returning raw string", ME.message);
                 value = payloadStr;
             end
         end

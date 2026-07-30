@@ -117,7 +117,7 @@ a short pyserial script; `old/old4/tools/thingset_autotest.py` (generic to the
 Text Mode protocol, not tied to `old4`'s specific data model) can also be
 pointed at the shell port for an automated read-only discovery smoke test.
 
-## `src/thingset_tools.py`
+## `src/tools/thingset_tools.py`
 
 A host-side helper (needs `pyserial`) that wraps the same protocol dialog
 behind a small `ThingSetTools` class, so poking at the device doesn't require

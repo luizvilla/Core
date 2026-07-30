@@ -28,7 +28,8 @@
 
 MEAS = "Measurements";
 
-ts = ThingSetTools();
+ts = ThingSetTools("", 115200, 1.0, "2FE3", "", true); 
+%ts = ThingSetTools();
 ts.discover();
 
 % Auto-build {short_name: full_path} for every measurement, e.g.

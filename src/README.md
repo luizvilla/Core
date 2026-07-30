@@ -19,9 +19,11 @@ Data is exchanged using the ThingSet protocol, in Text Mode (JSON payloads over 
 - `app.conf` — enables the ThingSet stack and the shell transport.
 - `app.overlay` — adds a second USB-CDC UART dedicated to the ThingSet
   shell, so it doesn't collide with console output.
-- `thingset_tools.py` — a host-side Python helper for talking to the
-  device.
-- `thingset_example.py` — a usage example for `thingset_tools.py`.
+- `tools/thingset_tools.py` — a host-side Python helper for talking to
+  the device.
+- `tools/thingset_example.py` — a usage example for `thingset_tools.py`.
+- `tools/ThingSetTools.m`, `tools/thingset_example.m` — the MATLAB
+  equivalents of the two above.
 
 See [`THINGSET_SERIAL_EXAMPLE.md`](../THINGSET_SERIAL_EXAMPLE.md) at the
 repo root for the full build/flash instructions and design rationale.
@@ -142,10 +144,11 @@ name, reads the whole `Measurements` group at once, and writes a `Config`
 value both via `write()` and via the attribute proxy.
 
 Edit the port at the top of the script if your board doesn't enumerate as
-`/dev/ttyACM1`, then run it from this directory:
+`/dev/ttyACM1`, then run it from the `tools` directory:
 
 
 ```
+cd tools
 python3 thingset_example.py
 ```
 
@@ -171,10 +174,11 @@ ts.write("Config", struct("wBlinkPeriod_s", 0.2))
 `thingset_example.m` mirrors `thingset_example.py`: it auto-builds a
 `containers.Map` of `{short_name: path}` for `Measurements`, reads one
 measurement by its short name, reads the whole group at once, and writes a
-`Config` value. Run it from this directory with `Home` tab or:
+`Config` value. Run it from the `tools` directory with `Home` tab or:
 
 ```
+cd tools
 run('thingset_example.m')
 ```
 
-or, from a shell, `matlab -batch "run('thingset_example.m')"`.
+or, from a shell, `matlab -batch "cd('tools'); run('thingset_example.m')"`.
