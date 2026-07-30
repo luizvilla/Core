@@ -287,8 +287,8 @@ it before use.
 | 0. Plan and global convention | PASS | Commit `a6ca0f7` | Global rule created; staged-file gate passed | Complete |
 | 1. Data-port viability | PASS | Based on `a6ca0f7` | Build 41.4% RAM; upload selected `5843500300470047`; 3 probes, unknown command, `/Converter`, and isolation passed | Complete |
 | 1A. Upload isolation remediation | PASS | Based on `b1bfe77` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot; Python compilation passed | Complete |
-| 2. Decimated acquisition | IN_PROGRESS | Based on upload-isolation remediation | Clean build passed at 41.7% linked RAM; target application is wedged on the earlier image, so hardware state tests await a physical TWIST reset | Complete offline gate, then recover TWIST |
-| 3. Bounded download | NOT_STARTED | — | Complete legacy dump pending | Add `D` transfer |
+| 2. Decimated acquisition | BLOCKED | Commit `feat: add decimated ThingSet scope acquisition` | Clean build passed at 41.7% reported RAM with 4 KiB system heap; hardware state gate awaits a physical TWIST reset | Rerun hardware state gate after target recovery |
+| 3. Bounded download | IN_PROGRESS | Based on Phase 2 implementation | Complete legacy dump pending | Add `D` transfer and offline checks |
 | 4. Python client | NOT_STARTED | — | Python tests pending | Add Python scope transport |
 | 5. MATLAB client | NOT_STARTED | — | MATLAB tests pending | Add MATLAB scope transport |
 | 6. Documentation and acceptance | NOT_STARTED | — | Full gates pending | Run final acceptance |
