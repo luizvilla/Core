@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Build every OwnTech example from a local ``examples`` checkout against a
-local ``Core`` checkout, to check that Core changes don't break them.
+"""Build every OwnTech example against a local ``Core`` checkout, to check
+that Core changes don't break them.
 
-The build happens in an isolated copy of the Core tree (under a temp dir, or
---workdir) so the real working copy's uncommitted files (src/main.cpp,
-src/app.ini, ...) are never touched.
+By default the examples are pulled from the `owntech_examples` PlatformIO
+dependency already resolved under owntech/lib/<env>/owntech_examples --
+i.e. whatever repo/branch is configured for it in src/app.ini (or
+platformio.ini). That means a reviewer testing a PR just needs to check out
+the branch and run this script: no separate manual clone of the examples
+repo, and it automatically tracks whatever fork/branch the PR points
+lib_deps at. If that dependency isn't fetched yet, `pio pkg install` is run
+once to fetch it.
+
+The build itself happens in an isolated copy of the Core tree (under a temp
+dir, or --workdir) so the real working copy's uncommitted files
+(src/main.cpp, src/app.ini, ...) are never touched.
 
 Usage:
     python3 scripts/build_examples.py
@@ -61,6 +70,27 @@ def resolve_pio(explicit: str | None) -> str:
             continue
 
     sys.exit("error: could not find a working PlatformIO CLI (tried: " + ", ".join(candidates) + ")")
+
+
+def resolved_examples_dir(core_dir: Path, env: str) -> Path:
+    """Where PlatformIO puts the `owntech_examples` lib_deps dependency for
+    a given environment once it's fetched (path is env-specific: each env
+    gets its own owntech/lib/<env>/ tree)."""
+    return core_dir / "owntech" / "lib" / env / "owntech_examples"
+
+
+def ensure_examples_fetched(core_dir: Path, env: str, pio: str) -> Path:
+    examples_dir = resolved_examples_dir(core_dir, env)
+    if (examples_dir / "library.json").exists():
+        return examples_dir
+
+    print(f"owntech_examples dependency not found at {examples_dir}; "
+          f"running `pio pkg install -e {env}` to fetch it (per src/app.ini lib_deps)...")
+    subprocess.run([pio, "pkg", "install", "-e", env], cwd=core_dir, check=True)
+
+    if not (examples_dir / "library.json").exists():
+        sys.exit(f"error: owntech_examples still not found at {examples_dir} after `pio pkg install`")
+    return examples_dir
 
 
 def load_examples(examples_dir: Path):
@@ -162,7 +192,8 @@ def main():
     parser.add_argument("--core", default=str(Path(__file__).resolve().parent.parent),
                          help="Path to the Core checkout to validate (default: this script's own repo).")
     parser.add_argument("--examples", default=None,
-                         help="Path to the examples checkout (default: ../examples next to --core).")
+                         help="Path to an examples checkout to use instead of the resolved "
+                              "owntech_examples lib_deps dependency (owntech/lib/<env>/owntech_examples).")
     parser.add_argument("--env", default="USB", help="PlatformIO environment to build (default: USB).")
     parser.add_argument("--filter", default=None,
                          help="Only build examples whose name or base path contains this substring (case-insensitive).")
@@ -174,14 +205,19 @@ def main():
     args = parser.parse_args()
 
     core_dir = Path(args.core).resolve()
-    examples_dir = Path(args.examples).resolve() if args.examples else (core_dir.parent / "examples")
-
     if not (core_dir / "platformio.ini").exists():
         sys.exit(f"error: {core_dir} does not look like a Core checkout (no platformio.ini)")
-    if not (examples_dir / "library.json").exists():
-        sys.exit(f"error: {examples_dir} does not look like the examples repo (no library.json)")
+
     pio = resolve_pio(args.pio)
     print(f"Using PlatformIO CLI: {pio}")
+
+    if args.examples:
+        examples_dir = Path(args.examples).resolve()
+        if not (examples_dir / "library.json").exists():
+            sys.exit(f"error: {examples_dir} does not look like the examples repo (no library.json)")
+    else:
+        examples_dir = ensure_examples_fetched(core_dir, args.env, pio)
+    print(f"Using examples from: {examples_dir}")
 
     examples = load_examples(examples_dir)
     if args.filter:
