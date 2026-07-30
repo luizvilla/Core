@@ -18,99 +18,66 @@
  */
 
 /**
- * @brief  This example shows how to blink the onboard LED of the Spin board.
- *
- * @author Clément Foucher <clement.foucher@laas.fr>
- * @author Luiz Villa <luiz.villa@laas.fr>
- * @author Ayoub Farah Hassan <ayoub.farah-hassan@laas.fr>
+ * @brief  Minimal example exposing ThingSet over the Zephyr shell,
+ *         reachable on a dedicated serial (USB-CDC) port.
  */
 
-/* --------------OWNTECH APIs---------------------------------- */
-#include "SpinAPI.h"
+/*--------------OWNTECH APIs---------------------------------- */
 #include "TaskAPI.h"
+#include "ShieldAPI.h"
+#include "SpinAPI.h"
+#include "user_data_objects.h"
 
-/* --------------SETUP FUNCTIONS DECLARATION------------------- */
-
-/* Setups the hardware and software of the system */
 void setup_routine();
-
-/* --------------LOOP FUNCTIONS DECLARATION-------------------- */
-
-/* Code to be executed in the background task */
 void loop_background_task();
-/* Code to be executed in real time in the critical task */
 void loop_critical_task();
 
-/* --------------USER VARIABLES DECLARATIONS------------------- */
-
-
-
-/* --------------SETUP FUNCTIONS------------------------------- */
-
-/**
- * This is the setup routine.
- * It is used to call functions that will initialize your spin, power shields
- * and tasks.
- *
- * In this example, we spawn a background task.
- * An optional critical task can be initialized by uncommenting the two
- * commented lines.
- */
 void setup_routine()
 {
-    /* Declare task */
-    uint32_t background_task_number =
-                            task.createBackground(loop_background_task);
+    shield.power.initBuck(ALL);
+    shield.sensors.enableDefaultTwistSensors();
 
-    /* Uncomment following line if you use the critical task */
-    /* task.createCritical(loop_critical_task, 500); */
+    uint32_t background_task_number = task.createBackground(loop_background_task);
+    task.createCritical(loop_critical_task, 100);
 
-    /* Finally, start tasks */
     task.startBackground(background_task_number);
-    /* Uncomment following line if you use the critical task */
-    /* task.startCritical(); */
+    task.startCritical();
 }
 
-/* --------------LOOP FUNCTIONS-------------------------------- */
-
-/**
- * This is the code loop of the background task
- * It runs perpetually. Here a `suspendBackgroundMs` is used to pause during
- * 1000ms between each LED toggles.
- * Hence we expect the LED to blink each second.
- */
 void loop_background_task()
 {
-    /* Task content */
     spin.led.toggle();
 
-    /* Pause between two runs of the task */
-    task.suspendBackgroundMs(1000);
+    shield.sensors.triggerTwistTempMeas(TEMP_SENSOR_1);
+    meas_data = shield.sensors.getLatestValue(TEMP_SENSOR_1);
+    if (meas_data != NO_VALUE) temp_1_value = meas_data;
+
+    shield.sensors.triggerTwistTempMeas(TEMP_SENSOR_2);
+    meas_data = shield.sensors.getLatestValue(TEMP_SENSOR_2);
+    if (meas_data != NO_VALUE) temp_2_value = meas_data;
+
+    /* blink_period_s is writable over the ThingSet shell (Config/wBlinkPeriod_s) */
+    task.suspendBackgroundMs((uint32_t)(blink_period_s * 1000.0f));
 }
 
-/**
- * Uncomment lines in setup_routine() to use critical task.
- *
- * This is the code loop of the critical task
- * It is executed every 500 micro-seconds defined in the setup_software
- * function. You can use it to execute an ultra-fast code with
- * the highest priority which cannot be interrupted by the background tasks.
- *
- * In the critical task, you can implement your control algorithm that will
- * run in Real Time and control your power flow.
- */
 void loop_critical_task()
 {
-
+    meas_data = shield.sensors.getLatestValue(I1_LOW);
+    if (meas_data != NO_VALUE) I1_low_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(V1_LOW);
+    if (meas_data != NO_VALUE) V1_low_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(V2_LOW);
+    if (meas_data != NO_VALUE) V2_low_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(I2_LOW);
+    if (meas_data != NO_VALUE) I2_low_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(I_HIGH);
+    if (meas_data != NO_VALUE) I_high_value = meas_data;
+    meas_data = shield.sensors.getLatestValue(V_HIGH);
+    if (meas_data != NO_VALUE) V_high_value = meas_data;
 }
 
-/**
- * This is the main function of this example
- * This function is generic and does not need editing.
- */
 int main(void)
 {
     setup_routine();
-
     return 0;
 }
