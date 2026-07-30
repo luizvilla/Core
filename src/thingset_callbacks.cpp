@@ -6,10 +6,82 @@
 
 #include "user_data_objects.h"
 
+#include <stddef.h>
 #include <string.h>
 
 #include "ShieldAPI.h"
 #include "SpinAPI.h"
+#include "nvs_storage.h"
+
+static constexpr uint16_t CONVERTER_METADATA_NVS_ID = 0x0401;
+static converter_metadata_t previous_converter_metadata;
+
+static_assert(sizeof(converter_metadata_t) == 120);
+static_assert(sizeof(converter_metadata_t) <= 127,
+              "NVS storage API returns the byte count as int8_t");
+
+static bool metadata_string_is_valid(const char *value, size_t capacity)
+{
+    size_t length = 0;
+    while (length < capacity && value[length] != '\0') {
+        const unsigned char character = static_cast<unsigned char>(value[length]);
+        if (character < 0x20 || character > 0x7E) {
+            return false;
+        }
+        ++length;
+    }
+    return length > 0 && length < capacity;
+}
+
+static bool converter_metadata_is_valid(const converter_metadata_t &metadata)
+{
+    return metadata_string_is_valid(metadata.board_name,
+                                    sizeof(metadata.board_name)) &&
+           metadata_string_is_valid(metadata.board_version,
+                                    sizeof(metadata.board_version)) &&
+           metadata_string_is_valid(metadata.serial_number,
+                                    sizeof(metadata.serial_number)) &&
+           metadata_string_is_valid(metadata.firmware_version,
+                                    sizeof(metadata.firmware_version));
+}
+
+void load_converter_metadata(void)
+{
+    converter_metadata_t stored_metadata;
+    const int read_size = nvs_storage_retrieve_data(
+        CONVERTER_METADATA_NVS_ID, &stored_metadata, sizeof(stored_metadata));
+
+    if (read_size == sizeof(stored_metadata) &&
+        converter_metadata_is_valid(stored_metadata)) {
+        converter_metadata = stored_metadata;
+    }
+}
+
+void converter_metadata_cb(enum thingset_callback_reason reason)
+{
+    switch (reason) {
+        case THINGSET_CALLBACK_PRE_WRITE:
+            previous_converter_metadata = converter_metadata;
+            break;
+
+        case THINGSET_CALLBACK_POST_WRITE:
+            if (memcmp(&converter_metadata, &previous_converter_metadata,
+                       sizeof(converter_metadata)) == 0) {
+                break;
+            }
+
+            if (!converter_metadata_is_valid(converter_metadata) ||
+                nvs_storage_store_data(CONVERTER_METADATA_NVS_ID,
+                                       &converter_metadata,
+                                       sizeof(converter_metadata)) < 0) {
+                converter_metadata = previous_converter_metadata;
+            }
+            break;
+
+        default:
+            break;
+    }
+}
 
 static uint8_t previous_mode;
 static uint32_t previous_frequency_hz;
