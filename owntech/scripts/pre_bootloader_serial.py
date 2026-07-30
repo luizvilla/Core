@@ -121,6 +121,25 @@ def get_bootloader_port_from_id(id_to_find):
 
 	return None
 
+def get_stable_port_path(port, id_to_find):
+	# Linux ttyACM numbers may be reused immediately after a USB reset. Prefer
+	# the udev by-id link containing the already-verified USB serial so a stale
+	# mcumgr connection can disappear but can never name another board.
+	if platform.system() != "Linux":
+		return port
+
+	by_id_dir = os.path.join(os.sep, "dev", "serial", "by-id")
+	if not os.path.isdir(by_id_dir):
+		return port
+
+	resolved_port = os.path.realpath(port)
+	for entry in sorted(os.listdir(by_id_dir)):
+		candidate = os.path.join(by_id_dir, entry)
+		if id_to_find in entry and os.path.realpath(candidate) == resolved_port:
+			return candidate
+
+	return port
+
 ################### Pre function ###################
 
 def upload_pre(source, target, env):
@@ -161,7 +180,8 @@ def upload_pre(source, target, env):
 	# Wait 1 more second so that bootloader finishes loading
 	sleep(1)
 
-	print("Board ready.")
+	spin_port = get_stable_port_path(spin_port, spin_id)
+	print(f"Board ready on identity-pinned port {spin_port}.")
 
 	# Configure mcumgr with found port
 	init_command = [mcumgr_path, \
