@@ -193,7 +193,15 @@ class ThingSetTools:
 
     def _transact(self, cmd, timeout=3.0):
         self.ser.reset_input_buffer()
-        self.ser.write((cmd + "\r\n").encode())
+        wire_data = (cmd + "\r\n").encode()
+        # The firmware shell may use a receive ring smaller than its command
+        # buffer. Pace longer commands so a single USB transfer cannot
+        # overrun that ring before the shell consumes it.
+        for offset in range(0, len(wire_data), 32):
+            self.ser.write(wire_data[offset:offset + 32])
+            if offset + 32 < len(wire_data):
+                self.ser.flush()
+                time.sleep(0.005)
 
         deadline = time.time() + timeout
         raw = b""
@@ -249,10 +257,18 @@ class ThingSetTools:
         """UPDATE `path` with `values` (a dict of {item_name: value}).
 
         Handles the Zephyr shell's unescaped-double-quote stripping
-        automatically, so callers just pass a normal dict.
+        automatically, so callers just pass a normal dict. Multi-item
+        updates are staged as individual requests because supported firmware
+        may have a smaller serial receive ring than ThingSet command buffer.
         """
-        payload = json.dumps(values, separators=(",", ":")).replace('"', '\\"')
-        self._parse_response(self._transact(f"={path} {payload}"))
+        if not isinstance(values, dict):
+            raise TypeError("values must be a dict")
+        updates = [values] if len(values) <= 1 else [
+            {name: value} for name, value in values.items()
+        ]
+        for update in updates:
+            payload = json.dumps(update, separators=(",", ":")).replace('"', '\\"')
+            self._parse_response(self._transact(f"={path} {payload}"))
         return True
 
     # ---- discovery --------------------------------------------------------
