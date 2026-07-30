@@ -4,7 +4,7 @@ Automated write -> reset -> read regression test for the spin.metaData
 NVS persistence feature.
 
 Drives the serial command menu exposed by the test harness in
-src/main.cpp (h/w/r/c/f) to verify that board/shield metadata survives:
+src/main.cpp (h/w/b/r/c/f) to verify that board/shield metadata survives:
 
   1. A same-boot round trip (sanity check).
   2. A board reset, triggered via the classic 1200bps-touch convention
@@ -13,6 +13,10 @@ src/main.cpp (h/w/r/c/f) to verify that board/shield metadata survives:
   3. Optionally (--reflash), a full firmware reflash via
      `platformio run -t upload`, proving the storage_partition survives
      an application image update.
+
+It also verifies that fixed-length fields reject undersized writes, and
+that the generic extra-data slot rejects an undersized read buffer,
+without corrupting previously stored values.
 
 Requires the board to be flashed with the src/main.cpp test harness, and
 pyserial installed (`pip install pyserial`).
@@ -63,7 +67,8 @@ EXPECTED_VALUES = {
     "SHIELD_SERIAL":    "SHLD000000001",
     "SPIN_VERSION":     "9.9.9",
     "SHIELD_VERSION":   "8.8.8",
-    "SHIELD_PASSWORD":  "abc",
+    "SPIN_PASSWORD":    "SPINPASS01",
+    "SHIELD_PASSWORD":  "SHLDPASS01",
     "EXTRA_0":          "EXTRA0",
     "EXTRA_1":          "EXTRA1",
     "EXTRA_2":          "EXTRA2",
@@ -241,7 +246,9 @@ def check_all_cleared(fields):
 EXPECTED_BADSIZE_RESULTS = {
     "SPIN_SERIAL_BADSIZE":     "-2",
     "SHIELD_SERIAL_BADSIZE":   "-2",
+    "SPIN_PASSWORD_BADSIZE":   "-2",
     "SHIELD_PASSWORD_BADSIZE": "-2",
+    "EXTRA_BADSIZE":           "-2",
 }
 
 
@@ -458,12 +465,12 @@ def main():
         print("FAIL: fields were not empty after clear")
         return 1
 
-    print("[3/8] Attempting undersized writes (expect all rejected)...")
+    print("[3/8] Attempting undersized writes/reads (expect all rejected)...")
     badsize_results = parse_kv_lines(
         send_multiline_command(ser, "b", "END_BADSIZE")
     )
     if not check_all_rejected(badsize_results):
-        print("FAIL: an undersized write was not rejected with -2")
+        print("FAIL: an undersized write or read was not rejected with -2")
         return 1
 
     print("[4/8] Reading back (expect fields still empty/ERR)...")

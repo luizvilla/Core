@@ -46,7 +46,8 @@ uint8_t received_serial_char;
 /* Canned test values written by the 'w' command and expected back by 'r' */
 static const char TEST_SPIN_SERIAL[]     = "SPIN000000001"; /* 13 chars */
 static const char TEST_SHIELD_SERIAL[]   = "SHLD000000001"; /* 13 chars */
-static const char TEST_SHIELD_PASSWORD[] = "abc";           /* 3 chars */
+static const char TEST_SPIN_PASSWORD[]   = "SPINPASS01";    /* 10 chars */
+static const char TEST_SHIELD_PASSWORD[] = "SHLDPASS01";    /* 10 chars */
 static const uint8_t TEST_SPIN_VERSION[3]   = {9, 9, 9};
 static const uint8_t TEST_SHIELD_VERSION[3] = {8, 8, 8};
 static const char* TEST_EXTRA[METADATA_EXTRA_COUNT] =
@@ -70,7 +71,7 @@ static void print_help()
            "|     ------- spin.metaData TEST MENU ---------  |\n"
            "|     press h : print this help menu             |\n"
            "|     press w : write canned test values         |\n"
-           "|     press b : attempt undersized writes        |\n"
+           "|     press b : attempt undersized writes/reads  |\n"
            "|     press r : read back all metadata fields    |\n"
            "|     press c : clear all metadata fields        |\n"
            "|     press f : print free NVS space             |\n"
@@ -99,6 +100,10 @@ static void write_all_fields()
                                           TEST_SHIELD_VERSION[2]);
     printk("SHIELD_VERSION=%s\n", (ret == 0) ? "OK" : "ERR");
 
+    ret = spin.metaData.setSpinPassword(TEST_SPIN_PASSWORD,
+                                         sizeof(TEST_SPIN_PASSWORD) - 1);
+    printk("SPIN_PASSWORD=%s\n", (ret == 0) ? "OK" : "ERR");
+
     ret = spin.metaData.setShieldPassword(TEST_SHIELD_PASSWORD,
                                            sizeof(TEST_SHIELD_PASSWORD) - 1);
     printk("SHIELD_PASSWORD=%s\n", (ret == 0) ? "OK" : "ERR");
@@ -116,8 +121,10 @@ static void write_all_fields()
 
 /**
  * @brief Attempt to write each fixed-length field with fewer bytes than
- *        required, to verify the size check rejects them (-2) instead of
- *        reading past the end of the caller's buffer.
+ *        required, and to read the extra-data slot with a buffer smaller
+ *        than METADATA_EXTRA_MAX_LEN, to verify the size checks reject
+ *        them (-2) instead of reading/writing past the end of the
+ *        caller's buffer.
  */
 static void write_undersized_fields()
 {
@@ -129,8 +136,15 @@ static void write_undersized_fields()
     ret = spin.metaData.setShieldSerialNumber("XY", 2);
     printk("SHIELD_SERIAL_BADSIZE=%d\n", ret);
 
+    ret = spin.metaData.setSpinPassword("XYZ", 3);
+    printk("SPIN_PASSWORD_BADSIZE=%d\n", ret);
+
     ret = spin.metaData.setShieldPassword("Z", 1);
     printk("SHIELD_PASSWORD_BADSIZE=%d\n", ret);
+
+    uint8_t extra_buf[METADATA_EXTRA_MAX_LEN - 1];
+    ret = spin.metaData.getExtraData(0, extra_buf, sizeof(extra_buf));
+    printk("EXTRA_BADSIZE=%d\n", ret);
 
     printk("END_BADSIZE\n");
 }
@@ -184,6 +198,18 @@ static void read_all_fields()
     else
     {
         printk("SHIELD_VERSION=ERR:%d\n", ret);
+    }
+
+    char spin_password_buf[SPIN_PASSWORD_LEN + 1];
+    ret = spin.metaData.getSpinPassword(spin_password_buf, sizeof(spin_password_buf));
+    if (ret >= 0)
+    {
+        spin_password_buf[SPIN_PASSWORD_LEN] = '\0';
+        printk("SPIN_PASSWORD=%s\n", spin_password_buf);
+    }
+    else
+    {
+        printk("SPIN_PASSWORD=ERR:%d\n", ret);
     }
 
     char password_buf[SHIELD_PASSWORD_LEN + 1];
