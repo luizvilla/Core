@@ -23,12 +23,25 @@ float blink_period_s = 1.0f;
 
 const ModeDef modes[NUM_OF_MODES] = {
     { "IDLE", IDLE },
-    { "POWER_OFF", POWER_OFF },
     { "POWER_ON", POWER_ON },
+    { "POWER_OFF", POWER_OFF },
 };
 
 uint8_t mode = IDLE;
-power_leg_t power_legs[POWER_LEG_COUNT] = {};
+
+const tracking_variable_t tracking_variables[TRACKING_VAR_COUNT] = {
+    { "V1", &V1_low_value },
+    { "V2", &V2_low_value },
+    { "VH", &V_high_value },
+    { "I1", &I1_low_value },
+    { "I2", &I2_low_value },
+    { "IH", &I_high_value },
+};
+
+power_leg_t power_legs[POWER_LEG_COUNT] = {
+    { false, false, false, false, 0.1f, 0.0f, &V1_low_value, "V1" },
+    { false, false, false, false, 0.1f, 0.0f, &V2_low_value, "V2" },
+};
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_MEAS, "Measurements", THINGSET_NO_CALLBACK);
 
@@ -55,10 +68,32 @@ THINGSET_ADD_ITEM_FLOAT(ID_CONFIG, ID_CONFIG_BLINK_PERIOD, "wBlinkPeriod_s",
 THINGSET_ADD_ITEM_UINT8(ID_CONFIG, ID_CONFIG_MODE, "Mode", &mode,
                         THINGSET_ANY_RW, SUBSET_SER);
 
-THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG1, "Leg1", THINGSET_NO_CALLBACK);
+THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG1, "Leg1", &conf_leg_cb_0);
 THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_ENABLE, "wEnable",
                        &power_legs[0].enable, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_BUCK, "wBuck",
+                       &power_legs[0].buck, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_BOOST, "wBoost",
+                       &power_legs[0].boost, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG1, ID_CONFIG_LEG1_DUTY, "wDutyCycle",
+                        &power_legs[0].duty_cycle, 3, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG1, ID_CONFIG_LEG1_REF, "wReferenceValue",
+                        &power_legs[0].reference_value, 3, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_STRING(ID_CONFIG_LEG1, ID_CONFIG_LEG1_TRACK, "wTrackingVar",
+                         power_legs[0].tracking_name, TRACKING_NAME_SIZE,
+                         THINGSET_ANY_RW, SUBSET_SER);
 
-THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG2, "Leg2", THINGSET_NO_CALLBACK);
+THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG2, "Leg2", &conf_leg_cb_1);
 THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_ENABLE, "wEnable",
                        &power_legs[1].enable, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_BUCK, "wBuck",
+                       &power_legs[1].buck, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_BOOST, "wBoost",
+                       &power_legs[1].boost, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DUTY, "wDutyCycle",
+                        &power_legs[1].duty_cycle, 3, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG2, ID_CONFIG_LEG2_REF, "wReferenceValue",
+                        &power_legs[1].reference_value, 3, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_STRING(ID_CONFIG_LEG2, ID_CONFIG_LEG2_TRACK, "wTrackingVar",
+                         power_legs[1].tracking_name, TRACKING_NAME_SIZE,
+                         THINGSET_ANY_RW, SUBSET_SER);

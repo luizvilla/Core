@@ -26,11 +26,44 @@
 #include "TaskAPI.h"
 #include "ShieldAPI.h"
 #include "SpinAPI.h"
+#include "pid.h"
 #include "user_data_objects.h"
 
 void setup_routine();
 void loop_background_task();
 void loop_critical_task();
+
+static constexpr uint32_t CONTROL_TASK_PERIOD_US = 100;
+static constexpr float CONTROL_TASK_PERIOD_S = CONTROL_TASK_PERIOD_US * 1e-6f;
+static const PidParams pid_params = {
+    CONTROL_TASK_PERIOD_S,
+    0.000215f,
+    7.5175e-5f,
+    0.0f,
+    0.0f,
+    0.0f,
+    1.0f,
+};
+
+static Pid pid_leg1;
+static Pid pid_leg2;
+
+static void update_leg_duty(power_leg_t &leg, leg_t hardware_leg, Pid &pid)
+{
+    if (!leg.running) {
+        return;
+    }
+
+    float duty = leg.duty_cycle;
+    if (leg.buck || leg.boost) {
+        duty = pid.calculateWithReturn(leg.reference_value, *leg.tracking_var);
+    }
+    if (leg.boost) {
+        duty = 1.0f - duty;
+    }
+
+    shield.power.setDutyCycle(hardware_leg, duty);
+}
 
 void setup_routine()
 {
@@ -39,7 +72,10 @@ void setup_routine()
     shield.sensors.enableDefaultTwistSensors();
 
     uint32_t background_task_number = task.createBackground(loop_background_task);
-    task.createCritical(loop_critical_task, 100);
+    task.createCritical(loop_critical_task, CONTROL_TASK_PERIOD_US);
+
+    pid_leg1.init(pid_params);
+    pid_leg2.init(pid_params);
 
     task.startBackground(background_task_number);
     task.startCritical();
@@ -93,6 +129,9 @@ void loop_critical_task()
         shield.power.stop(LEG2);
         power_legs[1].running = false;
     }
+
+    update_leg_duty(power_legs[0], LEG1, pid_leg1);
+    update_leg_duty(power_legs[1], LEG2, pid_leg2);
 }
 
 int main(void)
