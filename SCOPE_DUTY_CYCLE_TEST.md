@@ -3,27 +3,44 @@
 `src/tools/scope_duty_cycle_test.py` is a live-hardware script that exercises
 the decimated software-scope feature (`/Debug/Scope`, `if00` data port —
 see [src/README.md](src/README.md#software-scope)) against a real Twist
-board. It runs three fixed-duty, open-loop power phases in sequence and
-captures a scope buffer during each one:
+board. It runs two kinds of phases in sequence and captures a scope buffer
+during each one:
 
-1. **`leg1_only`** — Leg 1 enabled at a fixed duty cycle (default `0.3`),
-   Leg 2 disabled.
-2. **`leg2_only`** — Leg 2 enabled at the same fixed duty cycle, Leg 1
-   disabled.
-3. **`both_legs`** — both legs enabled at the same fixed duty cycle
-   simultaneously.
+1. **Decimated-acquisition sweep** — one phase per value in `--decimations`
+   (default `1,10,100`), each named `decimation_<N>`. These run in
+   `POWER_OFF` with both legs disabled and pre-trigger ratio `0.0`, and
+   verify three things against the documented `/Debug/Scope` behavior:
+   - the armed `sample_period_us`/`duration_ms` equal `100 us`/`102.4 ms`
+     times the decimation;
+   - the measured trigger-to-`READY` latency falls inside the documented
+     window for that decimation (`0.08–0.25 s` / `0.9–1.2 s` / `9.8–10.7 s`
+     for decimations `1`/`10`/`100`; other decimations are timed but not
+     checked against a window);
+   - the downloaded buffer's `VHigh_V` mean and per-channel current
+     magnitudes stay within the no-load baseline (`--expected-vhigh`,
+     `--vhigh-tolerance`, `--baseline-max-current`).
+2. **Fixed-duty, open-loop power phases** — `leg1_only`, `leg2_only`, then
+   `both_legs`, each at a fixed duty cycle (default `0.3`) and captured at
+   `--decimation`:
+   - **`leg1_only`** — Leg 1 enabled, Leg 2 disabled.
+   - **`leg2_only`** — Leg 2 enabled, Leg 1 disabled.
+   - **`both_legs`** — both legs enabled simultaneously.
 
-No PID/tracking control is used (`wBuck`/`wBoost` stay `false`); each leg's
-`wDutyCycle` is written directly. This deliberately exercises a different
-code path than the closed-loop regulation test already recorded in
-[automated_test.md](automated_test.md).
+   No PID/tracking control is used (`wBuck`/`wBoost` stay `false`); each
+   leg's `wDutyCycle` is written directly. This deliberately exercises a
+   different code path than the closed-loop regulation test already
+   recorded in [automated_test.md](automated_test.md).
+
+The decimation sweep runs first (fail-fast by default, same as the power
+phases below); pass `--decimations ""` to skip it and run only the power
+phases, as before.
 
 Each phase writes:
 
 | File | Contents |
 | --- | --- |
 | `<phase>.csv` | Decoded capture: `time_s` plus all 8 channels, one row per sample, chronologically ordered (same format as `thingset_example.py --scope-csv`) |
-| `<phase>.txt` | Human-readable report: requested config, pass/fail, pre- and post-capture `Measurements`, the `Debug/Scope` status object, and per-channel min/mean/max/peak-to-peak over the capture window |
+| `<phase>.txt` | Human-readable report: requested config, pass/fail, pre- and post-capture `Measurements`, the `Debug/Scope` status object, per-channel min/mean/max/peak-to-peak over the capture window, and — for decimation-sweep phases — the measured trigger-to-`READY` latency and no-load baseline check results |
 | `<phase>.png` | Three stacked plots (voltages, currents, duty cycles) vs. time relative to the trigger, for quick visual inspection |
 
 A `summary.txt` at the top of each run directory lists every phase's
@@ -81,13 +98,25 @@ options:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--duty` | `0.3` | Fixed duty cycle applied to every active leg |
-| `--decimation` | `1` | Scope decimation (`1` → 102.4 ms window at full 100 us resolution) |
-| `--pretrigger` | `0.2` | Scope pre-trigger ratio |
-| `--settle-seconds` | `0.5` | Settle time after `POWER_ON` before arming/triggering the scope |
-| `--max-voltage`, `--max-current` | `35 V`, `3 A` | Interlock limits |
+| `--decimations` | `1,10,100` | Comma-separated decimations for the sweep; `""` skips it |
+| `--expected-vhigh` | `30 V` | Expected `VHigh_V` for the sweep's no-load baseline check |
+| `--vhigh-tolerance` | `0.05` (5%) | Fractional tolerance around `--expected-vhigh` |
+| `--baseline-max-current` | `0.5 A` | Per-channel current sanity ceiling for the sweep's baseline check |
+| `--duty` | `0.3` | Fixed duty cycle applied to every active leg in the power phases |
+| `--decimation` | `1` | Scope decimation used by the power phases (`1` → 102.4 ms window at full 100 us resolution) |
+| `--pretrigger` | `0.2` | Scope pre-trigger ratio used by the power phases (the sweep always uses `0.0`) |
+| `--settle-seconds` | `0.5` | Settle time after `POWER_ON` before arming/triggering the scope in a power phase |
+| `--max-voltage`, `--max-current` | `35 V`, `3 A` | Safety interlock limits (see below); apply to every phase |
 | `--output-dir` | `scope_test_results` | Parent directory; each run gets its own UTC-timestamped subdirectory |
 | `--continue-on-error` | off | Keep running remaining phases after a phase failure |
+
+The `--max-voltage`/`--max-current` safety interlock and the sweep's
+`--expected-vhigh`/`--vhigh-tolerance`/`--baseline-max-current` baseline check
+are different things: the interlock is a wide safety backstop that trips a
+shutdown (default `35 V`/`3 A`, checked on every phase); the baseline check is
+a narrow correctness assertion specific to the no-load sweep (default `30 V
+± 5%` and `0.5 A`, checked only on `decimation_<N>` phases) that fails that
+phase without necessarily indicating a hardware safety problem.
 
 Run it from `src/tools` (or add that directory to `PYTHONPATH`) since it
 imports `power_test_bench`, `scope_serial`, and `thingset_tools` as

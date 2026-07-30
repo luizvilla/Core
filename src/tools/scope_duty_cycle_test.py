@@ -22,11 +22,25 @@
 """
 scope_duty_cycle_test.py
 
-Live-hardware acceptance script for the software-scope feature. Runs three
-fixed-duty-cycle (open-loop, no PID) power phases in sequence - Leg 1 only,
-Leg 2 only, then both legs together - and captures a decimated scope buffer
-during each one. Every phase writes a CSV, a plain-text report, and a PNG
-plot so a capture can be inspected without touching the hardware again.
+Live-hardware acceptance script for the software-scope feature. Runs two
+kinds of phases in sequence and captures a decimated scope buffer during
+each one:
+
+    1. Decimated-acquisition verification, one phase per value in
+       --decimations (default 1, 10, 100). These run in POWER_OFF with both
+       legs disabled and pre-trigger ratio 0.0, and check three things
+       against the documented behavior of /Debug/Scope: the armed
+       sample_period_us/duration_ms match 100 us/102.4 ms times the
+       decimation, the measured trigger-to-READY latency falls inside the
+       documented window for that decimation, and the downloaded buffer's
+       VHigh_V mean and per-channel current magnitudes stay within the
+       no-load baseline (--expected-vhigh/--vhigh-tolerance/
+       --baseline-max-current).
+    2. Fixed-duty-cycle (open-loop, no PID) power phases - Leg 1 only, Leg 2
+       only, then both legs together - each captured at --decimation.
+
+Every phase writes a CSV, a plain-text report, and a PNG plot so a capture
+can be inspected without touching the hardware again.
 
 This script does not control the external supply. It assumes, per this
 project's established live-test conditions (see automated_test.md):
@@ -46,7 +60,9 @@ Because the applied duty cycle is open-loop (wBuck/wBoost left false), there
 is no feedback to stop a runaway output. A software interlock polls
 Measurements during the settle period and after capture, and immediately
 requests a shutdown if any voltage or current magnitude exceeds
---max-voltage / --max-current.
+--max-voltage / --max-current. The decimation phases run with both legs
+disabled, so that interlock is a backstop rather than an expected trip
+path there.
 
 Example:
 
@@ -60,6 +76,7 @@ import argparse
 import csv
 import datetime
 import json
+import math
 import statistics
 import sys
 import time
@@ -77,11 +94,15 @@ from thingset_tools import ThingSetTools
 
 DEFAULT_DUTY = 0.3
 DEFAULT_DECIMATION = 1
+DEFAULT_DECIMATIONS = (1, 10, 100)
 DEFAULT_PRETRIGGER = 0.2
 DEFAULT_SETTLE_S = 0.5
 DEFAULT_POLL_INTERVAL_S = 0.05
 DEFAULT_MAX_VOLTAGE_V = 35.0
 DEFAULT_MAX_CURRENT_A = 3.0
+DEFAULT_EXPECTED_VHIGH_V = 30.0
+DEFAULT_VHIGH_TOLERANCE = 0.05
+DEFAULT_BASELINE_MAX_CURRENT_A = 0.5
 
 VOLTAGE_FIELDS = ("rV1Low_V", "rV2Low_V", "rVHigh_V")
 CURRENT_FIELDS = ("rI1Low_A", "rI2Low_A", "rIHigh_A")
@@ -92,9 +113,23 @@ PHASES = (
     ("both_legs", (1, 2)),
 )
 
+# Pre-trigger-zero ready-time windows documented for /Debug/Scope (see
+# THINGSET_COMM_PROTOCOL_PLAN.md, "Required coverage"): trigger-to-READY
+# latency with wPretriggerRatio=0.0, since the full buffer must be filled
+# after the trigger in that case.
+DECIMATION_TIMING = {
+    1: {"sample_period_us": 100, "duration_ms": 102.4, "ready_min_s": 0.08, "ready_max_s": 0.25},
+    10: {"sample_period_us": 1000, "duration_ms": 1024.0, "ready_min_s": 0.9, "ready_max_s": 1.2},
+    100: {"sample_period_us": 10000, "duration_ms": 10240.0, "ready_min_s": 9.8, "ready_max_s": 10.7},
+}
+
 
 class SafetyInterlockError(RuntimeError):
     """Raised when a live measurement exceeds a configured safety limit."""
+
+
+class ScopeAcceptanceError(RuntimeError):
+    """Raised when a decimated-acquisition timing or baseline check fails."""
 
 
 def log(message):
@@ -197,6 +232,135 @@ def run_phase(bench, phase_name, active_legs, args, output_dir):
     return report
 
 
+def check_baseline(capture, expected_vhigh, vhigh_tolerance, baseline_max_current):
+    """Check a no-load, POWER_OFF capture's VHigh mean and current
+    magnitudes against the documented baseline. Returns a list of failure
+    strings (empty if every check passed)."""
+
+    notes = []
+    if any(not math.isfinite(value) for row in capture.samples for value in row):
+        notes.append("capture contains a non-finite sample")
+
+    vhigh_index = capture.channel_names.index("VHigh_V")
+    vhigh_mean = statistics.fmean(row[vhigh_index] for row in capture.samples)
+    lower = expected_vhigh * (1.0 - vhigh_tolerance)
+    upper = expected_vhigh * (1.0 + vhigh_tolerance)
+    if not lower <= vhigh_mean <= upper:
+        notes.append(
+            f"VHigh_V mean {vhigh_mean:.3f} V outside "
+            f"{lower:.3f}-{upper:.3f} V ({expected_vhigh:g} V +/- "
+            f"{vhigh_tolerance * 100:g}%)"
+        )
+
+    for name in ("I1Low_A", "I2Low_A", "IHigh_A"):
+        index = capture.channel_names.index(name)
+        peak = max(abs(row[index]) for row in capture.samples)
+        if peak > baseline_max_current:
+            notes.append(
+                f"{name} peak magnitude {peak:.3f} A exceeds "
+                f"{baseline_max_current:g} A"
+            )
+
+    return notes, vhigh_mean
+
+
+def run_decimation_phase(bench, decimation, args, output_dir):
+    phase_name = f"decimation_{decimation}"
+    expected = DECIMATION_TIMING.get(decimation)
+    log(f"--- Phase: {phase_name} (POWER_OFF, no load, pretrigger=0.0) ---")
+    report = {
+        "phase": phase_name,
+        "decimation": decimation,
+        "ok": False,
+    }
+    try:
+        bench.shutdown(disconnect_hardware=True)
+        for leg in (1, 2):
+            bench.configure_leg(leg, enable=False, driver=False, capacitor=False)
+        bench.set_mode(TesterMode.POWER_OFF)
+
+        pre_measurements = bench.read_measurements()
+        check_interlock(pre_measurements, args.max_voltage, args.max_current)
+        report["pre_capture_measurements"] = pre_measurements
+
+        armed_status = bench.arm_scope(pretrigger_ratio=0.0, decimation=decimation)
+        report["armed_status"] = armed_status
+        if expected is not None and (
+            armed_status["sample_period_us"] != expected["sample_period_us"]
+            or not math.isclose(
+                armed_status["duration_ms"], expected["duration_ms"], rel_tol=1e-6
+            )
+        ):
+            raise ScopeAcceptanceError(
+                f"decimation {decimation}: armed with "
+                f"sample_period_us={armed_status['sample_period_us']}, "
+                f"duration_ms={armed_status['duration_ms']:g}; expected "
+                f"{expected['sample_period_us']} us / "
+                f"{expected['duration_ms']:g} ms"
+            )
+
+        trigger_time = time.monotonic()
+        bench.trigger_scope()
+        ready_timeout = expected["ready_max_s"] + 5.0 if expected is not None else None
+        bench.wait_scope_ready(timeout=ready_timeout)
+        ready_elapsed_s = time.monotonic() - trigger_time
+        report["ready_elapsed_s"] = ready_elapsed_s
+        report["expected_ready_window_s"] = (
+            (expected["ready_min_s"], expected["ready_max_s"])
+            if expected is not None
+            else None
+        )
+        if expected is not None and not (
+            expected["ready_min_s"] <= ready_elapsed_s <= expected["ready_max_s"]
+        ):
+            raise ScopeAcceptanceError(
+                f"decimation {decimation}: ready in {ready_elapsed_s:.3f} s, "
+                f"expected {expected['ready_min_s']:g}-"
+                f"{expected['ready_max_s']:g} s"
+            )
+        log(
+            f"decimation {decimation}: ready in {ready_elapsed_s:.3f} s"
+            + (
+                f" (expected {expected['ready_min_s']:g}-{expected['ready_max_s']:g} s)"
+                if expected is not None
+                else ""
+            )
+        )
+
+        capture = bench.download_scope()
+        report["capture"] = capture
+
+        baseline_notes, vhigh_mean = check_baseline(
+            capture,
+            args.expected_vhigh,
+            args.vhigh_tolerance,
+            args.baseline_max_current,
+        )
+        report["baseline_vhigh_mean_v"] = vhigh_mean
+        report["baseline_notes"] = baseline_notes
+        if baseline_notes:
+            raise ScopeAcceptanceError(
+                f"decimation {decimation}: no-load baseline failed: "
+                + "; ".join(baseline_notes)
+            )
+
+        post_measurements = bench.read_measurements()
+        check_interlock(post_measurements, args.max_voltage, args.max_current)
+        report["post_capture_measurements"] = post_measurements
+        report["scope_status"] = bench.read_scope_status()
+        report["ok"] = True
+    except Exception as exc:
+        report["error"] = str(exc)
+        raise
+    finally:
+        try:
+            bench.shutdown(disconnect_hardware=True)
+        except Exception as exc:
+            report["shutdown_error"] = str(exc)
+        write_phase_outputs(output_dir, phase_name, report)
+    return report
+
+
 def write_scope_csv(path, capture):
     with open(path, "w", newline="", encoding="utf-8") as output:
         writer = csv.writer(output)
@@ -245,17 +409,33 @@ def plot_capture(capture, phase_name, png_path):
 
 
 def write_phase_outputs(output_dir, phase_name, report):
-    lines = [
-        f"Phase: {phase_name}",
-        f"Active legs: {report.get('active_legs')}",
-        f"Requested duty cycle: {report.get('duty_cycle')}",
-        f"Result: {'OK' if report.get('ok') else 'FAILED'}",
-    ]
+    lines = [f"Phase: {phase_name}"]
+    if "active_legs" in report:
+        lines.append(f"Active legs: {report.get('active_legs')}")
+        lines.append(f"Requested duty cycle: {report.get('duty_cycle')}")
+    if "decimation" in report:
+        lines.append(f"Decimation: {report.get('decimation')}")
+    lines.append(f"Result: {'OK' if report.get('ok') else 'FAILED'}")
     if report.get("error"):
         lines.append(f"Error: {report['error']}")
     if report.get("shutdown_error"):
         lines.append(f"Shutdown error: {report['shutdown_error']}")
     lines.append("")
+
+    if "ready_elapsed_s" in report:
+        window = report.get("expected_ready_window_s")
+        window_text = f" (expected {window[0]:g}-{window[1]:g} s)" if window else ""
+        lines.append(f"Trigger-to-READY latency: {report['ready_elapsed_s']:.3f} s{window_text}")
+        lines.append("")
+    if "baseline_vhigh_mean_v" in report:
+        lines.append(f"No-load baseline VHigh_V mean: {report['baseline_vhigh_mean_v']:.3f} V")
+        if report.get("baseline_notes"):
+            lines.append("Baseline failures:")
+            for note in report["baseline_notes"]:
+                lines.append(f"  - {note}")
+        else:
+            lines.append("Baseline checks: all passed")
+        lines.append("")
 
     if "pre_capture_measurements" in report:
         lines.append("Pre-capture measurements (after settle):")
@@ -299,13 +479,17 @@ def write_phase_outputs(output_dir, phase_name, report):
         plot_capture(capture, phase_name, output_dir / f"{phase_name}.png")
 
 
-def write_summary(output_dir, args, reports, metadata):
+def write_summary(output_dir, args, reports, metadata, decimations):
     lines = [
         "Scope duty-cycle test summary",
         f"Run directory: {output_dir}",
         f"Converter metadata: {json.dumps(metadata)}",
-        f"Requested duty cycle: {args.duty:g}",
-        f"Decimation: {args.decimation}, pretrigger ratio: {args.pretrigger:g}",
+        f"Decimated-acquisition sweep: {list(decimations)} "
+        f"(no-load POWER_OFF, pretrigger 0.0, expected VHigh "
+        f"{args.expected_vhigh:g} V +/- {args.vhigh_tolerance * 100:g}%, "
+        f"baseline current <= {args.baseline_max_current:g} A)",
+        f"Power phases requested duty cycle: {args.duty:g}",
+        f"Power phases decimation: {args.decimation}, pretrigger ratio: {args.pretrigger:g}",
         f"Settle time: {args.settle_seconds:g} s",
         f"Interlock limits: |V| <= {args.max_voltage:g} V, "
         f"|I| <= {args.max_current:g} A",
@@ -349,7 +533,37 @@ def build_parser():
         "--decimation",
         type=int,
         default=DEFAULT_DECIMATION,
-        help=f"scope decimation, 1-100 (default {DEFAULT_DECIMATION})",
+        help="scope decimation used by the leg1_only/leg2_only/both_legs "
+        f"power phases, 1-100 (default {DEFAULT_DECIMATION})",
+    )
+    parser.add_argument(
+        "--decimations",
+        default=",".join(str(value) for value in DEFAULT_DECIMATIONS),
+        help="comma-separated decimations to verify in the no-load, "
+        "POWER_OFF decimated-acquisition sweep, each 1-100; pass an empty "
+        f"string to skip it (default {','.join(str(v) for v in DEFAULT_DECIMATIONS)})",
+    )
+    parser.add_argument(
+        "--expected-vhigh",
+        type=float,
+        default=DEFAULT_EXPECTED_VHIGH_V,
+        help="expected VHigh for the no-load baseline check, volts "
+        f"(default {DEFAULT_EXPECTED_VHIGH_V:g})",
+    )
+    parser.add_argument(
+        "--vhigh-tolerance",
+        type=float,
+        default=DEFAULT_VHIGH_TOLERANCE,
+        help="fractional VHigh tolerance for the no-load baseline check "
+        f"(default {DEFAULT_VHIGH_TOLERANCE:g} = "
+        f"{DEFAULT_VHIGH_TOLERANCE * 100:g}%%)",
+    )
+    parser.add_argument(
+        "--baseline-max-current",
+        type=float,
+        default=DEFAULT_BASELINE_MAX_CURRENT_A,
+        help="no-load baseline current sanity ceiling per channel, amps "
+        f"(default {DEFAULT_BASELINE_MAX_CURRENT_A:g})",
     )
     parser.add_argument(
         "--pretrigger",
@@ -436,6 +650,24 @@ def main(argv=None):
         parser.error("--poll-interval must be positive")
     if args.max_voltage <= 0 or args.max_current <= 0:
         parser.error("--max-voltage and --max-current must be positive")
+    if args.expected_vhigh <= 0:
+        parser.error("--expected-vhigh must be positive")
+    if not 0.0 <= args.vhigh_tolerance < 1.0:
+        parser.error("--vhigh-tolerance must be between 0.0 and 1.0")
+    if args.baseline_max_current <= 0:
+        parser.error("--baseline-max-current must be positive")
+
+    decimations = []
+    if args.decimations.strip():
+        for token in args.decimations.split(","):
+            token = token.strip()
+            try:
+                value = int(token)
+            except ValueError:
+                parser.error(f"--decimations value {token!r} is not an integer")
+            if not 1 <= value <= 100:
+                parser.error(f"--decimations value {value} must be between 1 and 100")
+            decimations.append(value)
 
     run_dir = Path(args.output_dir) / datetime.datetime.now(
         datetime.timezone.utc
@@ -458,23 +690,34 @@ def main(argv=None):
 
         bench.shutdown(disconnect_hardware=True)
 
+        def attempt(phase_name, run_fn):
+            nonlocal exit_code
+            try:
+                report = run_fn()
+                reports.append(report)
+                log(f"Phase {phase_name}: OK")
+                return True
+            except Exception as exc:
+                reports.append({"phase": phase_name, "ok": False, "error": str(exc)})
+                log(f"Phase {phase_name}: FAILED - {exc}")
+                exit_code = 1
+                return args.continue_on_error
+
         try:
-            for phase_name, active_legs in PHASES:
-                try:
-                    report = run_phase(bench, phase_name, active_legs, args, run_dir)
-                    reports.append(report)
-                    log(f"Phase {phase_name}: OK")
-                except Exception as exc:
-                    reports.append(
-                        {
-                            "phase": phase_name,
-                            "ok": False,
-                            "error": str(exc),
-                        }
-                    )
-                    log(f"Phase {phase_name}: FAILED - {exc}")
-                    exit_code = 1
-                    if not args.continue_on_error:
+            for decimation in decimations:
+                if not attempt(
+                    f"decimation_{decimation}",
+                    lambda d=decimation: run_decimation_phase(bench, d, args, run_dir),
+                ):
+                    break
+            else:
+                for phase_name, active_legs in PHASES:
+                    if not attempt(
+                        phase_name,
+                        lambda p=phase_name, legs=active_legs: run_phase(
+                            bench, p, legs, args, run_dir
+                        ),
+                    ):
                         break
         finally:
             try:
@@ -484,7 +727,7 @@ def main(argv=None):
                 log(f"Final shutdown reported errors: {exc}")
                 exit_code = 1
 
-    write_summary(run_dir, args, reports, metadata)
+    write_summary(run_dir, args, reports, metadata, decimations)
     log(f"Done. Results in {run_dir}")
     return exit_code
 
