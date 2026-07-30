@@ -8,8 +8,9 @@ tree and ThingSet write callbacks.
 
 The application can remotely configure both power legs, select manual-duty or
 PID control, choose a PID tracking measurement, update timing and switch
-settings, calibrate sensor channels, and read live measurements and control
-readbacks.
+settings, calibrate sensor channels, read live measurements and control
+readbacks, and acquire a decimated 1,024-sample, eight-channel software-scope
+capture.
 
 ## Runtime architecture
 
@@ -20,9 +21,14 @@ effects:
   uses `/Config/wBlinkPeriod_s` as its delay.
 - The 100 us critical task samples voltage/current channels, starts or stops
   each PWM leg according to `Mode` and `wEnable`, calculates manual or PID duty,
-  applies the duty, and updates peak-voltage and duty readbacks.
+  applies the duty, updates peak-voltage and duty readbacks, and performs the
+  selected decimated ScopeMimicry acquisition tick.
 - ThingSet group callbacks immediately apply capacitor, driver, phase-shift,
-  dead-time, switching-frequency, and calibration writes.
+  dead-time, switching-frequency, and calibration writes. Scope callbacks
+  only validate configuration and queue arm/trigger requests.
+- A dedicated background data-port task receives commands and streams frozen
+  scope buffers over USB `if00`; no serial I/O runs in a callback or critical
+  task.
 
 ThingSet registration lives in one translation unit so every object is
 registered exactly once.
@@ -37,6 +43,10 @@ registered exactly once.
   registrations.
 - `thingset_callbacks.cpp` — write validation and immediate Shield/Spin API
   side effects.
+- `scope_capture.h` and `scope_capture.cpp` — ScopeMimicry ownership,
+  decimation, state machine, and frozen-buffer access.
+- `scope_data_port.h` and `scope_data_port.cpp` — permanent `if00` probe and
+  bounded legacy-format scope download.
 - `app.conf` — enables ThingSet and its shell transport.
 - `app.overlay` — provides a second USB-CDC UART dedicated to the ThingSet
   shell.
@@ -44,13 +54,15 @@ registered exactly once.
   MATLAB ThingSet transports.
 - `tools/power_test_bench.py` and `tools/PowerTestBench.m` — matched,
   safety-oriented converter clients.
+- `tools/scope_serial.py` and `tools/ScopeSerial.m` — explicit-port,
+  bounded scope transports and parsers.
 - `tools/thingset_example.py` and `tools/thingset_example.m` — safe-by-default
   command-line and callable examples.
 - `tools/tests` — Python `unittest` and MATLAB `matlab.unittest` suites using
   fake transports, with no hardware side effects.
 
-`../zephyr/CMakeLists.txt` explicitly compiles `main.cpp`,
-`user_data_objects.cpp`, and `thingset_callbacks.cpp`.
+`../zephyr/CMakeLists.txt` explicitly compiles `main.cpp`, both scope
+components, `user_data_objects.cpp`, and `thingset_callbacks.cpp`.
 
 ## ThingSet object tree
 
@@ -109,6 +121,45 @@ Mode values preserve the original power-test-bench protocol:
 At startup the application is in `IDLE`, uses a 200 kHz switching frequency,
 and leaves both legs disabled.
 
+### Software scope
+
+`/Debug/Scope` controls a fixed ScopeMimicry buffer without carrying capture
+data through ThingSet:
+
+| Path | Type | Behavior |
+| --- | --- | --- |
+| `/Debug/Scope/wArm` | bool | One-shot reset/arm request; returns to `false` |
+| `/Debug/Scope/wTrigger` | bool | One-shot software trigger while armed; returns to `false` |
+| `/Debug/Scope/wPretriggerRatio` | float | Next-capture ratio, default `0.2`, range `0.0–0.9` |
+| `/Debug/Scope/wDecimation` | uint16 | Next-capture decimation, default `1`, range `1–100` |
+| `/Debug/Scope/rState` | uint8 | `IDLE`, `ARMED`, `TRIGGERED`, `READY`, `STREAMING`, or `ERROR` as codes `0–5` |
+| `/Debug/Scope/rSampleCount` | uint16 | Constant `1024` |
+| `/Debug/Scope/rChannelCount` | uint16 | Constant `8` |
+| `/Debug/Scope/rSamplePeriod_us` | uint32 | Period latched when armed |
+| `/Debug/Scope/rCaptureDuration_ms` | float | Full buffer window latched when armed |
+| `/Debug/Scope/rFinalIndex` | uint16 | Circular-buffer final index |
+| `/Debug/Scope/rLastError` | uint8 | `NONE`, `INVALID_STATE`, `INVALID_DECIMATION`, `TRANSFER`, or `INTERNAL` as codes `0–4` |
+
+The channels, in wire order, are `V1Low_V`, `V2Low_V`, `VHigh_V`,
+`I1Low_A`, `I2Low_A`, `IHigh_A`, `Duty1`, and `Duty2`.
+
+Decimation changes only the scope call rate. The control task continues to run
+every 100 us:
+
+| Decimation | Scope sample period | 1,024-sample window |
+| ---: | ---: | ---: |
+| `1` | 100 us | 102.4 ms |
+| `10` | 1 ms | 1.024 s |
+| `100` | 10 ms | 10.24 s |
+
+Configuration writes made while `ARMED`, `TRIGGERED`, or `STREAMING` are
+restored. The effective period and duration describe the frozen or active
+capture until the next arm, even if next-capture settings are changed while
+`READY`. Software triggers remain latched until the next decimated acquisition
+tick, so maximum trigger alignment latency is one effective sample period.
+Acquisition is independent of converter power state and is available with
+`POWER_OFF` and both legs disabled.
+
 ### Per-leg configuration
 
 `/Config/Leg1` and `/Config/Leg2` expose the same fields:
@@ -159,6 +210,8 @@ Gain and offset writes take effect immediately. They are not persisted until
 | --- | --- |
 | Immediate callback | Converter metadata, `Frequency_Hz`, `wCapa`, `wDriver`, `wPhaseShift`, both dead times, calibration gain/offset/store |
 | Critical-task evaluation | `Mode`, `wEnable`, `wBuck`, `wBoost`, `wDutyCycle`, `wReferenceValue`, `wTrackingVar` |
+| Callback queue, critical-task execution | Scope arm, trigger, and decimated acquisition |
+| Scope data background task | Probe responses and frozen-buffer downloads |
 
 `Mode` and `wEnable` are both required to start PWM. Moving out of `POWER_ON`
 or clearing `wEnable` stops the corresponding leg on the next critical-task
@@ -178,8 +231,43 @@ that selects the ThingSet stack, even though this example uses the serial shell
 rather than CAN.
 
 `app.overlay` adds a second CDC-ACM UART and routes `zephyr,shell-uart` to it.
-After flashing, the board therefore enumerates separate console and ThingSet
-shell serial ports.
+After flashing, the board therefore enumerates two independent interfaces:
+
+| USB interface | Purpose | Host selection |
+| --- | --- | --- |
+| `if00` | Scope data and normal console | Explicit stable `/dev/serial/by-id/...-if00` path |
+| `if02` | Zephyr ThingSet shell | Explicit stable `/dev/serial/by-id/...-if02` path for multi-board work |
+
+Never open `if00` at 1200 baud: the board intentionally interprets that baud
+rate as a request to enter MCUboot. `ScopeSerial` fixes the data connection at
+115200 baud and never performs VID/PID auto-detection.
+
+The permanent data-port commands are:
+
+| Byte | Response |
+| --- | --- |
+| `?` | `SCOPE-DATA/1 OK` |
+| `D` while `READY` | Frozen capture in the format below |
+| `D` otherwise | `SCOPE-DATA/1 ERROR NOT_READY <state>` |
+| Any other byte | `SCOPE-DATA/1 ERROR UNKNOWN_COMMAND` |
+
+```text
+begin record
+#V1Low_V,V2Low_V,VHigh_V,I1Low_A,I2Low_A,IHigh_A,Duty1,Duty2,
+# <final-index>
+<8192 lines containing one 8-digit IEEE-754 hexadecimal value>
+end record
+```
+
+Values are sample-major and channel-interleaved. Hosts require exactly 8,192
+values and rotate the rows starting at `(finalIndex + 1) % 1024` to produce
+chronological order. Firmware serializes all 32,768 capture bytes directly
+instead of using ScopeMimicry's legacy dumper, which omits its last value.
+
+The buffer costs 32 KiB of runtime newlib heap plus small pointer tables.
+Zephyr's system heap remains 4 KiB; the linked firmware reports 41.7% RAM
+before dynamic scope allocation. ScopeMimicry is pinned in `platformio.ini` to
+revision `6f49b722fa508703387aa87ed95d75d1044a8f06`.
 
 ## Build and flash
 
@@ -192,6 +280,13 @@ From the repository root:
 
 The `control_library` dependency in `platformio.ini` supplies the `Pid` and
 `PidParams` implementation.
+
+When multiple OwnTech boards are attached, temporarily configure the exact
+target USB serial as `board_id` in `platformio.ini`. An explicit ID is
+mandatory: the uploader now aborts rather than selecting another board, waits
+for that same serial to enumerate with product `MCUBOOT`, and only then
+configures `mcumgr` with its serial-specific `/dev/serial/by-id` link on
+Linux. Restore the project setting after the upload.
 
 ## Manual shell use
 
@@ -216,6 +311,7 @@ Discovery and reads:
 ?Config null
 ?Config/Leg1 null
 ?Calibration null
+?Debug/Scope
 ?Measurements/rV1Low_V
 ?Measurements/rDuty1
 ```
@@ -251,6 +347,19 @@ Calibration example:
 =Calibration/V1 {\"wGain\":1.0,\"wOffset\":0.0}
 =Calibration/V1 {\"wStore\":true}
 ```
+
+Arm and trigger a power-off scope capture through `if02`:
+
+```text
+=Debug/Scope {\"wPretriggerRatio\":0.2,\"wDecimation\":10}
+=Debug/Scope {\"wArm\":true}
+?Debug/Scope
+=Debug/Scope {\"wTrigger\":true}
+?Debug/Scope
+```
+
+Once `rState` is `3` (`READY`), send the literal `D` byte at 115200 baud to
+the same board's `if00` data port. Do not send `D` through the ThingSet shell.
 
 The Zephyr shell strips unescaped double quotes before ThingSet receives the
 request. A command such as:
@@ -303,11 +412,38 @@ operate on the discovered tree and reject read-only write targets locally.
 
 `PowerTestBench` provides `set_mode`, `set_frequency`, `configure_leg`,
 `read_leg`, `read_measurements`, `read_calibration`, `set_calibration`,
-`read_metadata`, `set_metadata`, `power_on`, and `shutdown`. It validates
-ranges and names, writes related fields as one group update, then reads them
-back to detect firmware rejection. Setting converter metadata writes NVS on
-the device. Calibration `store=True` verifies that `wStore` resets, but the
-firmware exposes no separate storage-status object.
+`read_metadata`, `set_metadata`, `read_scope_status`, `arm_scope`,
+`trigger_scope`, `wait_scope_ready`, `download_scope`, `power_on`, and
+`shutdown`. It validates ranges and names, writes related fields as one group
+update, then reads them back to detect firmware rejection. Setting converter
+metadata writes NVS on the device. Calibration `store=True` verifies that
+`wStore` resets, but the firmware exposes no separate storage-status object.
+
+Scope downloads require a separate, explicit `ScopeSerial`; constructing
+`PowerTestBench(ts)` without one remains backward compatible:
+
+```python
+from power_test_bench import PowerTestBench
+from scope_serial import ScopeSerial
+from thingset_tools import ThingSetTools
+
+shell_port = "/dev/serial/by-id/...TWIST...-if02"
+scope_port = "/dev/serial/by-id/...TWIST...-if00"
+
+with ThingSetTools(shell_port) as ts, ScopeSerial(scope_port) as scope:
+    bench = PowerTestBench(ts, scope)
+    bench.shutdown()
+    bench.arm_scope(pretrigger_ratio=0.2, decimation=10)
+    bench.trigger_scope()
+    bench.wait_scope_ready()
+    capture = bench.download_scope()
+    print(capture.channel_names, len(capture.samples))
+```
+
+`ScopeCapture` includes the active decimation, sample period, full duration,
+channel names, chronological samples, final index, pre-trigger ratio, and a
+trigger-relative time axis. Its parser bounds line size, count, and timeout
+and rejects truncated, malformed, non-hexadecimal, or mismatched captures.
 
 `power_on()` first requests `POWER_OFF`, disables both legs, configures and
 enables exactly the selected leg, then requests `POWER_ON`. On failure it
@@ -319,7 +455,13 @@ Run the bundled example from `src/tools`:
 
 ```sh
 # Safe default: discovers, reads, configures a disabled leg, and remains off.
-python3 thingset_example.py
+python3 thingset_example.py --port /dev/serial/by-id/...TWIST...-if02
+
+# Safe power-off scope capture; no power enable is implied.
+python3 thingset_example.py \
+    --port /dev/serial/by-id/...TWIST...-if02 \
+    --scope-port /dev/serial/by-id/...TWIST...-if00 \
+    --capture --decimation 10 --pretrigger 0.2 --scope-csv capture.csv
 
 # Explicit opt-in on a properly prepared power bench.
 python3 thingset_example.py --leg 1 --duty 0.2 --duration 1 \
@@ -348,15 +490,41 @@ disp(bench.readMeasurements());
 
 The MATLAB wrapper methods are `setMode`, `setFrequency`, `configureLeg`,
 `readLeg`, `readMeasurements`, `readCalibration`, `setCalibration`,
-`readMetadata`, `setMetadata`, `powerOn`, and `shutdown`. Configuration,
+`readMetadata`, `setMetadata`, `readScopeStatus`, `armScope`, `triggerScope`,
+`waitScopeReady`, `downloadScope`, `powerOn`, and `shutdown`. Configuration,
 calibration, and metadata setters accept scalar structs with camelCase field
-names.
+names. `ScopeSerial.m` returns a capture struct with fields equivalent to the
+Python `ScopeCapture`.
+
+```matlab
+shellPort = "/dev/serial/by-id/...TWIST...-if02";
+scopePort = "/dev/serial/by-id/...TWIST...-if00";
+ts = ThingSetTools(shellPort);
+scope = ScopeSerial(scopePort);
+tsCleanup = onCleanup(@() ts.close());
+scopeCleanup = onCleanup(@() scope.close());
+bench = PowerTestBench(ts, scope);
+
+bench.shutdown();
+bench.armScope(PretriggerRatio=0.2, Decimation=10);
+bench.triggerScope();
+bench.waitScopeReady();
+capture = bench.downloadScope();
+disp(size(capture.samples));
+```
 
 Call the bundled example from `src/tools`:
 
 ```matlab
 % Safe default.
-thingset_example()
+thingset_example(Port="/dev/serial/by-id/...TWIST...-if02")
+
+% Safe power-off scope capture.
+thingset_example( ...
+    Port="/dev/serial/by-id/...TWIST...-if02", ...
+    ScopePort="/dev/serial/by-id/...TWIST...-if00", ...
+    Capture=true, Decimation=10, PretriggerRatio=0.2, ...
+    ScopeCsv="capture.csv")
 
 % Explicit power opt-in.
 thingset_example( ...
@@ -379,7 +547,15 @@ matlab -batch "addpath('src/tools','src/tools/tests'); \
 results=runtests('src/tools/tests'); assertSuccess(results);"
 ```
 
+The current offline gate is 23 Python tests and 19 MATLAB tests. Scope coverage
+includes decimations 1, 10, and 100; booleans, non-integers, bounds, NaN, and
+infinity; valid and wrapped records; truncated, malformed, non-hexadecimal,
+wrong-count, wrong-channel, timeout, and probe-mismatch inputs; readback
+rejection; missing scope transport; and cleanup.
+
 The firmware build and fake-client tests do not replace hardware acceptance.
-After flashing, separately verify metadata persistence across a reboot,
-frequency range handling, measurement readback, explicit power-on sequencing,
-and shutdown on interruption using the normal isolated bench procedure.
+After flashing, verify the state transitions and ready-time windows at all
+three decimations, repeated downloads, ThingSet responsiveness during transfer,
+and identical Python/MATLAB decoding of the same frozen buffer. On a no-load
+30 V setup, scope acceptance keeps `POWER_OFF`, both legs disabled, and makes
+no frequency write or external power-supply control.

@@ -10,8 +10,9 @@ hardware.
 ## Functional Coverage Compared with `old4`
 
 This comparison uses `old/old4/comm_protocol.cpp` as the legacy reference and
-the current branch at `069248a` (including the rebased Power API change
-`aab0ae5`) as the ThingSet implementation. "Present" means that an equivalent
+the current branch after the dual-serial scope implementation (including the
+rebased Power API change `aab0ae5`) as the ThingSet implementation. "Present"
+means that an equivalent
 application behavior is exposed by the current firmware and, where relevant,
 by both the Python and MATLAB wrappers. "Partial" means that an object or API
 exists but behavior, validation, reporting, or hardware execution is
@@ -38,8 +39,8 @@ compatible.
 | Power-off configuration frame | `frame_POWER_OFF()` prints factory-test flags and every leg's state, duty, reference, and tracking selection in one line | `/Config`, `/Config/LegN`, and `/Measurements` provide typed on-demand reads | Generic reads plus `read_leg`/`readLeg` | **Partial / replaced** — converter configuration is available, but there is no single legacy frame and no RS485/sync/analog/CAN result block |
 | Power-on telemetry frame | `frame_POWER_ON()` prints duty, voltages, currents, peaks, temperatures, high-side values, and factory-test fields | `/Measurements` exposes V1/V2/VH, I1/I2/IH, both temperatures, V1/V2 peaks, and both duty readbacks | `read_measurements`/`readMeasurements` | **Partial / replaced** — TWIST converter telemetry is present; the diagnostic tail and optional Leg 3 telemetry are missing |
 | Automatic/push telemetry | Legacy code can emit fixed-format power-on and power-off lines without a structured request | Current serial API is request/read based; no application telemetry stream or report schedule is defined for these objects | Wrappers poll measurements explicitly | **Missing** if legacy push/stream behavior is required |
-| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | No ThingSet acquisition-control object | No wrapper method | **Missing** |
-| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | No ThingSet scope-read/download command or data object | No wrapper method | **Missing** |
+| Scope acquisition toggle | `scopeHandler()` toggles `enable_acq` through `_a` | `/Debug/Scope` provides validated one-shot arm/trigger, state/error readbacks, pre-trigger ratio, and decimation 1–100 | `arm_scope`/`armScope`, `trigger_scope`/`triggerScope`, and duration-aware ready waits | **Partial pending hardware acceptance** — firmware and fake-client gates pass; live state/timing gates await recovery of the target board |
+| Scope buffer download | `scopeHandler()` sets `is_downloading` through `_r` | Dedicated `if00` `D` command emits the complete frozen 1,024-by-8 buffer in legacy text/hex while ThingSet remains on `if02` | Explicit-port Python/MATLAB `ScopeSerial` parsers and `download_scope`/`downloadScope` | **Partial pending hardware acceptance** — bounded parsing, rotation, malformed-input handling, and wrapper parity pass offline; live transfer/repeated-download parity awaits target recovery |
 | RS485 slave response | `slave_reception_function()` echoes and increments the RS485 test data, adds sync/CAN/analog fields, and starts transmission | The repository contains communication drivers, but this application does not configure or expose this factory-test transaction | No wrapper method | **Missing** |
 | RS485/CAN/sync/analog master verification | `master_reception_function()` evaluates the returned fields and latches `RS485_success`, `Sync_success`, `Analog_success`, and `Can_success` | No application state, callback, or ThingSet object implements this diagnostic workflow | No wrapper method | **Missing** |
 | Conditional Ownverter support | Compile-time Leg 3, V3/I3 tracking, V3/I3/temperature/peak telemetry | `POWER_LEG_COUNT` is 2 and `CALIBRATION_CHANNEL_COUNT` is 6; object IDs are explicitly defined for two legs | Both wrappers reject Leg 3 and V3/I3 | **Missing** |
@@ -60,8 +61,8 @@ If full `old4` parity is required, the priority order is:
    `shield.power.setFrequency()`.
 2. Correct `PowerAPI::disconnectDriver()` and verify physical driver-off
    readback or behavior.
-3. Add explicit ThingSet scope acquisition and bounded scope-download
-   interfaces.
+3. Complete live timing, repeated-download, and cross-language acceptance for
+   the implemented dual-serial scope after the TWIST target is recovered.
 4. Decide whether the RS485/CAN/sync/analog factory-test workflow belongs in
    this application; if so, expose its commands, status, and failure details as
    typed objects.
@@ -197,8 +198,9 @@ The fixed design is:
 - No scope-port auto-detection, frequency writes, or power-supply control
   during acceptance.
 
-The two scope entries in the old4 comparison above remain **Missing — planned
-below** until Phase 6 acceptance is complete.
+The two scope entries in the old4 comparison above are implemented and remain
+**Partial pending hardware acceptance** until the blocked Phase 2/3 live gates
+and final Phase 6 acceptance are complete.
 
 ## Public Interface and Protocol
 
@@ -286,12 +288,12 @@ it before use.
 |---:|---|---|---|---|
 | 0. Plan and global convention | PASS | Commit `a6ca0f7` | Global rule created; staged-file gate passed | Complete |
 | 1. Data-port viability | PASS | Based on `a6ca0f7` | Build 41.4% RAM; upload selected `5843500300470047`; 3 probes, unknown command, `/Converter`, and isolation passed | Complete |
-| 1A. Upload isolation remediation | PASS | Based on `b1bfe77` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot; Python compilation passed | Complete |
+| 1A. Upload isolation remediation | PASS | Commits `a47a096`, `88d7ba0` | Exact board ID is mandatory; uploader waits for the selected serial to identify as MCUboot and stores its stable by-id path; Python compilation passed | Complete |
 | 2. Decimated acquisition | BLOCKED | Commit `feat: add decimated ThingSet scope acquisition` | Clean build passed at 41.7% reported RAM with 4 KiB system heap; hardware state gate awaits a physical TWIST reset | Rerun hardware state gate after target recovery |
 | 3. Bounded download | BLOCKED | Commit `feat: stream scope captures on the data serial port` | Build passed at 41.7% RAM; source emits exact header, all 32,768 buffer bytes as 8,192 hex lines, and returns `STREAMING` to `READY`; live download gate awaits target recovery | Rerun hardware transfer gate after target recovery |
 | 4. Python client | PASS | Commit `feat: add Python decimated scope capture interface` | `compileall` and 23 `unittest` cases pass, including bounded parsing, rotation, malformed input, scope validation, readback rejection, sequencing, and missing transport | Complete |
 | 5. MATLAB client | PASS | Commit `feat: add MATLAB decimated scope capture interface` | `checkcode` reports zero issues and all 19 `matlab.unittest` cases pass, including matched parser, scope validation, sequencing, and transport cleanup | Complete |
-| 6. Documentation and acceptance | IN_PROGRESS | Based on completed host interfaces | Documentation and aggregate offline gates pending; live gates remain blocked by target recovery | Update READMEs and test record |
+| 6. Documentation and acceptance | BLOCKED | Commit `docs: document and validate decimated scope capture` | Both READMEs and `automated_test.md` updated; 23 Python tests, 19 MATLAB tests with zero `checkcode` findings, and USB build at 41.7% RAM/81.6% flash pass; live acceptance awaits physical target reset | Recover TWIST, rerun Phase 2/3 live gates, then mark scope parity present |
 
 Only one phase may be `IN_PROGRESS`. Before and after each phase, update its
 status and record command results, identity evidence, incidents, recovery
@@ -334,9 +336,10 @@ Incident log:
    application port instead of waiting for the selected serial to enumerate
    as `MCUBOOT`. The saved `/dev/ttyACM*` connection could then be rebound to
    another board. The uploader now aborts if an explicit board ID is absent,
-   selects the application console interface, and waits for both the selected
-   serial and `MCUBOOT` product before configuring `mcumgr`. OWNVERTER returned
-   to `OWNVERTER_V1_1_0` without being opened, reset, or probed by this test.
+   selects the application console interface, waits for both the selected
+   serial and `MCUBOOT` product, and stores the corresponding serial-specific
+   `/dev/serial/by-id` path before configuring `mcumgr`. OWNVERTER returned to
+   `OWNVERTER_V1_1_0` without being opened, reset, or probed by this test.
    The TWIST application remained wedged, and its 1200-baud callback could not
    be reached; its hardware gate therefore awaits a physical target reset.
 7. `2026-07-29` — The first MATLAB parser test run failed because the fake
@@ -384,6 +387,11 @@ Commit 1A: `fix: pin USB uploads to selected bootloader identity`
 
 Gate: the uploader script compiles, explicit-target fallback is absent, and
 the MCUboot wait requires both the selected serial and product.
+
+Follow-up commit 1B: `fix: keep mcumgr uploads on stable serial paths`
+
+Gate: after identity verification, Linux `mcumgr` profiles use the matching
+serial-specific `/dev/serial/by-id` link instead of a reusable tty number.
 
 ### Phase 2 — Implement decimated acquisition
 

@@ -266,3 +266,95 @@ Append-only log.
 - [x] TWIST ended in `POWER_OFF` with both legs disabled.
 - [x] Original `platformio.ini` was restored.
 - [x] No required evidence remains pending.
+
+---
+
+# Dual-Serial Scope Acceptance Run
+
+## Scope-run status
+
+- Status: **BLOCKED — OFFLINE IMPLEMENTATION COMPLETE**
+- Recorded through: `2026-07-29T17:52:43+02:00`
+- Baseline implementation SHA: `88d7ba0a7fcbf3b0c1bfeb331678233c401d5133`
+- Branch: `serial_thingset_example`
+- External supply: user-controlled; this run issued no supply command
+- Frequency: no write attempted
+- Converter state during scope acceptance: intended `POWER_OFF`, both legs
+  disabled
+
+This section is append-only and independent of the completed buck-regulation
+run above. The scope firmware and both host interfaces are implemented and
+pass their offline gates. Live scope acceptance is blocked because the first
+Phase 2 image reserved too much Zephyr heap and the target application wedged
+before its serial tasks started. Its normal 1200-baud bootloader callback
+cannot currently be reached; a physical reset of the target TWIST is required
+before reflashing the corrected image.
+
+## Scope device isolation
+
+| Role | Product | USB serial | Stable interface | Status |
+|---|---|---|---|---|
+| Scope target | `TWIST_V1_4_2` | `5843500300470047` | `...5843500300470047-if00` data, `...5843500300470047-if02` ThingSet | Enumerated; application endpoints wedged |
+| Protected | `OWNVERTER_V1_1_0` | `584350030047002D` | `...584350030047002D-if00` | **DO_NOT_TOUCH**, normal and unchanged |
+| Protected | `TWIST_V1_4_2` | `423250070031003C` | `...423250070031003C-if00` | **DO_NOT_TOUCH**, normal and unchanged |
+
+Read-only snapshot at `2026-07-29T17:52:43+02:00`:
+
+```text
+/dev/ttyACM0  TWIST_V1_4_2      SER=5843500300470047  LOCATION=3-4:1.0
+/dev/ttyACM1  OWNVERTER_V1_1_0  SER=584350030047002D  LOCATION=3-6.3:1.0
+/dev/ttyACM2  TWIST_V1_4_2      SER=5843500300470047  LOCATION=3-4:1.2
+/dev/ttyACM3  TWIST_V1_4_2      SER=423250070031003C  LOCATION=3-5.3.1:1.0
+```
+
+No scope-run command opened, probed, reset, or flashed serial
+`584350030047002D` or serial `423250070031003C`.
+
+## Scope progress ledger
+
+| Phase | Status | Evidence | Next action |
+|---:|---|---|---|
+| 0. Plan and convention | PASS | Plan-only commit `a6ca0f7`; global commit-sequence rule stored outside the repository | Complete |
+| 1. Data-port viability | PASS | Target-only upload selected `5843500300470047`; three exact `SCOPE-DATA/1 OK` probes, unknown-command response, concurrent `/Converter` read on `if02`, and zero cross-port bytes | Complete |
+| 1A. Upload isolation remediation | PASS | Commits `a47a096` and `88d7ba0`; explicit target fallback removed, uploader waits for matching serial plus `MCUBOOT`, and Linux `mcumgr` uses the serial-specific by-id path | Use remediated uploader after physical target reset |
+| 2. Decimated acquisition | BLOCKED | Corrected image builds at 41.7% reported RAM with 4 KiB system heap; live state/timing gate cannot run on wedged target | Physical target reset, flash, then test decimations 1/10/100 |
+| 3. Bounded download | BLOCKED | Firmware emits exact header, 32,768 buffer bytes as 8,192 hex lines, and repeatable `READY` ownership; build passes | Run live transfer, repeated-download, and shell-responsiveness gates |
+| 4. Python wrapper | PASS | `compileall` and 23 `unittest` cases pass | Run one live download |
+| 5. MATLAB wrapper | PASS | Zero `checkcode` findings and 19 `matlab.unittest` cases pass | Download the same frozen live capture |
+| 6. Documentation/final acceptance | BLOCKED | READMEs, protocol, timing, APIs, examples, and this evidence record updated; 23 Python tests, 19 MATLAB tests with zero analyzer findings, and USB build at 41.7% RAM/81.6% flash pass | Complete live gates and mark scope rows present |
+
+## Scope incidents and recovery
+
+1. The first Phase 2 compile used unavailable minimal-C++ headers. It was
+   corrected to C `math.h`/`stdint.h` interfaces.
+2. The first Phase 2 image used a 40 KiB Zephyr system heap. ScopeMimicry
+   allocates through newlib `malloc`, leaving insufficient newlib heap for its
+   32,768-byte buffer plus overhead. The corrected configuration retains the
+   existing 4 KiB system heap and leaves otherwise-unused RAM to newlib.
+3. During that upload, the protected OWNVERTER temporarily enumerated as
+   `MCUBOOT`. Inspection showed the uploader accepted the still-enumerated
+   application `/dev/ttyACM*` and retained that unstable path. No explicit
+   command targeted the protected serial. The uploader was fixed to wait for
+   the selected serial and `MCUBOOT` product; OWNVERTER returned to its normal
+   identity without being opened or reset by the test.
+4. The target application remained wedged. Two target-only 1200-baud attempts
+   could not reach its bootloader callback. No further flash was attempted.
+5. The first MATLAB fake-parser run used double-quoted `sprintf` strings where
+   byte conversion required characters. The fixtures were corrected; all 19
+   tests passed on rerun.
+
+## Remaining live acceptance checklist
+
+- [ ] Physically reset TWIST serial `5843500300470047`.
+- [ ] Revalidate all three USB identities and stable paths.
+- [ ] Flash the corrected image using the identity-pinned uploader.
+- [ ] Verify the complete `/Debug/Scope` tree and invalid-state restoration.
+- [ ] Verify 100, 1,000, and 10,000 us sample-period readbacks.
+- [ ] Verify ready windows of 0.08–0.25 s, 0.9–1.2 s, and 9.8–10.7 s.
+- [ ] Verify a trigger between decimated ticks is retained.
+- [ ] Verify exact 8,192-value and repeated downloads with responsive `if02`.
+- [ ] Decode the same frozen buffer with Python and MATLAB and compare it
+  exactly.
+- [ ] At user-provided 30 V/no-load input, verify finite samples, mean VHigh
+  within ±5%, and current magnitudes below 0.5 A while power remains off.
+- [ ] Re-enumerate and confirm both protected devices remain unchanged.
