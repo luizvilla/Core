@@ -6,50 +6,74 @@
 %   the Free Software Foundation, either version 2 of the License, or
 %   (at your option) any later version.
 %
-%   This program is distributed in the hope that it will be useful,
-%   but WITHOUT ANY WARRANTY; without even the implied warranty of
-%   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-%   GNU General Public License for more details.
-%
-%   You should have received a copy of the GNU General Public License
-%   along with this program.  If not, see <https://www.gnu.org/licenses/>.
-%
 % SPDX-License-Identifier: GPL-2.0-or-later
 %
-% @author Luiz Villa <luiz.villa@laas.fr>
+
+function thingset_example(options)
+%THINGSET_EXAMPLE Safe-by-default ThingSet power-test-bench example.
 %
+%   thingset_example()
+%   thingset_example(Port="/dev/ttyACM1", Leg=2, DutyCycle=0.2)
+%   thingset_example(EnablePower=true, ConnectDriver=true, Duration=1.0)
 
-% thingset_example.m
-%
-% Usage example for ThingSetTools: discovers the device's ThingSet
-% objects, auto-builds a {short_name: path} map for the Measurements
-% group, reads a single measurement and the whole group, and writes a
-% Config value.
-
-MEAS = "Measurements";
-
-ts = ThingSetTools("", 115200, 1.0, "2FE3", "", true); 
-%ts = ThingSetTools();
-ts.discover();
-
-% Auto-build {short_name: full_path} for every measurement, e.g.
-% "rV1Low_V" -> name "V1Low" (between the leading "r" and the "_V" unit).
-measurements = containers.Map("KeyType", "char", "ValueType", "any");
-for name = ts.fetchChildren(MEAS)
-    tok = regexp(char(name), "^r(.+)_(\w+)$", "tokens", "once");
-    if ~isempty(tok)
-        measurements(tok{1}) = char(MEAS + "/" + name);
-    end
+arguments
+    options.Port (1,1) string = ""
+    options.BaudRate (1,1) double {mustBePositive} = 115200
+    options.Leg (1,1) double {mustBeMember(options.Leg, [1, 2])} = 1
+    options.DutyCycle (1,1) double {mustBeFinite, mustBeInRange( ...
+        options.DutyCycle, 0, 1)} = 0.1
+    options.Duration (1,1) double {mustBeNonnegative, mustBeFinite} = 1.0
+    options.EnablePower (1,1) logical = false
+    options.ConnectDriver (1,1) logical = false
+    options.ConnectCapacitor (1,1) logical = false
 end
 
-disp(measurements.keys);
-disp(measurements.values);
+if ~options.EnablePower && ...
+        (options.ConnectDriver || options.ConnectCapacitor)
+    error("thingset_example:safety", ...
+        "ConnectDriver and ConnectCapacitor require EnablePower=true");
+end
 
-disp(ts.read(measurements("V1Low")));
+ts = ThingSetTools(options.Port, options.BaudRate);
+transportCleanup = onCleanup(@() ts.close());
+ts.discover();
+bench = PowerTestBench(ts);
 
-% Flush all measurements and their current values at once.
-disp(ts.read(MEAS));
+% Establish the safe baseline before applying any requested duty.
+bench.shutdown();
+bench.configureLeg( ...
+    options.Leg, struct("dutyCycle", options.DutyCycle));
 
-ts.write("Config", struct("wBlinkPeriod_s", 0.5));
+disp("Converter metadata:");
+disp(bench.readMetadata());
+disp("Measurements:");
+disp(bench.readMeasurements());
 
-ts.close();
+if ~options.EnablePower
+    disp("Power remains OFF; pass EnablePower=true to energize one leg.");
+    return
+end
+
+disconnectAfterward = ...
+    options.ConnectDriver || options.ConnectCapacitor;
+powerCleanup = onCleanup( ...
+    @() safeShutdown(bench, disconnectAfterward));
+bench.powerOn( ...
+    options.Leg, ...
+    struct("dutyCycle", options.DutyCycle), ...
+    ConnectDriver=options.ConnectDriver, ...
+    ConnectCapacitor=options.ConnectCapacitor);
+fprintf("Leg %d is powered for %.3f seconds.\n", ...
+    options.Leg, options.Duration);
+pause(options.Duration);
+disp(bench.readMeasurements());
+end
+
+function safeShutdown(bench, disconnectHardware)
+try
+    bench.shutdown(DisconnectHardware=disconnectHardware);
+catch ME
+    warning("thingset_example:shutdown", ...
+        "Shutdown completed with errors: %s", ME.message);
+end
+end
