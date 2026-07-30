@@ -316,6 +316,38 @@ classdef ThingSetTools < handle
     end
 
     methods (Static)
+        function kind = classifyLeaf(name, path)
+            % Classify a leaf by exact-path overrides first, then by the
+            % ThingSet r/w/s/x naming convention.
+            arguments
+                name (1,1) string
+                path (1,1) string = ""
+            end
+            normalizedPath = regexprep(path, '^/+', '');
+            if any(normalizedPath == ["Config/Mode", "Config/Frequency_Hz"])
+                kind = "writable";
+                return
+            end
+
+            chars = char(name);
+            if isempty(chars)
+                kind = "unknown";
+                return
+            end
+            switch chars(1)
+                case 'r'
+                    kind = "read-only";
+                case 'w'
+                    kind = "writable";
+                case 's'
+                    kind = "writable-setting";
+                case 'x'
+                    kind = "executable";
+                otherwise
+                    kind = "informational";
+            end
+        end
+
         function ports = findPorts(vid, pid, verbose)
             % List serial ports matching a USB vendor ID (and optionally
             % a specific product ID). Defaults to OwnTech's VID. Reads
@@ -527,29 +559,9 @@ classdef ThingSetTools < handle
                         "Children", obj.discoverNode(childPath));
                 else
                     tree.(fieldName) = struct( ...
-                        "Type", obj.classifyLeaf(name), ...
+                        "Type", ThingSetTools.classifyLeaf(name, childPath), ...
                         "Path", childPath);
                 end
-            end
-        end
-
-        function kind = classifyLeaf(~, name)
-            chars = char(name);
-            if isempty(chars)
-                kind = "unknown";
-                return
-            end
-            switch chars(1)
-                case 'r'
-                    kind = "read-only";
-                case 'w'
-                    kind = "writable";
-                case 's'
-                    kind = "writable-setting";
-                case 'x'
-                    kind = "executable";
-                otherwise
-                    kind = "informational";
             end
         end
 
