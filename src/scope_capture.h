@@ -52,5 +52,11 @@ extern uint8_t scope_last_error;
 void scope_capture_init(void);
 void scope_capture_process(void);
 void scope_config_cb(enum thingset_callback_reason reason);
+bool scope_capture_begin_stream(void);
+void scope_capture_end_stream(bool success);
+const uint8_t *scope_capture_buffer(void);
+uint16_t scope_capture_buffer_size(void);
+const char *scope_capture_channel_name(uint16_t index);
+const char *scope_capture_state_name(void);
 
 #endif /* SCOPE_CAPTURE_H_ */
