@@ -1,5 +1,55 @@
 # Extend Python and MATLAB ThingSet Clients
 
+## Session Handoff (2026-07-31)
+
+Read this section first when resuming.
+
+**Working tree is clean.** Last two commits are `5d6e5ae` (`thingset: fix
+frequency callback to use shield.power and drop dead max check`) and
+`7317278` (`thingset: back Converter metadata with spin.metaData instead
+of raw NVS`) — both from this session, nothing left staged or unstaged.
+
+**What changed this session, in order:**
+
+1. Commit `7317278` — reworked `/Converter` metadata (`wSerialNumber`,
+   `wBoardVersion`) to persist through the core's new `spin.metaData`
+   (`MetaDataAPI`) instead of an application-owned raw NVS blob that
+   collided with it. Dropped `wBoardName`/`wFirmwareVersion`. Updated the
+   Python/MATLAB test-bench tooling and `src/README.md` to match. Details
+   and rationale: "Metadata Rework Update (2026-07-31)" under
+   [Firmware and Metadata](#firmware-and-metadata).
+2. Commit `5d6e5ae` — fixed `conf_freq_cb` in `thingset_callbacks.cpp`:
+   it now calls `shield.power.setFrequency()`/`getFrequencyMin()` instead
+   of `spin.pwm.*` directly, and no longer checks a permanently-zero
+   upper bound (`spin.pwm.getFrequencyMax()` never gets populated by the
+   HRTIM driver, and no layer defines a real maximum). This was the
+   "valid changes such as 100 kHz are restored" bug tracked in the
+   Functional Coverage table. Details: "Switching Frequency Fix Update
+   (2026-07-31)" under the same section.
+
+**Verified so far:** both changes compile cleanly against the real
+PlatformIO toolchain (`.pio/build/USB/compile_commands.json`); the
+metadata rework additionally passes 23/23 Python `unittest` and 19/19
+MATLAB `matlab.unittest` cases. **Neither change has been tested live on
+real hardware yet** — that's the immediate next step.
+
+**Next actions, in order:**
+
+1. Live-verify on TWIST hardware (`5843500300470047`, see
+   [Hardware and Test Acceptance](#hardware-and-test-acceptance) for the
+   identity-pinning rules): write `/Converter/wSerialNumber` (exactly 13
+   ASCII chars) and `/Converter/wBoardVersion` (e.g. `"1.4.2"`), reset,
+   confirm both persist; then write `/Config/Frequency_Hz` to a value
+   such as `100000` in `POWER_OFF` and confirm it is now accepted and the
+   PWM frequency actually changes (previously always silently rejected).
+2. Remaining open items, unchanged by this session: item 2 in the
+   priority-order list below (`PowerAPI::disconnectDriver()` bug), a real
+   frequency upper bound (flagged as a follow-up in the Switching
+   Frequency Fix Update — `hrtim_change_frequency()` itself has no
+   ceiling either), MATLAB's scope-download default timeout, the
+   RS485/CAN/sync/analog diagnostics decision, and Ownverter Leg 3/V3/I3
+   parity.
+
 ## Summary
 
 Add persistent writable converter metadata, matched Python/MATLAB
@@ -34,7 +84,7 @@ compatible.
 | Reference and tracking variable | `_r_<channel>_<value>` selects `V1`, `V2`, `VH`, `I1`, `I2`, or `IH`; Ownverter also adds `V3` and `I3` | `/Config/LegN/wReferenceValue` and `wTrackingVar` support the six TWIST channels | Channel-name validation and readback verification | **Present for TWIST; missing for Ownverter V3/I3** |
 | Phase shift | `_p_` validates against legacy minimum/maximum values and applies immediately | `/Config/LegN/wPhaseShift` validates `-360` to `360` and applies immediately | Same range enforced by both wrappers | **Present** |
 | Rising and falling dead time | `_x_` and `_z_` validate against legacy minimum/maximum values and apply immediately | `/Config/LegN/wDeadTimeRising_ns` and `wDeadTimeFalling_ns` apply immediately | Both wrappers validate only the `uint16` range | **Partial** — setting is present, but hardware-specific minimum/maximum validation is not |
-| Switching frequency | `_f_` checks the HRTIM minimum and calls the low-level PWM setter | `/Config/Frequency_Hz` and wrapper methods exist | `set_frequency`/`setFrequency` writes and verifies readback | **Partial / defective** — the callback still compares against an uninitialized zero maximum and bypasses the rebased `shield.power.setFrequency()` bookkeeping, so valid changes such as 100 kHz are restored |
+| Switching frequency | `_f_` checks the HRTIM minimum and calls the low-level PWM setter | `/Config/Frequency_Hz` calls `shield.power.setFrequency()`/`getFrequencyMin()`; wrapper methods exist | `set_frequency`/`setFrequency` writes and verifies readback | **Fixed 2026-07-31** — see Switching Frequency Fix Update below; upper-bound validation remains a follow-up (no working max-frequency source exists anywhere in the core) |
 | Sensor calibration | `calibrationHandler()` sets gain/offset, stores them, retrieves them, and prints persistence status | `/Calibration/<channel>/{wGain,wOffset,wStore}` sets values and performs store/retrieve | `set_calibration`/`setCalibration` and read methods | **Partial** — calibration and persistence are present, but firmware does not expose NVS store/retrieve success or restore values on persistence failure |
 | Power-off configuration frame | `frame_POWER_OFF()` prints factory-test flags and every leg's state, duty, reference, and tracking selection in one line | `/Config`, `/Config/LegN`, and `/Measurements` provide typed on-demand reads | Generic reads plus `read_leg`/`readLeg` | **Partial / replaced** — converter configuration is available, but there is no single legacy frame and no RS485/sync/analog/CAN result block |
 | Power-on telemetry frame | `frame_POWER_ON()` prints duty, voltages, currents, peaks, temperatures, high-side values, and factory-test fields | `/Measurements` exposes V1/V2/VH, I1/I2/IH, both temperatures, V1/V2 peaks, and both duty readbacks | `read_measurements`/`readMeasurements` | **Partial / replaced** — TWIST converter telemetry is present; the diagnostic tail and optional Leg 3 telemetry are missing |
@@ -45,7 +95,7 @@ compatible.
 | RS485/CAN/sync/analog master verification | `master_reception_function()` evaluates the returned fields and latches `RS485_success`, `Sync_success`, `Analog_success`, and `Can_success` | No application state, callback, or ThingSet object implements this diagnostic workflow | No wrapper method | **Missing** |
 | Conditional Ownverter support | Compile-time Leg 3, V3/I3 tracking, V3/I3/temperature/peak telemetry | `POWER_LEG_COUNT` is 2 and `CALIBRATION_CHANNEL_COUNT` is 6; object IDs are explicitly defined for two legs | Both wrappers reject Leg 3 and V3/I3 | **Missing** |
 | Runtime PID sensitivity tuning | Handler tables and PID parameter setters are commented out in `old4` | Current PID parameters remain compiled constants | No wrapper method | **Not an active `old4` baseline feature**; still missing if the commented experiment is revived |
-| Converter metadata | No equivalent in `comm_protocol.cpp` | Persistent `/Converter` board name, board version, serial number, and firmware version | Read/write metadata methods with validation | **Added in current implementation** |
+| Converter metadata | No equivalent in `comm_protocol.cpp` | Persistent `/Converter` board version and serial number, backed by the core's `spin.metaData` (`MetaDataAPI`) instead of an application-owned raw NVS blob | Read/write metadata methods with validation | **Added in current implementation; reworked 2026-07-31 to use `spin.metaData` (see Metadata Rework Update below)** |
 | Self-description and verified writes | Fixed parser and positional frames | ThingSet discovery, typed objects, access metadata, status responses, and post-write callbacks | Both clients discover objects and wrappers read back every safety-relevant write | **Added in current implementation** |
 | Failure-safe client sequencing | Host was responsible for ordering legacy commands | Firmware separates global mode from per-leg enable; wrappers request `POWER_OFF`, configure one leg, then request `POWER_ON`, with cleanup on failure | Implemented equivalently in Python and MATLAB | **Added in current implementation** |
 
@@ -57,8 +107,10 @@ workflow.
 
 If full `old4` parity is required, the priority order is:
 
-1. Correct frequency validation and route accepted writes through
-   `shield.power.setFrequency()`.
+1. ~~Correct frequency validation and route accepted writes through
+   `shield.power.setFrequency()`.~~ Done 2026-07-31 (see Switching Frequency
+   Fix Update in the Firmware and Metadata section) — the write path is
+   fixed; a real upper-bound source is still needed.
 2. Correct `PowerAPI::disconnectDriver()` and verify physical driver-off
    readback or behavior.
 3. Live scope acceptance is complete (2026-07-30, commits `73b66c4`,
@@ -81,22 +133,108 @@ If full `old4` parity is required, the priority order is:
 
 - Add an application-owned `/Converter` group, avoiding the CAN module's
   existing read-only `/Device` registration.
-- Register four `THINGSET_ANY_RW` strings:
-  - `/Converter/wBoardName`
+- Register two `THINGSET_ANY_RW` strings:
   - `/Converter/wBoardVersion`
   - `/Converter/wSerialNumber`
-  - `/Converter/wFirmwareVersion`
-- Store them in `converter_metadata_t`, with capacities of 24, 16, 48, and 32
-  bytes. Defaults are the devicetree shield name/version (`TWIST`, `v1.4.2`),
-  `"UNSET"`, and `"1.0.0"`.
-- Add `converter_metadata_cb` using PRE_WRITE/POST_WRITE snapshots. Accept
-  non-empty printable strings and restore the previous complete structure on
-  invalid input or persistence failure.
-- Persist the complete structure under application-owned NVS key `0x0401`.
-  Load it during startup, retaining compiled defaults when stored data is
-  absent or invalid.
+- Store them in `converter_metadata_t`. `wBoardVersion` is a
+  `MAJOR.MINOR.REV` string (capacity 16 bytes, optionally prefixed `v` to
+  match the devicetree convention); `wSerialNumber` is a null-terminated
+  mirror of the fixed 13-byte `SHIELD_SERIAL_LEN` field (capacity 14 bytes).
+  Defaults are the devicetree shield version (`v1.4.2`) and `"UNSET"`.
+- Add `converter_metadata_cb` using PRE_WRITE/POST_WRITE snapshots. Each
+  field is validated and persisted independently: `wSerialNumber` must be
+  exactly 13 printable-ASCII characters; `wBoardVersion` must parse as
+  `[v]MAJOR.MINOR.REV` with each component 0-255. A field that fails
+  validation, or whose underlying store fails, is restored to its previous
+  value without touching the other field.
+- Persist each field through the core's `spin.metaData` (`MetaDataAPI`):
+  `setShieldSerialNumber()`/`getShieldSerialNumber()` and
+  `setShieldVersion()`/`getShieldVersion()`. Load them during startup,
+  retaining compiled defaults when nothing is stored yet.
 - Document `/Device` as framework-owned/read-only and `/Converter` as
   application-owned/writable/persistent.
+
+### Metadata Rework Update (2026-07-31)
+
+The original design above (four fields — `wBoardName`, `wBoardVersion`,
+`wSerialNumber`, `wFirmwareVersion` — persisted as one 120-byte
+`converter_metadata_t` blob at raw application NVS key `0x0401`) was
+implemented as planned, but predated a core rebase that added `MetaDataAPI`
+(`spin.metaData`), the core's own board/shield identity storage API
+(documented in `docs/spin_metaDataAPI.md`). That core API allocates its own
+NVS keys under the `BOARD_METADATA` category — and `META_SHIELD_SERIAL`
+resolves to the exact same key, `0x0401`, that this application's raw blob
+was already using. Left as-is, the two would have silently corrupted each
+other's flash storage the first time both were written.
+
+Commit `7317278` (`thingset: back Converter metadata with spin.metaData
+instead of raw NVS`) reworked `thingset_callbacks.cpp` and
+`user_data_objects.{h,cpp}` to close this:
+
+- `wSerialNumber` now round-trips through
+  `spin.metaData.setShieldSerialNumber()`/`getShieldSerialNumber()`, which
+  requires exactly `SHIELD_SERIAL_LEN` (13) bytes — down from the previous
+  47-character free-form field.
+- `wBoardVersion` remains a single string field for wire compatibility, but
+  is now parsed into major/minor/rev and stored via
+  `spin.metaData.setShieldVersion()`/`getShieldVersion()`.
+- `wBoardName` and `wFirmwareVersion` were dropped: `wFirmwareVersion`
+  duplicated the framework's existing read-only `Device/cFirmwareVersion`,
+  and `wBoardName` has no equivalent field in the new hardware-identity
+  model (the core's fixed fields are serial numbers, hardware versions,
+  passwords, and five generic 16-byte slots — none of which fit a free-form
+  board name any better than what was already redundant).
+- The Python (`power_test_bench.py`) and MATLAB (`PowerTestBench.m`) test-bench
+  wrappers, their fake-client tests, and this repository's `src/README.md`
+  were all updated to match: two metadata fields instead of four, and an
+  exact 13-character requirement for `serial_number`/`serialNumber`.
+- Verified: `thingset_callbacks.cpp`/`user_data_objects.cpp` compile cleanly
+  against the real toolchain; 23/23 Python `unittest` cases and 19/19 MATLAB
+  `matlab.unittest` cases pass. Not yet re-verified live against hardware
+  under this reworked schema (the original metadata hardware acceptance
+  below predates this rework).
+
+### Switching Frequency Fix Update (2026-07-31)
+
+The "Partial / defective" frequency behavior above had two independent
+causes, both traced in `thingset_callbacks.cpp`'s `conf_freq_cb`:
+
+- **Bookkeeping bypass:** the callback called `spin.pwm.setFrequency()`
+  directly instead of `shield.power.setFrequency()`, so `PowerAPI`'s own
+  `timer_frequency` and per-leg `duty_min_user`/`duty_max_user` bounds
+  never updated after a frequency change.
+- **Always-rejecting upper bound:** the callback compared the requested
+  frequency against `spin.pwm.getFrequencyMax(PWMA)`, which reads
+  `tu_channel[PWMA]->pwm_conf.max_frequency` — a field the HRTIM driver
+  (`zephyr/modules/owntech_hrtim_driver/zephyr/src/hrtim.c`) never
+  assigns anywhere (only `min_frequency` is populated, from the devicetree
+  `min-frequency` property). The field is permanently `0`, so any positive
+  requested frequency failed the `switching_frequency_hz > max_frequency`
+  check and was restored — explaining why even valid changes such as
+  100 kHz were rejected.
+
+There is no working max-frequency source to fall back to: `PowerAPI` has
+no `getFrequencyMax()`, and the `power-leg` devicetree binding
+(`zephyr/dts/bindings/power-leg.yaml`) only declares `default-frequency`
+(required) and `min-frequency` (optional) — no maximum concept exists at
+any layer. Every current shield overlay sets `default-frequency = 200000`;
+only Twist v1.4.1/v1.4.2 set a distinct `min-frequency = 50000` (other
+boards set `min-frequency` equal to `default-frequency`, i.e. effectively
+fixed).
+
+Given no authoritative ceiling exists to enforce, `conf_freq_cb` was
+changed to call `shield.power.setFrequency()`/`shield.power.getFrequencyMin()`
+and validate only the lower bound, removing the broken upper-bound check
+rather than fabricating an unenforced one. **Follow-up (not yet done):** a
+real upper bound is still meaningful for safety — `hrtim_change_frequency()`
+has no ceiling either, and an unreasonably high requested frequency could
+drive the computed HRTIM period to a degenerate value. Adding a proper
+`max-frequency` devicetree property plus `PowerAPI::getFrequencyMax()` (or
+at minimum an application-level constant, e.g. 200 kHz matching every
+current overlay's `default-frequency`) remains open.
+
+Verified: `thingset_callbacks.cpp` compiles cleanly against the real
+toolchain. Not yet verified live against hardware.
 
 ## Client Interfaces
 
