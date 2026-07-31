@@ -7,7 +7,7 @@
 #include "user_data_objects.h"
 
 #include <stddef.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ShieldAPI.h"
@@ -39,7 +39,13 @@ static bool raw_bytes_are_printable_ascii(const char *value, size_t length)
 
 /* Parses a "[v]MAJOR.MINOR.REV" string (the optional leading 'v'/'V' matches
  * the devicetree shield-version convention, e.g. "v1.4.2") into three
- * uint8_t components suitable for spin.metaData.setShieldVersion(). */
+ * uint8_t components suitable for spin.metaData.setShieldVersion().
+ *
+ * Hand-rolled instead of sscanf(): on this toolchain, even the "integer-only"
+ * scanf variants route through iswspace()/iswspace_l(), pulling in ~27 KB of
+ * Unicode category/JIS-conversion tables (libc_a-categories.o,
+ * libc_a-jp2uc.o) that this firmware has no other reason to need. strtoul()
+ * has no such dependency (only _ctype_/_impure_ptr). */
 static bool parse_version_string(const char *value, uint8_t &major,
                                   uint8_t &minor, uint8_t &rev)
 {
@@ -47,22 +53,69 @@ static bool parse_version_string(const char *value, uint8_t &major,
         ++value;
     }
 
-    unsigned int major_value, minor_value, rev_value;
-    int consumed = 0;
-    if (sscanf(value, "%u.%u.%u%n", &major_value, &minor_value, &rev_value,
-               &consumed) != 3) {
+    unsigned long components[3];
+    for (int i = 0; i < 3; ++i) {
+        if (*value < '0' || *value > '9') {
+            return false;
+        }
+
+        char *end = nullptr;
+        components[i] = strtoul(value, &end, 10);
+        if (components[i] > UINT8_MAX) {
+            return false;
+        }
+
+        value = end;
+        if (i < 2) {
+            if (*value != '.') {
+                return false;
+            }
+            ++value;
+        }
+    }
+
+    if (*value != '\0') {
         return false;
     }
 
-    if (value[consumed] != '\0' || major_value > UINT8_MAX ||
-        minor_value > UINT8_MAX || rev_value > UINT8_MAX) {
-        return false;
-    }
-
-    major = static_cast<uint8_t>(major_value);
-    minor = static_cast<uint8_t>(minor_value);
-    rev   = static_cast<uint8_t>(rev_value);
+    major = static_cast<uint8_t>(components[0]);
+    minor = static_cast<uint8_t>(components[1]);
+    rev   = static_cast<uint8_t>(components[2]);
     return true;
+}
+
+/* Formats "major.minor.rev" without going through snprintf(): on this
+ * toolchain, snprintf() unconditionally routes through the float-capable
+ * _svfprintf_r backend (~7 KB) regardless of format string content, and
+ * even sniprintf() (the "integer-only" variant) still pulls in wide-char
+ * conversion support. major/minor/rev are uint8_t, so the result never
+ * exceeds "255.255.255" (11 chars) plus a null terminator. */
+static void format_version_string(char *buffer, size_t buffer_size,
+                                   uint8_t major, uint8_t minor, uint8_t rev)
+{
+    const uint8_t components[3] = {major, minor, rev};
+    size_t pos = 0;
+
+    for (int i = 0; i < 3; ++i) {
+        char digits[3];
+        size_t digit_count = 0;
+        uint8_t value = components[i];
+
+        do {
+            digits[digit_count++] = static_cast<char>('0' + (value % 10));
+            value /= 10;
+        } while (value != 0);
+
+        while (digit_count > 0 && pos < buffer_size - 1) {
+            buffer[pos++] = digits[--digit_count];
+        }
+
+        if (i < 2 && pos < buffer_size - 1) {
+            buffer[pos++] = '.';
+        }
+    }
+
+    buffer[pos] = '\0';
 }
 
 void load_converter_metadata(void)
@@ -77,9 +130,9 @@ void load_converter_metadata(void)
 
     uint8_t major, minor, rev;
     if (spin.metaData.getShieldVersion(&major, &minor, &rev) == 0) {
-        snprintf(converter_metadata.board_version,
-                 sizeof(converter_metadata.board_version), "%u.%u.%u", major,
-                 minor, rev);
+        format_version_string(converter_metadata.board_version,
+                               sizeof(converter_metadata.board_version),
+                               major, minor, rev);
     }
 }
 
