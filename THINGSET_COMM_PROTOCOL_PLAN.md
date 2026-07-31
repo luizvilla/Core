@@ -4,10 +4,12 @@
 
 Read this section first when resuming.
 
-**Working tree is clean.** Last two commits are `5d6e5ae` (`thingset: fix
-frequency callback to use shield.power and drop dead max check`) and
-`7317278` (`thingset: back Converter metadata with spin.metaData instead
-of raw NVS`) — both from this session, nothing left staged or unstaged.
+**Working tree is clean.** Last three commits are `163b014` (`thingset:
+avoid sscanf/snprintf to fix flash overflow (102% -> 80%)`), `5d6e5ae`
+(`thingset: fix frequency callback to use shield.power and drop dead max
+check`), and `7317278` (`thingset: back Converter metadata with
+spin.metaData instead of raw NVS`) — all from this session, nothing left
+staged or unstaged.
 
 **What changed this session, in order:**
 
@@ -26,12 +28,26 @@ of raw NVS`) — both from this session, nothing left staged or unstaged.
    "valid changes such as 100 kHz are restored" bug tracked in the
    Functional Coverage table. Details: "Switching Frequency Fix Update
    (2026-07-31)" under the same section.
+3. Commit `163b014` — a real `pio run` build after commit 2 overflowed
+   FLASH at 102.00% (4,556 bytes over a 222 KB partition). Traced via
+   the actual linker map to two calls added in commit 1:
+   `parse_version_string()`'s `sscanf()` and `load_converter_metadata()`'s
+   `snprintf()`, both used only for a trivial "MAJOR.MINOR.REV" format.
+   On this toolchain, `sscanf()` drags in ~27 KB of newlib Unicode/JIS
+   locale tables via `iswspace()`, and `snprintf()` forces the ~7 KB
+   float-capable printf backend — neither needed anywhere else in the
+   firmware. Replaced both with hand-rolled `strtoul()`-based parse/format
+   helpers. **Confirmed via a real rebuild: 102% -> 80% flash.** Details:
+   "Flash Overflow Fix Update (2026-07-31)" under
+   [Firmware and Metadata](#firmware-and-metadata).
 
-**Verified so far:** both changes compile cleanly against the real
-PlatformIO toolchain (`.pio/build/USB/compile_commands.json`); the
-metadata rework additionally passes 23/23 Python `unittest` and 19/19
-MATLAB `matlab.unittest` cases. **Neither change has been tested live on
-real hardware yet** — that's the immediate next step.
+**Verified so far:** all three changes compile cleanly against the real
+PlatformIO toolchain; the metadata rework additionally passes 23/23
+Python `unittest` and 19/19 MATLAB `matlab.unittest` cases; the flash fix
+is confirmed by a real hardware-target build (102% -> 80%). **The
+metadata and frequency changes' functional behavior has not been
+exercised live on real hardware yet** (only the build itself was
+verified) — that's the immediate next step.
 
 **Next actions, in order:**
 
@@ -235,6 +251,58 @@ current overlay's `default-frequency`) remains open.
 
 Verified: `thingset_callbacks.cpp` compiles cleanly against the real
 toolchain. Not yet verified live against hardware.
+
+### Flash Overflow Fix Update (2026-07-31)
+
+The Metadata Rework above (commit `7317278`) added two small formatting
+helper calls in `thingset_callbacks.cpp`: `parse_version_string()` used
+`sscanf(value, "%u.%u.%u%n", ...)`, and `load_converter_metadata()` used
+`snprintf(..., "%u.%u.%u", ...)` — both just to convert a
+"MAJOR.MINOR.REV" string to/from three `uint8_t` values, no floats
+involved. A subsequent real `pio run` build failed:
+
+```text
+region `FLASH' overflowed by 4556 bytes
+FLASH:  231884 B  222 KB  102.00%
+RAM:     57216 B  127 KB   44.00%
+```
+
+The app partition (`slot0_partition` in `zephyr/boards/owntech/spin/spin.dts`)
+is a fixed 0x37800 = 227,328 bytes (~222 KiB), one of two equal slots in a
+512 KiB STM32G474 flash. Tracing the real `zephyr_final.map` (not just
+archive sizes, which over-count by including unlinked members) with `nm`
+found the actual cause, entirely attributable to those two calls:
+
+- `sscanf()` → `svfscanf` → `iswspace()`/`iswspace_l()` → pulls in
+  `libc_a-categories.o` + `libc_a-jp2uc.o` (~27 KB of newlib Unicode
+  category / JIS-conversion tables). Confirmed via `nm -u` that even this
+  toolchain's "integer-only" `siscanf()` still depends on `iswspace()` —
+  there was no lighter scanf-family option available.
+- `snprintf()` unconditionally routes through the float-capable
+  `_svfprintf_r` backend (~7 KB) regardless of format string content;
+  even `sniprintf()` (the "integer-only" variant) still pulled in
+  wide-char conversion glue (`_wcrtomb_r`, `_localeconv_r`) plus
+  `_malloc_r`/`_free_r` — undesirable in a print helper regardless.
+- `strtoul()`, by contrast, was confirmed via `nm -u` to depend on
+  nothing but `_ctype_`/`_impure_ptr` (already needed everywhere).
+
+Both calls were replaced with hand-rolled helpers: `parse_version_string()`
+now parses with `strtoul()`, and a new `format_version_string()` formats
+by manual digit-writing — neither touches newlib's formatted I/O family
+at all. **Confirmed via a real rebuild on the actual target: FLASH usage
+dropped from the 4,556-byte overflow (102.00%) to 80%,** more than the
+~43 KB estimated from the traced symbol chain, with no functional change
+to the ThingSet wire format.
+
+Also checked (via `nm -u` and a repo-wide grep for the same function
+family) whether this was an isolated mistake or a pattern: one other call
+exists, `Sensors.cpp`'s `atof()` in `owntech_shield_api`, but it costs
+nothing extra — the same `strtod`/`dtoa`/`mprec` machinery it needs is
+*already* forced into the link independently by ThingSet's own
+`thingset_txt.c.o` (which calls `strtod()` directly to parse floats off
+the wire), so removing it would recover 0 bytes. No other `scanf`/`printf`
+family, float-conversion, or locale/wide-char call exists anywhere in
+`src/` or the `owntech_*` modules.
 
 ## Client Interfaces
 
