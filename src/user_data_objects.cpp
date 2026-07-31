@@ -50,17 +50,11 @@ power_leg_t power_legs[POWER_LEG_COUNT] = {
 };
 
 converter_metadata_t converter_metadata = {
-    DT_PROP(DT_NODELABEL(pcb), shield_name),
     DT_PROP(DT_NODELABEL(pcb), shield_version),
     "UNSET",
-    "1.0.0",
 };
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_CONVERTER, "Converter", &converter_metadata_cb);
-THINGSET_ADD_ITEM_STRING(ID_CONVERTER, ID_CONVERTER_BOARD_NAME, "wBoardName",
-                         converter_metadata.board_name,
-                         CONVERTER_BOARD_NAME_SIZE,
-                         THINGSET_ANY_RW, SUBSET_SER);
 THINGSET_ADD_ITEM_STRING(ID_CONVERTER, ID_CONVERTER_BOARD_VERSION,
                          "wBoardVersion", converter_metadata.board_version,
                          CONVERTER_BOARD_VERSION_SIZE,
@@ -68,10 +62,6 @@ THINGSET_ADD_ITEM_STRING(ID_CONVERTER, ID_CONVERTER_BOARD_VERSION,
 THINGSET_ADD_ITEM_STRING(ID_CONVERTER, ID_CONVERTER_SERIAL_NUMBER,
                          "wSerialNumber", converter_metadata.serial_number,
                          CONVERTER_SERIAL_NUMBER_SIZE,
-                         THINGSET_ANY_RW, SUBSET_SER);
-THINGSET_ADD_ITEM_STRING(ID_CONVERTER, ID_CONVERTER_FIRMWARE_VERSION,
-                         "wFirmwareVersion", converter_metadata.firmware_version,
-                         CONVERTER_FIRMWARE_VERSION_SIZE,
                          THINGSET_ANY_RW, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_DEBUG, "Debug", THINGSET_NO_CALLBACK);

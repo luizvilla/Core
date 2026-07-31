@@ -217,25 +217,24 @@ classdef PowerTestBench < handle
                 settings (1,1) struct
             end
             allowed = [ ...
-                "boardName", "boardVersion", ...
-                "serialNumber", "firmwareVersion"];
+                "boardVersion", "serialNumber"];
             PowerTestBench.rejectUnknownFields( ...
                 settings, allowed, "metadata field");
 
+            % source, target, minimumLength, maximumLength
             mappings = {
-                "boardName", "wBoardName", 23;
-                "boardVersion", "wBoardVersion", 15;
-                "serialNumber", "wSerialNumber", 47;
-                "firmwareVersion", "wFirmwareVersion", 31
+                "boardVersion", "wBoardVersion", 1, 15;
+                "serialNumber", "wSerialNumber", 13, 13
             };
             values = struct();
             for i = 1:size(mappings, 1)
                 source = mappings{i, 1};
                 target = mappings{i, 2};
-                maximumLength = mappings{i, 3};
+                minimumLength = mappings{i, 3};
+                maximumLength = mappings{i, 4};
                 if isfield(settings, source)
                     values.(target) = PowerTestBench.validateMetadata( ...
-                        source, settings.(source), maximumLength);
+                        source, settings.(source), minimumLength, maximumLength);
                 end
             end
             if isempty(fieldnames(values))
@@ -734,17 +733,22 @@ classdef PowerTestBench < handle
             end
         end
 
-        function value = validateMetadata(name, value, maximumLength)
+        function value = validateMetadata(name, value, minimumLength, maximumLength)
             if ~(ischar(value) || (isstring(value) && isscalar(value)))
                 error("PowerTestBench:validation", "%s must be text", name);
             end
             value = char(string(value));
             codes = double(value);
-            if isempty(value) || numel(value) > maximumLength || ...
+            if numel(value) < minimumLength || numel(value) > maximumLength || ...
                     any(codes < 32 | codes > 126)
+                if minimumLength == maximumLength
+                    error("PowerTestBench:validation", ...
+                        "%s must be exactly %d printable ASCII characters", ...
+                        name, minimumLength);
+                end
                 error("PowerTestBench:validation", ...
-                    "%s must contain 1 to %d printable ASCII characters", ...
-                    name, maximumLength);
+                    "%s must contain %d to %d printable ASCII characters", ...
+                    name, minimumLength, maximumLength);
             end
         end
 
@@ -773,8 +777,7 @@ classdef PowerTestBench < handle
 
         function metadata = metadataFromReadback(raw)
             required = [ ...
-                "wBoardName", "wBoardVersion", ...
-                "wSerialNumber", "wFirmwareVersion"];
+                "wBoardVersion", "wSerialNumber"];
             missing = required(~isfield(raw, cellstr(required)));
             if ~isempty(missing)
                 error("PowerTestBench:readback", ...
@@ -782,10 +785,8 @@ classdef PowerTestBench < handle
                     strjoin(missing, ", "));
             end
             metadata = struct( ...
-                "boardName", string(raw.wBoardName), ...
                 "boardVersion", string(raw.wBoardVersion), ...
-                "serialNumber", string(raw.wSerialNumber), ...
-                "firmwareVersion", string(raw.wFirmwareVersion));
+                "serialNumber", string(raw.wSerialNumber));
         end
     end
 end

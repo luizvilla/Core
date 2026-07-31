@@ -53,10 +53,8 @@ class FakeThingSetClient:
             "Calibration/I2": copy.deepcopy(calibration),
             "Calibration/IH": copy.deepcopy(calibration),
             "Converter": {
-                "wBoardName": "TWIST",
-                "wBoardVersion": "v1.4.2",
+                "wBoardVersion": "1.4.2",
                 "wSerialNumber": "UNSET",
-                "wFirmwareVersion": "1.0.0",
             },
             "Debug/Scope": {
                 "wArm": False,
@@ -186,18 +184,19 @@ class PowerTestBenchTests(unittest.TestCase):
 
     def test_metadata_uses_friendly_names_and_validates_limits(self):
         metadata = self.bench.set_metadata(
-            board_name="OWNVERTER", serial_number="SN-123"
+            board_version="1.4.2", serial_number="OWNVERTER0001"
         )
-        self.assertEqual(metadata["board_name"], "OWNVERTER")
-        self.assertEqual(metadata["serial_number"], "SN-123")
+        self.assertEqual(metadata["board_version"], "1.4.2")
+        self.assertEqual(metadata["serial_number"], "OWNVERTER0001")
         self.assertEqual(self.bench.read_metadata(), metadata)
 
         with self.assertRaises(ValueError):
             self.bench.set_metadata(board_version="")
         with self.assertRaises(ValueError):
-            self.bench.set_metadata(firmware_version="bad\nversion")
+            self.bench.set_metadata(board_version="bad\nversion")
         with self.assertRaises(ValueError):
-            self.bench.set_metadata(board_name="x" * 24)
+            # serial_number must be exactly 13 characters
+            self.bench.set_metadata(serial_number="TOO_SHORT")
 
     def test_measurement_and_leg_reads(self):
         self.assertEqual(self.bench.read_measurements()["rV1Low_V"], 12.0)

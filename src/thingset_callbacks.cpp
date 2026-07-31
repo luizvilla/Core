@@ -7,53 +7,79 @@
 #include "user_data_objects.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "ShieldAPI.h"
 #include "SpinAPI.h"
-#include "nvs_storage.h"
 
-static constexpr uint16_t CONVERTER_METADATA_NVS_ID = 0x0401;
+/* converter_metadata's serial_number is a null-terminated mirror of
+ * spin.metaData's fixed-length, non-null-terminated SHIELD_SERIAL_LEN
+ * buffer; keep the two in sync. */
+static_assert(CONVERTER_SERIAL_NUMBER_SIZE == SHIELD_SERIAL_LEN + 1,
+              "converter_metadata_t.serial_number size must match "
+              "MetaDataAPI's SHIELD_SERIAL_LEN");
+
 static converter_metadata_t previous_converter_metadata;
 
-static_assert(sizeof(converter_metadata_t) == 120);
-static_assert(sizeof(converter_metadata_t) <= 127,
-              "NVS storage API returns the byte count as int8_t");
-
-static bool metadata_string_is_valid(const char *value, size_t capacity)
+static bool raw_bytes_are_printable_ascii(const char *value, size_t length)
 {
-    size_t length = 0;
-    while (length < capacity && value[length] != '\0') {
-        const unsigned char character = static_cast<unsigned char>(value[length]);
+    if (length == 0) {
+        return false;
+    }
+
+    for (size_t i = 0; i < length; ++i) {
+        const unsigned char character = static_cast<unsigned char>(value[i]);
         if (character < 0x20 || character > 0x7E) {
             return false;
         }
-        ++length;
     }
-    return length > 0 && length < capacity;
+    return true;
 }
 
-static bool converter_metadata_is_valid(const converter_metadata_t &metadata)
+/* Parses a "[v]MAJOR.MINOR.REV" string (the optional leading 'v'/'V' matches
+ * the devicetree shield-version convention, e.g. "v1.4.2") into three
+ * uint8_t components suitable for spin.metaData.setShieldVersion(). */
+static bool parse_version_string(const char *value, uint8_t &major,
+                                  uint8_t &minor, uint8_t &rev)
 {
-    return metadata_string_is_valid(metadata.board_name,
-                                    sizeof(metadata.board_name)) &&
-           metadata_string_is_valid(metadata.board_version,
-                                    sizeof(metadata.board_version)) &&
-           metadata_string_is_valid(metadata.serial_number,
-                                    sizeof(metadata.serial_number)) &&
-           metadata_string_is_valid(metadata.firmware_version,
-                                    sizeof(metadata.firmware_version));
+    if (*value == 'v' || *value == 'V') {
+        ++value;
+    }
+
+    unsigned int major_value, minor_value, rev_value;
+    int consumed = 0;
+    if (sscanf(value, "%u.%u.%u%n", &major_value, &minor_value, &rev_value,
+               &consumed) != 3) {
+        return false;
+    }
+
+    if (value[consumed] != '\0' || major_value > UINT8_MAX ||
+        minor_value > UINT8_MAX || rev_value > UINT8_MAX) {
+        return false;
+    }
+
+    major = static_cast<uint8_t>(major_value);
+    minor = static_cast<uint8_t>(minor_value);
+    rev   = static_cast<uint8_t>(rev_value);
+    return true;
 }
 
 void load_converter_metadata(void)
 {
-    converter_metadata_t stored_metadata;
-    const int read_size = nvs_storage_retrieve_data(
-        CONVERTER_METADATA_NVS_ID, &stored_metadata, sizeof(stored_metadata));
+    char serial_buffer[SHIELD_SERIAL_LEN];
+    if (spin.metaData.getShieldSerialNumber(serial_buffer,
+                                             sizeof(serial_buffer)) >= 0) {
+        memcpy(converter_metadata.serial_number, serial_buffer,
+               sizeof(serial_buffer));
+        converter_metadata.serial_number[SHIELD_SERIAL_LEN] = '\0';
+    }
 
-    if (read_size == sizeof(stored_metadata) &&
-        converter_metadata_is_valid(stored_metadata)) {
-        converter_metadata = stored_metadata;
+    uint8_t major, minor, rev;
+    if (spin.metaData.getShieldVersion(&major, &minor, &rev) == 0) {
+        snprintf(converter_metadata.board_version,
+                 sizeof(converter_metadata.board_version), "%u.%u.%u", major,
+                 minor, rev);
     }
 }
 
@@ -64,19 +90,41 @@ void converter_metadata_cb(enum thingset_callback_reason reason)
             previous_converter_metadata = converter_metadata;
             break;
 
-        case THINGSET_CALLBACK_POST_WRITE:
-            if (memcmp(&converter_metadata, &previous_converter_metadata,
-                       sizeof(converter_metadata)) == 0) {
-                break;
+        case THINGSET_CALLBACK_POST_WRITE: {
+            if (strncmp(converter_metadata.serial_number,
+                        previous_converter_metadata.serial_number,
+                        sizeof(converter_metadata.serial_number)) != 0) {
+                const size_t length = strnlen(
+                    converter_metadata.serial_number,
+                    sizeof(converter_metadata.serial_number));
+
+                if (length != SHIELD_SERIAL_LEN ||
+                    !raw_bytes_are_printable_ascii(
+                        converter_metadata.serial_number, length) ||
+                    spin.metaData.setShieldSerialNumber(
+                        converter_metadata.serial_number,
+                        static_cast<uint8_t>(length)) != 0) {
+                    memcpy(converter_metadata.serial_number,
+                           previous_converter_metadata.serial_number,
+                           sizeof(converter_metadata.serial_number));
+                }
             }
 
-            if (!converter_metadata_is_valid(converter_metadata) ||
-                nvs_storage_store_data(CONVERTER_METADATA_NVS_ID,
-                                       &converter_metadata,
-                                       sizeof(converter_metadata)) < 0) {
-                converter_metadata = previous_converter_metadata;
+            if (strncmp(converter_metadata.board_version,
+                        previous_converter_metadata.board_version,
+                        sizeof(converter_metadata.board_version)) != 0) {
+                uint8_t major, minor, rev;
+
+                if (!parse_version_string(converter_metadata.board_version,
+                                          major, minor, rev) ||
+                    spin.metaData.setShieldVersion(major, minor, rev) != 0) {
+                    memcpy(converter_metadata.board_version,
+                           previous_converter_metadata.board_version,
+                           sizeof(converter_metadata.board_version));
+                }
             }
             break;
+        }
 
         default:
             break;

@@ -30,7 +30,7 @@ class ThingSetAccessClassificationTests(unittest.TestCase):
     def test_prefix_convention_is_preserved(self):
         self.assertEqual(
             ThingSetTools._classify_leaf(
-                "wBoardName", "Converter/wBoardName"
+                "wBoardVersion", "Converter/wBoardVersion"
             ),
             "writable",
         )

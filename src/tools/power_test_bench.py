@@ -39,11 +39,10 @@ class PowerTestBench:
 
     _LEGS = {"1": 1, "LEG1": 1, "2": 2, "LEG2": 2}
     _CHANNELS = ("V1", "V2", "VH", "I1", "I2", "IH")
+    # public_name: (thingset_name, min_length, max_length)
     _METADATA_FIELDS = {
-        "board_name": ("wBoardName", 23),
-        "board_version": ("wBoardVersion", 15),
-        "serial_number": ("wSerialNumber", 47),
-        "firmware_version": ("wFirmwareVersion", 31),
+        "board_version": ("wBoardVersion", 1, 15),
+        "serial_number": ("wSerialNumber", 13, 13),
     }
 
     _SCOPE_STATES = (
@@ -338,7 +337,7 @@ class PowerTestBench:
             raise PowerTestBenchError("metadata readback is not a ThingSet object")
 
         result = {}
-        for public_name, (thingset_name, _) in self._METADATA_FIELDS.items():
+        for public_name, (thingset_name, _, _) in self._METADATA_FIELDS.items():
             if thingset_name not in value:
                 raise PowerTestBenchError(
                     f"Converter/{thingset_name} is missing from the readback"
@@ -347,12 +346,17 @@ class PowerTestBench:
         return result
 
     @staticmethod
-    def _validate_metadata_value(name, value, maximum_length):
+    def _validate_metadata_value(name, value, minimum_length, maximum_length):
         if not isinstance(value, str):
             raise ValueError(f"{name} must be a string")
-        if not value or len(value) > maximum_length:
+        if len(value) < minimum_length or len(value) > maximum_length:
+            if minimum_length == maximum_length:
+                raise ValueError(
+                    f"{name} must be exactly {minimum_length} ASCII characters"
+                )
             raise ValueError(
-                f"{name} must contain 1 to {maximum_length} ASCII characters"
+                f"{name} must contain {minimum_length} to {maximum_length} "
+                "ASCII characters"
             )
         if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
             raise ValueError(f"{name} must contain printable ASCII only")
@@ -361,26 +365,24 @@ class PowerTestBench:
     def set_metadata(
         self,
         *,
-        board_name=None,
         board_version=None,
         serial_number=None,
-        firmware_version=None,
     ):
         """Set one or more persistent converter identity fields."""
 
         supplied = {
-            "board_name": board_name,
             "board_version": board_version,
             "serial_number": serial_number,
-            "firmware_version": firmware_version,
         }
         values = {}
         for public_name, value in supplied.items():
             if value is None:
                 continue
-            thingset_name, maximum_length = self._METADATA_FIELDS[public_name]
+            thingset_name, minimum_length, maximum_length = self._METADATA_FIELDS[
+                public_name
+            ]
             values[thingset_name] = self._validate_metadata_value(
-                public_name, value, maximum_length
+                public_name, value, minimum_length, maximum_length
             )
         if not values:
             raise ValueError("at least one metadata field must be supplied")
@@ -388,7 +390,7 @@ class PowerTestBench:
         readback = self._write_and_verify("Converter", values)
         return {
             public_name: readback[thingset_name]
-            for public_name, (thingset_name, _) in self._METADATA_FIELDS.items()
+            for public_name, (thingset_name, _, _) in self._METADATA_FIELDS.items()
         }
 
     def read_scope_status(self):

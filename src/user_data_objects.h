@@ -59,19 +59,17 @@
 #define ID_CONFIG_LEG2_DT_FALL 0x80B
 
 #define ID_CONVERTER                  0x07
-#define ID_CONVERTER_BOARD_NAME       0x71
 #define ID_CONVERTER_BOARD_VERSION    0x72
 #define ID_CONVERTER_SERIAL_NUMBER    0x73
-#define ID_CONVERTER_FIRMWARE_VERSION 0x74
 
 #define SUBSET_SER (1U << 0)
 #define POWER_LEG_COUNT 2
 #define TRACKING_NAME_SIZE 8
 #define CALIBRATION_CHANNEL_COUNT 6
-#define CONVERTER_BOARD_NAME_SIZE 24
 #define CONVERTER_BOARD_VERSION_SIZE 16
-#define CONVERTER_SERIAL_NUMBER_SIZE 48
-#define CONVERTER_FIRMWARE_VERSION_SIZE 32
+/* Must hold SHIELD_SERIAL_LEN (13) raw bytes plus a null terminator; kept in
+ * sync with spin.metaData via a static_assert in thingset_callbacks.cpp. */
+#define CONVERTER_SERIAL_NUMBER_SIZE 14
 
 #define ID_CALIBRATION 0x09
 
@@ -177,10 +175,8 @@ typedef struct
 
 typedef struct
 {
-    char board_name[CONVERTER_BOARD_NAME_SIZE];
     char board_version[CONVERTER_BOARD_VERSION_SIZE];
     char serial_number[CONVERTER_SERIAL_NUMBER_SIZE];
-    char firmware_version[CONVERTER_FIRMWARE_VERSION_SIZE];
 } converter_metadata_t;
 
 extern const ModeDef modes[NUM_OF_MODES];

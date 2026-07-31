@@ -68,23 +68,27 @@ components, `user_data_objects.cpp`, and `thingset_callbacks.cpp`.
 
 ### Converter metadata
 
-`/Converter` is application-owned writable identity metadata:
+`/Converter` is application-owned writable identity metadata, backed by the
+Spin API's [MetaDataAPI](../docs/spin_metaDataAPI.md) (`spin.metaData`),
+which persists each field under its own NVS key:
 
-| Path | Maximum length | Compiled default |
-| --- | ---: | --- |
-| `/Converter/wBoardName` | 23 characters | Shield devicetree name (`TWIST`) |
-| `/Converter/wBoardVersion` | 15 characters | Shield devicetree version (`v1.4.2`) |
-| `/Converter/wSerialNumber` | 47 characters | `UNSET` |
-| `/Converter/wFirmwareVersion` | 31 characters | `1.0.0` |
+| Path | Format | Compiled default |
+| --- | --- | --- |
+| `/Converter/wBoardVersion` | `MAJOR.MINOR.REV` (optionally `vMAJOR.MINOR.REV`), each 0-255 | Shield devicetree version (`v1.4.2`) |
+| `/Converter/wSerialNumber` | Exactly 13 printable ASCII characters | `UNSET` |
 
-Values must be non-empty printable ASCII. A successful write persists the
-entire metadata record under application NVS key `0x0401`; it is restored
-during startup. Invalid data, an incompatible stored record, or an NVS write
-failure leaves the previous complete record in place.
+`wSerialNumber` is stored via `spin.metaData.setShieldSerialNumber()`/
+`getShieldSerialNumber()`, which requires exactly `SHIELD_SERIAL_LEN` (13)
+bytes. `wBoardVersion` is parsed into three numbers and stored via
+`spin.metaData.setShieldVersion()`/`getShieldVersion()`. A write that fails
+validation (wrong serial number length, unparsable version string, or an
+underlying storage error) is rejected and the previous value is restored;
+each field is validated and persisted independently of the other.
 
 The OwnTech communication module separately supplies `/Device` with read-only
-framework metadata. `/Converter` avoids duplicate ThingSet IDs while providing
-the mutable, application-owned converter identity required by this example.
+framework metadata (including firmware version via `cFirmwareVersion`).
+`/Converter` avoids duplicate ThingSet IDs while providing the mutable,
+application-owned shield identity required by this example.
 
 ### Measurements
 
@@ -320,7 +324,7 @@ Read or update persistent converter identity:
 
 ```text
 ?Converter
-=Converter {\"wSerialNumber\":\"TWIST-001\",\"wFirmwareVersion\":\"1.0.1\"}
+=Converter {\"wSerialNumber\":\"TWIST00000001\",\"wBoardVersion\":\"1.4.2\"}
 ```
 
 Keep the converter off while configuring it:
