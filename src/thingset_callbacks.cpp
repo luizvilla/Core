@@ -161,15 +161,18 @@ void conf_freq_cb(enum thingset_callback_reason reason)
 
         case THINGSET_CALLBACK_POST_WRITE:
             if (switching_frequency_hz != previous_frequency_hz) {
-                const uint32_t min_frequency = spin.pwm.getFrequencyMin(PWMA);
-                const uint32_t max_frequency = spin.pwm.getFrequencyMax(PWMA);
+                /* There is no working upper bound to validate against: HRTIM
+                 * never populates pwm_conf.max_frequency (spin.pwm.getFrequencyMax()
+                 * always returns 0), and neither PowerAPI nor the devicetree
+                 * power-leg binding define a max-frequency concept. Only the
+                 * lower bound is enforced until a real ceiling is modeled. */
+                const uint32_t min_frequency = shield.power.getFrequencyMin();
 
-                if (switching_frequency_hz < min_frequency ||
-                    switching_frequency_hz > max_frequency) {
+                if (switching_frequency_hz < min_frequency) {
                     switching_frequency_hz = previous_frequency_hz;
                 }
                 else {
-                    spin.pwm.setFrequency(switching_frequency_hz);
+                    shield.power.setFrequency(switching_frequency_hz);
                 }
             }
             break;
