@@ -274,6 +274,9 @@ void hrtim_frequency_set(uint32_t frequency_set, uint32_t frequency_min);
  *          the master. Call it before hrtim_tu_init(). hrtim_frequency_set()
  *          and hrtim_change_frequency() then leave this unit alone.
  *
+ *          The unit is not reset by the master: it free-runs on its own
+ *          period. Phase shifting and current mode are not available.
+ *
  * @param[in] tu_number  Timing unit: `PWMA` to `PWMF`
  * @param[in] frequency  Frequency in Hz, at least the minimum frequency
  *                       given to hrtim_frequency_set() (the clock
@@ -378,8 +381,11 @@ void hrtim_duty_cycle_set(hrtim_tu_number_t tu_number, uint16_t value);
  * @param[in] tu_number        Timing unit number:
  *                  `MSTR`, `TIMA`, `TIMB`, `TIMC`, `TIMD`, `TIME`, `TIMF`
  * @param[in] shift        The desired phase shift value
+ *
+ * @return `0` if ok, `-1` if the unit has its own frequency
+ *         (hrtim_tu_frequency_set()) and `shift` is not 0
  */
-void hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift);
+int8_t hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift);
 
 /**
  * @brief   Initialize the dead-time for the PWM

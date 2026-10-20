@@ -655,6 +655,15 @@ uint16_t hrtim_tu_init(hrtim_tu_number_t tu_number)
         _init_master();
     }
 
+    if (tu_channel[tu_number]->pwm_conf.own_frequency &&
+        tu_channel[tu_number]->pwm_conf.pwm_mode == CURRENT_MODE)
+    {
+        /* Current mode resets the unit on external events and on the
+         * master: not supported with an independent frequency */
+        printk("hrtim: current mode not supported with an own frequency\n");
+        return 0;
+    }
+
     if (tu_channel[tu_number]->pwm_conf.pwm_mode == CURRENT_MODE)
     {
         /* if we are in current mode, only lft_aligned is supported */
@@ -1144,16 +1153,31 @@ inline void hrtim_duty_cycle_set(hrtim_tu_number_t tu_number, uint16_t value)
 }
 
 
-void hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift)
+int8_t hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift)
 {
-    tu_channel[tu_number]->phase_shift.value = shift;
-
     hrtim_tu_t local_tu = tu_channel[tu_number]->pwm_conf.pwm_tu;
     hrtim_reset_trig_t rst_trg = tu_channel[tu_number]->phase_shift.reset_trig;
 
     uint32_t current_reset_trig = LL_HRTIM_TIM_GetResetTrig(HRTIM1, local_tu);
     uint32_t master_reset_trig = timerMaster.phase_shift.reset_trig;
     uint32_t updated_reset_trig = (current_reset_trig & ~master_reset_trig);
+
+    /**
+     * A unit with its own frequency free-runs on its own period: neither
+     * the master period nor its phase shift compare (e.g. master CMP3 for
+     * timer D, set by hrtim_tu_init()) may reset it, otherwise it is cut
+     * every master period. Its phase cannot be shifted.
+     */
+    if (tu_channel[tu_number]->pwm_conf.own_frequency)
+    {
+        LL_HRTIM_TIM_SetResetTrig(HRTIM1, local_tu,
+                                  current_reset_trig &
+                                  ~(master_reset_trig | rst_trg));
+        tu_channel[tu_number]->phase_shift.value = 0;
+        return (shift == 0) ? 0 : -1;
+    }
+
+    tu_channel[tu_number]->phase_shift.value = shift;
 
     /* Set reset comparator for phase positioning */
     if (shift)
@@ -1221,11 +1245,15 @@ void hrtim_phase_shift_set(hrtim_tu_number_t tu_number, uint16_t shift)
             }
         }else{
             /* timing unit do not run at the same frequency as master so
-            * phase positioning is not applicable */
-            uint32_t clear_reset = current_reset_trig & ~master_reset_trig;
+            * phase positioning is not applicable: remove the master period
+            * and the phase shift compare from the reset sources */
+            uint32_t clear_reset = current_reset_trig &
+                                   ~(master_reset_trig | local_tu_reset);
             LL_HRTIM_TIM_SetResetTrig(HRTIM1,local_tu,clear_reset);
         }
     }
+
+    return 0;
 }
 
 
