@@ -632,6 +632,22 @@ hrtim_external_trigger_t hrtim_eev_get(hrtim_tu_number_t tu_number);
  */
 void hrtim_change_frequency(uint32_t new_frequency);
 
+/**
+ * @brief Changes the frequency of a unit that has its own frequency
+ *        (hrtim_tu_frequency_set()), after it has been initialized.
+ *        The duty cycle (CMP1), the ADC trigger position (CMP3) and the
+ *        user duty cycle limits keep their ratio to the period. The new
+ *        values are preloaded and applied on the next period.
+ *
+ * @param[in] tu_number     Timing unit: `PWMA` to `PWMF`
+ * @param[in] new_frequency Frequency in Hz, at least the minimum frequency
+ *
+ * @return `0` if ok, `-1` if the unit follows the master frequency or the
+ *         frequency is out of range
+ */
+int8_t hrtim_tu_change_frequency(hrtim_tu_number_t tu_number,
+                                 uint32_t new_frequency);
+
 
 /**
  * @brief Hot swaps the output channels for the timing unit.

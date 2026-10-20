@@ -1566,6 +1566,72 @@ void DualDAC_init(hrtim_tu_number_t tu_number)
                                       tu_channel[tu_number]->pwm_conf.pwm_tu);
 }
 
+/* Value scaled from one period to another, rounded down */
+static inline uint16_t _rescale(uint32_t value, uint16_t old_period,
+                                uint16_t new_period)
+{
+    if (old_period == 0)
+        return 0;
+    return (uint16_t)(((uint64_t)value * new_period) / old_period);
+}
+
+int8_t hrtim_tu_change_frequency(hrtim_tu_number_t tu_number,
+                                 uint32_t new_frequency)
+{
+    if (tu_number >= HRTIM_STU_NUMOF)
+        return -1;
+
+    timer_hrtim_t *tu = tu_channel[tu_number];
+
+    /* Units that follow the master change with hrtim_change_frequency() */
+    if (!tu->pwm_conf.own_frequency)
+        return -1;
+
+    if (new_frequency < HRTIM_MINIM_FREQUENCY)
+        return -1;
+
+#if defined(CONFIG_SOC_SERIES_STM32F3X)
+    uint32_t f_hrtim = hrtim_get_apb2_clock() * 2;
+#elif defined(CONFIG_SOC_SERIES_STM32G4X)
+    uint32_t f_hrtim = hrtim_get_apb2_clock();
+#else
+#warning "unsupported stm32XX family"
+#endif
+
+    /* An up-down unit counts at twice its switching frequency */
+    uint32_t f_count = (tu->pwm_conf.modulation == UpDwn) ?
+                       2 * new_frequency : new_frequency;
+
+    uint32_t new_period = ((f_hrtim / f_count) * 32 +
+                           (f_hrtim % f_count) * 32 / f_count) >>
+                          tu->pwm_conf.ckpsc;
+
+    if (new_period > HRTIM_MAX_PER_and_CMP_REG_VALUES[tu->pwm_conf.ckpsc] ||
+        new_period < HRTIM_MIN_PER_and_CMP_REG_VALUES[tu->pwm_conf.ckpsc])
+        return -1;
+
+    hrtim_tu_t timing_unit = tu->pwm_conf.pwm_tu;
+    uint16_t old_period = tu->pwm_conf.period;
+    uint16_t new_duty = _rescale(tu->pwm_conf.duty_cycle, old_period,
+                                 new_period);
+
+    /* Preloaded: all applied together on the next repetition event */
+    LL_HRTIM_TIM_SetPeriod(HRTIM1, timing_unit, new_period);
+    LL_HRTIM_TIM_SetCompare1(HRTIM1, timing_unit, new_duty);
+    LL_HRTIM_TIM_SetCompare3(HRTIM1, timing_unit,
+        _rescale(LL_HRTIM_TIM_GetCompare3(HRTIM1, timing_unit),
+                 old_period, new_period));
+
+    tu->pwm_conf.period = new_period;
+    tu->pwm_conf.duty_cycle = new_duty;
+    tu->pwm_conf.frequency = f_count;
+    tu->pwm_conf.own_frequency = new_frequency;
+    tu->pwm_conf.duty_min_user = tu->pwm_conf.duty_min_user_float * new_period;
+    tu->pwm_conf.duty_max_user = tu->pwm_conf.duty_max_user_float * new_period;
+
+    return 0;
+}
+
 void hrtim_change_frequency(uint32_t new_frequency)
 {
 
@@ -1631,6 +1697,12 @@ void hrtim_change_frequency(uint32_t new_frequency)
 
                 LL_HRTIM_TIM_SetPeriod(HRTIM1,timing_unit,new_tu_period);
                 LL_HRTIM_TIM_SetCompare1(HRTIM1,timing_unit,new_duty);                 
+
+                /* CMP3 places the ADC trigger within the period: keep its
+                 * position as a fraction of the period */
+                LL_HRTIM_TIM_SetCompare3(HRTIM1, timing_unit,
+                    _rescale(LL_HRTIM_TIM_GetCompare3(HRTIM1, timing_unit),
+                             old_period, new_tu_period));
 
                 phase_shift_ratio = (float32_t)old_shift/(float32_t)old_period;
                 new_shift = phase_shift_ratio*new_tu_period;
