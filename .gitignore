@@ -5,3 +5,4 @@
 .vscode/settings.json
 old
 src/Data_records/*
+*venv*

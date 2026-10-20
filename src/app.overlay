@@ -1,0 +1,33 @@
+
+
+&leg2{
+    driver-pin-num = <19>;
+};
+
+
+// &v1low {
+//     sensor-name = "V_LOW";
+//     default-adc = "ADC_1";
+//     default-order = <1>;
+// };
+
+// &v2low {
+//     sensor-name = "V_AC";
+//     default-adc = "ADC_2";
+//     default-order = <1>;
+// };
+
+// &vhigh {
+//     sensor-name = "V_DC";
+//     default-adc = "ADC_2";
+//     default-order = <1>;
+// };
+
+// /* Current channels */
+
+
+// &ihigh {
+//     sensor-name = "I_AC";
+//     default-adc = "ADC_2";
+//     default-order = <2>;
+// };
