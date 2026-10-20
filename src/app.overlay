@@ -5,22 +5,25 @@
 };
 
 /**
- * Inverter H-bridge (schematic page 9/9, pin labels):
+ * Inverter H-bridge (schematic page 9/9, pin labels; the PWM channel
+ * table of that page is wrong for CHE1 / CHE2):
  *   LEG3 = TIMD: PB14 (Spin 5) PWM_IIHigh1, PB15 (Spin 6) PWM_IILow1
  *   LEG4 = TIME: PC8 (Spin 10) PWM_IIHigh2, PC9 (Spin 11) PWM_IILow2
- * The PWM channel table of the same page gives CHE1 = IILow2 and
- * CHE2 = IILow1: to check on the board before powering the bridge.
  *
  * 50 kHz center-aligned, independent of the 200 kHz boost legs
  * (leg-frequency must be >= min-frequency = 50 kHz of the Twist 1.4.2).
  *
  * To check before powering:
- * - dead time: 100 ns is the Twist default, not chosen for these switches;
- * - driver enable: no driver-pin-num, the enable pin of the inverter
- *   drivers is not identified (PC12 / Spin 19 is driven by LEG2);
- * - ADC: no trigger. ADC_2 is triggered by LEG2; HRTIM ADC trigger
- *   registers are overwritten, so ADC_2 can follow LEG3 only if LEG2
- *   gives it up (set LEG2 to "UNKNOWN_ADC" and LEG3 to "ADC_2").
+ * - dead time: 100 ns is copied from the Twist legs, not computed for the
+ *   inverter switches, drivers and isolators;
+ * - bridge supply: DIS_HV (PB9, Spin 21) drives the EN pin of U703
+ *   (VPS8701B), which makes the isolated +12V_HV of the inverter drivers
+ *   and isolators. Not handled yet (EN polarity to confirm); no
+ *   driver-pin-num here (PC12 / Spin 19 is EN_I, the boost side, on LEG2);
+ * - ADC: no trigger. ADC_2 (V2_LOW = V_AC, I2_LOW, I_HIGH = I_AC by
+ *   default) is triggered by LEG2. It could be triggered by LEG3 instead
+ *   (HRTIM ADC trigger 3 on timer D compare 3), to sample I_AC at the
+ *   centre of the inverter pulses, at the cost of I2_LOW.
  */
 &powershield {
     leg3: leg3 {
