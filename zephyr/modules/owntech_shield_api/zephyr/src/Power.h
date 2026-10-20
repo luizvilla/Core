@@ -56,6 +56,9 @@ private:
 	/* return timing unit from spin pin number */
 	hrtim_tu_number_t spinNumberToTu(uint16_t spin_number);
 
+	/* restart together the legs that share a leg-frequency */
+	void alignOwnFrequencyLegs();
+
 
 public:
 	/**
