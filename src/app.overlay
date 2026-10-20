@@ -1,7 +1,38 @@
+/**
+ * Micro-verter on the Twist 1.4.2 configuration.
+ *
+ * Measurements are split by converter, one ADC each, each ADC triggered
+ * by a leg of its own converter:
+ *
+ *   ADC_1, boost side, triggered by LEG1 (TIMA, 200 kHz, synchronised with
+ *   the boost leg LEG2 through the master):
+ *     order 0  I1_LOW  PA1 (Spin 30)  I_ILow1, boost phase 1 current
+ *     order 1  I2_LOW  PC1 (Spin 25)  I_ILow2, boost phase 2 current
+ *     order 2  V1_LOW  PA0 (Spin 29)  V_ILow,  boost input voltage
+ *     order 3  V_HIGH  PC3 (Spin 27)  V_DCBus, DC bus voltage
+ *
+ *   ADC_2, inverter side, triggered by LEG3 (TIMD, 50 kHz):
+ *     order 0  I_HIGH  PC2 (Spin 26)  I_AC, grid current
+ *     order 1  V2_LOW  PC0 (Spin 24)  V_AC, grid voltage
+ *
+ * The sensor names stay the Twist ones (used by main.cpp). Currents come
+ * first: order 0 is converted right at the trigger.
+ *
+ * The trigger instant is CMP3 of the leg, 0 unless setTriggerValue() is
+ * called: the valley of the up-down counter, i.e. the middle of the
+ * high-side pulse, where the inductor current equals its average. To
+ * check on the scope for LEG3.
+ */
 
+&leg1 {
+    default-adc = "ADC_1";
+};
 
-&leg2{
+&leg2 {
     driver-pin-num = <19>;
+    /* ADC_2 is triggered by LEG3: the HRTIM ADC trigger source is
+     * overwritten by the last leg initialized, so only one leg per ADC */
+    default-adc = "UNKNOWN_ADC";
 };
 
 /**
@@ -19,18 +50,15 @@
  * - bridge supply: DIS_HV (PB9, Spin 21) drives the EN pin of U703
  *   (VPS8701B), which makes the isolated +12V_HV of the inverter drivers
  *   and isolators. Not handled yet (EN polarity to confirm); no
- *   driver-pin-num here (PC12 / Spin 19 is EN_I, the boost side, on LEG2);
- * - ADC: no trigger. ADC_2 (V2_LOW = V_AC, I2_LOW, I_HIGH = I_AC by
- *   default) is triggered by LEG2. It could be triggered by LEG3 instead
- *   (HRTIM ADC trigger 3 on timer D compare 3), to sample I_AC at the
- *   centre of the inverter pulses, at the cost of I2_LOW.
+ *   driver-pin-num here (PC12 / Spin 19 is EN_I, the boost side, on LEG2).
  */
 &powershield {
     leg3: leg3 {
         leg-name = "LEG3";
         pwms = <&pwmd 1 0>, <&pwmd 2 0>;
         pwm-pin-num = <5 6>;
-        default-adc = "UNKNOWN_ADC";
+        /* HRTIM ADC trigger 3 on timer D compare 3 */
+        default-adc = "ADC_2";
         default-adc-decim = <1>;
         default-edge-trigger = "EdgeTrigger_up";
         default-dead-time = <100 100>;
@@ -55,30 +83,36 @@
     };
 };
 
+/* ---------------- ADC_1: boost side ---------------- */
 
-// &v1low {
-//     sensor-name = "V_LOW";
-//     default-adc = "ADC_1";
-//     default-order = <1>;
-// };
+&i1low {
+    default-adc = "ADC_1";
+    default-order = <0>;
+};
 
-// &v2low {
-//     sensor-name = "V_AC";
-//     default-adc = "ADC_2";
-//     default-order = <1>;
-// };
+&i2low {
+    default-adc = "ADC_1";
+    default-order = <1>;
+};
 
-// &vhigh {
-//     sensor-name = "V_DC";
-//     default-adc = "ADC_2";
-//     default-order = <1>;
-// };
+&v1low {
+    default-adc = "ADC_1";
+    default-order = <2>;
+};
 
-// /* Current channels */
+&vhigh {
+    default-adc = "ADC_1";
+    default-order = <3>;
+};
 
+/* ---------------- ADC_2: inverter side ---------------- */
 
-// &ihigh {
-//     sensor-name = "I_AC";
-//     default-adc = "ADC_2";
-//     default-order = <2>;
-// };
+&ihigh {
+    default-adc = "ADC_2";
+    default-order = <0>;
+};
+
+&v2low {
+    default-adc = "ADC_2";
+    default-order = <1>;
+};
