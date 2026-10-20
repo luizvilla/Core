@@ -555,6 +555,7 @@ void hrtim_init_default_all()
 
             tu_channel[tu_count]->pwm_conf.frequency =
                 timerMaster.pwm_conf.frequency;
+            tu_channel[tu_count]->pwm_conf.own_frequency = 0;
 
             tu_channel[tu_count]->pwm_conf.fall_dead_time = TU_DEFAULT_DT;
             tu_channel[tu_count]->pwm_conf.period = TU_DEFAULT_PERIOD;
@@ -889,20 +890,66 @@ void hrtim_frequency_set(uint32_t frequency_set, uint32_t frequency_min)
     HRTIM_MINIM_FREQUENCY = frequency_min;
 
     timerMaster.pwm_conf.frequency = frequency_set;
-    tu_channel[PWMA]->pwm_conf.frequency = frequency_set;
-    tu_channel[PWMB]->pwm_conf.frequency = frequency_set;
-    tu_channel[PWMC]->pwm_conf.frequency = frequency_set;
-    tu_channel[PWMD]->pwm_conf.frequency = frequency_set;
-    tu_channel[PWME]->pwm_conf.frequency = frequency_set;
-    tu_channel[PWMF]->pwm_conf.frequency = frequency_set;
-
     timerMaster.pwm_conf.min_frequency = frequency_min;
-    tu_channel[PWMA]->pwm_conf.min_frequency = frequency_min;
-    tu_channel[PWMB]->pwm_conf.min_frequency = frequency_min;
-    tu_channel[PWMC]->pwm_conf.min_frequency = frequency_min;
-    tu_channel[PWMD]->pwm_conf.min_frequency = frequency_min;
-    tu_channel[PWME]->pwm_conf.min_frequency = frequency_min;
-    tu_channel[PWMF]->pwm_conf.min_frequency = frequency_min;
+
+    for (uint8_t tu = PWMA; tu <= PWMF; tu++)
+    {
+        /* Units with their own frequency keep it. pwm_conf.frequency is
+         * doubled by the init of an up-down unit, so it is restored from
+         * own_frequency rather than left as is */
+        if (tu_channel[tu]->pwm_conf.own_frequency)
+        {
+            tu_channel[tu]->pwm_conf.frequency =
+                tu_channel[tu]->pwm_conf.own_frequency;
+        }
+        else
+        {
+            tu_channel[tu]->pwm_conf.frequency = frequency_set;
+        }
+        tu_channel[tu]->pwm_conf.min_frequency = frequency_min;
+    }
+}
+
+int8_t hrtim_tu_frequency_set(hrtim_tu_number_t tu_number, uint32_t frequency)
+{
+    if (tu_number >= HRTIM_STU_NUMOF)
+        return -1;
+
+    /* The prescaler is shared with the master: below the minimum
+     * frequency the period would not fit in 16 bits */
+    if (frequency < HRTIM_MINIM_FREQUENCY)
+        return -1;
+
+    if (tu_channel[tu_number]->pwm_conf.unit_on == false)
+    {
+        /* Otherwise a later default initialization overwrites it */
+        hrtim_init_default_all();
+    }
+
+    tu_channel[tu_number]->pwm_conf.frequency = frequency;
+    tu_channel[tu_number]->pwm_conf.own_frequency = frequency;
+
+    return 0;
+}
+
+bool hrtim_tu_has_own_frequency(hrtim_tu_number_t tu_number)
+{
+    if (tu_number >= HRTIM_STU_NUMOF)
+        return false;
+
+    return tu_channel[tu_number]->pwm_conf.own_frequency != 0;
+}
+
+uint32_t hrtim_tu_frequency_get(hrtim_tu_number_t tu_number)
+{
+    if (tu_number >= HRTIM_STU_NUMOF)
+        return 0;
+
+    if (tu_channel[tu_number]->pwm_conf.own_frequency)
+        return tu_channel[tu_number]->pwm_conf.own_frequency;
+
+    /* pwm_conf.frequency is the counting frequency (x2 in up-down) */
+    return timerMaster.pwm_conf.frequency;
 }
 
 inline uint16_t hrtim_period_Master_get()
@@ -933,7 +980,7 @@ uint32_t hrtim_period_get_us(hrtim_tu_number_t tu_number)
     return tu_channel[tu_number]->pwm_conf.period *
            HRTIM_CLK_RESOLUTION *
            mult *
-           (1<<timerMaster.pwm_conf.ckpsc);
+           (1<<tu_channel[tu_number]->pwm_conf.ckpsc);
 }
 
 /* CMP1, CMP2 and CMP3 must not be changed in current mode since they are used */
@@ -1535,7 +1582,11 @@ void hrtim_change_frequency(uint32_t new_frequency)
             timerMaster.pwm_conf.period = new_master_period;
 
             for(uint8_t channel = PWMA; channel<=PWMF; channel++){
-                timing_unit = tu_channel[channel]->pwm_conf.pwm_tu;                
+                /* Units with their own frequency keep it */
+                if (tu_channel[channel]->pwm_conf.own_frequency)
+                    continue;
+
+                timing_unit = tu_channel[channel]->pwm_conf.pwm_tu;
                 old_duty = tu_channel[channel]->pwm_conf.duty_cycle;
                 old_period = tu_channel[channel]->pwm_conf.period;
                 old_shift = tu_channel[channel]->phase_shift.value;

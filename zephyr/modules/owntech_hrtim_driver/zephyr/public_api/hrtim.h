@@ -270,6 +270,35 @@ void hrtim_cmpl_pwm_out(hrtim_tu_number_t tu_number);
 void hrtim_frequency_set(uint32_t frequency_set, uint32_t frequency_min);
 
 /**
+ * @brief   Gives a timing unit its own switching frequency, independent of
+ *          the master. Call it before hrtim_tu_init(). hrtim_frequency_set()
+ *          and hrtim_change_frequency() then leave this unit alone.
+ *
+ * @param[in] tu_number  Timing unit: `PWMA` to `PWMF`
+ * @param[in] frequency  Frequency in Hz, at least the minimum frequency
+ *                       given to hrtim_frequency_set() (the clock
+ *                       prescaler is shared with the master)
+ *
+ * @return `0` if ok, `-1` if the frequency is below the minimum
+ */
+int8_t hrtim_tu_frequency_set(hrtim_tu_number_t tu_number, uint32_t frequency);
+
+/**
+ * @brief   Returns true if the timing unit has its own frequency
+ *          (hrtim_tu_frequency_set()).
+ *
+ * @param[in] tu_number  Timing unit: `PWMA` to `PWMF`
+ */
+bool hrtim_tu_has_own_frequency(hrtim_tu_number_t tu_number);
+
+/**
+ * @brief   Returns the switching frequency of a timing unit in Hz.
+ *
+ * @param[in] tu_number  Timing unit: `PWMA` to `PWMF`
+ */
+uint32_t hrtim_tu_frequency_get(hrtim_tu_number_t tu_number);
+
+/**
  * @brief   Returns the period of a given timing unit in number of clock cycles
  *
  * @param[in] tu_number        Timing unit number:
