@@ -1520,9 +1520,11 @@ void hrtim_change_frequency(uint32_t new_frequency)
 
         hrtim_tu_t timing_unit;
 
+        /* Same formula as _period_ckpsc(): the remainder is scaled by 32
+         * before the division, (32 / new_frequency) would always be 0 */
         new_master_period =
             ((f_hrtim / new_frequency) * 32 +
-            (f_hrtim % new_frequency) * (32 / new_frequency)) /
+            (f_hrtim % new_frequency) * 32 / new_frequency) /
             (1 << timerMaster.pwm_conf.ckpsc);
 
             timerMaster.pwm_conf.frequency = new_frequency;
