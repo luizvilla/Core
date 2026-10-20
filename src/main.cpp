@@ -109,10 +109,10 @@ uint8_t mode = IDLEMODE;
 void setup_routine()
 {
     /* Boost voltage mode */
-    shield.power.initBoost(ALL);
+    shield.power.initBoost(ALL); // ALL to activate ADC1 as well
 
     shield.power.setDutyCycleMin(ALL,0.0);
-    shield.power.setDutyCycleMax(ALL,0.1);
+    shield.power.setDutyCycleMax(ALL,0.7);
 
     shield.sensors.enableDefaultTwistSensors();
 
@@ -237,21 +237,18 @@ void loop_critical_task()
     if (meas_data != NO_VALUE) V_dc_value = meas_data;
 
 
-    // if(V_dc_value > 3000.0)
-    // {
-    //     mode = IDLEMODE;
-    //     printk("V_dc_value is too high, stopping the converter\n");
-    //     printk("V_dc_value is too high, stopping the converter\n");
-    //     printk("V_dc_value is too high, stopping the converter\n");
-    //     printk("V_dc_value is too high, stopping the converter\n");
-    // }
+    if(V_dc_value > 3200.0)  //800 = 100V  1600= 200V 3200= 400V
+    {
+        mode = IDLEMODE;
+        printk("V_dc_value is too high, stopping the converter\n");
+    }
 
 
     if (mode == IDLEMODE)
     {
         if (pwm_enable == true)
         {
-            shield.power.stop(LEG2);
+            shield.power.stop(ALL);
         }
         pwm_enable = false;
     }
