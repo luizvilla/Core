@@ -1427,6 +1427,25 @@ void hrtim_cnt_dis(hrtim_tu_number_t tu_number)
     LL_HRTIM_TIM_CounterDisable(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu);
 }
 
+void hrtim_cnt_reset_sync(const hrtim_tu_number_t *tu_numbers, uint8_t count)
+{
+    uint32_t timers = 0;
+
+    for (uint8_t i = 0; i < count; i++)
+    {
+        if (tu_numbers[i] < HRTIM_STU_NUMOF)
+        {
+            timers |= tu_channel[tu_numbers[i]]->pwm_conf.pwm_tu;
+        }
+    }
+
+    /* One CR2 write: all the counters restart on the same clock edge */
+    if (timers != 0)
+    {
+        LL_HRTIM_CounterReset(HRTIM1, timers);
+    }
+}
+
 void hrtim_rst_evt_en(hrtim_tu_number_t tu_number, hrtim_reset_trig_t evt)
 {
     LL_HRTIM_TIM_SetResetTrig(HRTIM1, tu_channel[tu_number]->pwm_conf.pwm_tu, evt);

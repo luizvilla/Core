@@ -436,6 +436,17 @@ void hrtim_burst_dis(void);
 void hrtim_cnt_en(hrtim_tu_number_t tu_number);
 
 /**
+ * @brief   Resets the counters of several timing units with a single
+ *          register write, so that they restart together. Used to align
+ *          units that run at the same frequency of their own
+ *          (hrtim_tu_frequency_set()), since the master does not reset them.
+ *
+ * @param[in] tu_numbers Timing units: `PWMA` to `PWMF`
+ * @param[in] count      Number of timing units
+ */
+void hrtim_cnt_reset_sync(const hrtim_tu_number_t *tu_numbers, uint8_t count);
+
+/**
  * @brief   Disables a timing unit counter
  *
  * @param[in] tu_number        Timing unit number:
