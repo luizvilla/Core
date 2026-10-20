@@ -28,6 +28,7 @@
 
 /*--------------Zephyr---------------------------------------- */
 #include <zephyr/console/console.h>
+#include <math.h>
 
 /*--------------OWNTECH APIs---------------------------------- */
 #include "SpinAPI.h"
@@ -48,6 +49,8 @@ void loop_communication_task();
 void loop_application_task();
 /* Code to be executed in real time in the critical task */
 void loop_critical_task();
+/* Open-loop inverter, called by the critical task */
+void inverter_control();
 
 /*--------------USER VARIABLES DECLARATIONS------------------- */
 
@@ -96,6 +99,28 @@ enum serial_interface_menu_mode
 
 uint8_t mode = IDLEMODE;
 
+/* Inverter (LEG3 / LEG4, 50 kHz), open loop, independent of the boost */
+enum inverter_mode
+{
+    INV_OFF = 0,
+    INV_FIXED,  /* constant duty cycle d on LEG3, 1 - d on LEG4 */
+    INV_SINE    /* 50 Hz unipolar sine: d = 0.5 + 0.5 m sin(wt) */
+};
+
+uint8_t inverter_state = INV_OFF;
+static bool inverter_enable = false;
+
+/* [-] duty cycle of LEG3 in INV_FIXED mode */
+static float32_t inverter_duty = 0.5F;
+/* [-] modulation index in INV_SINE mode */
+static float32_t modulation_index = 0.0F;
+static const float32_t modulation_index_max = 0.9F;
+/* [Hz] output frequency in INV_SINE mode */
+static const float32_t grid_frequency = 50.0F;
+/* [rad] angle of the sine reference */
+static float32_t grid_angle = 0.0F;
+static float32_t inverter_duty_applied = 0.5F;
+
 /*--------------SETUP FUNCTIONS------------------------------- */
 
 /**
@@ -108,11 +133,24 @@ uint8_t mode = IDLEMODE;
  */
 void setup_routine()
 {
-    /* Boost voltage mode */
-    shield.power.initBoost(ALL); // ALL to activate ADC1 as well
+    /* Boost voltage mode, LEG1 initialized to activate ADC1 as well */
+    shield.power.initBoost(LEG1);
+    shield.power.initBoost(LEG2);
 
-    shield.power.setDutyCycleMin(ALL,0.0);
-    shield.power.setDutyCycleMax(ALL,0.7);
+    shield.power.setDutyCycleMin(LEG1,0.0);
+    shield.power.setDutyCycleMax(LEG1,0.7);
+    shield.power.setDutyCycleMin(LEG2,0.0);
+    shield.power.setDutyCycleMax(LEG2,0.7);
+
+    /* Inverter legs, 50 kHz (leg-frequency in app.overlay). Buck
+     * convention on both: duty cycle = high-side switch, LEG4 gets 1 - d */
+    shield.power.initBuck(LEG3);
+    shield.power.initBuck(LEG4);
+
+    shield.power.setDutyCycleMin(LEG3,0.05);
+    shield.power.setDutyCycleMax(LEG3,0.95);
+    shield.power.setDutyCycleMin(LEG4,0.05);
+    shield.power.setDutyCycleMax(LEG4,0.95);
 
     shield.sensors.enableDefaultTwistSensors();
 
@@ -158,6 +196,12 @@ void loop_communication_task()
                "|     press j : voltage reference DOWN   |\n"
                "|     press o : duty cycle UP            |\n"
                "|     press l : duty cycle DOWN          |\n"
+               "|     --- inverter (LEG3/LEG4) ---       |\n"
+               "|     press v : fixed duty cycle         |\n"
+               "|     press s : 50 Hz sine               |\n"
+               "|     press x : inverter off             |\n"
+               "|     press k : duty / index UP          |\n"
+               "|     press m : duty / index DOWN        |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
         break;
@@ -180,6 +224,42 @@ void loop_communication_task()
         break;
     case 'l':
         duty_cycle -= 0.001;
+        break;
+    case 'v':
+        printk("inverter fixed duty cycle\n");
+        inverter_state = INV_FIXED;
+        break;
+    case 's':
+        printk("inverter 50 Hz sine\n");
+        inverter_state = INV_SINE;
+        break;
+    case 'x':
+        printk("inverter off\n");
+        inverter_state = INV_OFF;
+        break;
+    case 'k':
+        if (inverter_state == INV_SINE)
+        {
+            modulation_index += 0.01F;
+            if (modulation_index > modulation_index_max)
+                modulation_index = modulation_index_max;
+        }
+        else
+        {
+            inverter_duty += 0.01F;
+        }
+        break;
+    case 'm':
+        if (inverter_state == INV_SINE)
+        {
+            modulation_index -= 0.01F;
+            if (modulation_index < 0.0F)
+                modulation_index = 0.0F;
+        }
+        else
+        {
+            inverter_duty -= 0.01F;
+        }
         break;
     default:
         break;
@@ -205,6 +285,9 @@ void loop_application_task()
     printk("%.3f:", (double)V_low_value);
     printk("%.3f:", (double)V_dc_value);
     printk("%.3f:", (double)duty_cycle);
+    printk("%d:", inverter_state);
+    printk("%.3f:", (double)inverter_duty_applied);
+    printk("%.3f:", (double)modulation_index);
     printk("\n");
     task.suspendBackgroundMs(100);
 }
@@ -246,11 +329,14 @@ void loop_critical_task()
 
     if (mode == IDLEMODE)
     {
-        if (pwm_enable == true)
+        /* Idle stops everything, the inverter included */
+        if (pwm_enable == true || inverter_enable == true)
         {
             shield.power.stop(ALL);
         }
         pwm_enable = false;
+        inverter_enable = false;
+        inverter_state = INV_OFF;
     }
     else if (mode == POWERMODE)
     {
@@ -265,6 +351,52 @@ void loop_critical_task()
         }
     }
 
+    inverter_control();
+}
+
+/**
+ * Open-loop inverter, called by the critical task. The two legs share the
+ * same 50 kHz carrier (aligned at init), LEG4 gets 1 - d: unipolar
+ * modulation.
+ */
+void inverter_control()
+{
+    if (inverter_state == INV_OFF)
+    {
+        if (inverter_enable)
+        {
+            shield.power.stop(LEG3);
+            shield.power.stop(LEG4);
+            inverter_enable = false;
+        }
+        grid_angle = 0.0F;
+        return;
+    }
+
+    if (inverter_state == INV_SINE)
+    {
+        grid_angle += 2.0F * PI * grid_frequency * Ts;
+        if (grid_angle >= 2.0F * PI)
+        {
+            grid_angle -= 2.0F * PI;
+        }
+        inverter_duty_applied =
+            0.5F + 0.5F * modulation_index * sinf(grid_angle);
+    }
+    else
+    {
+        inverter_duty_applied = inverter_duty;
+    }
+
+    shield.power.setDutyCycle(LEG3, inverter_duty_applied);
+    shield.power.setDutyCycle(LEG4, 1.0F - inverter_duty_applied);
+
+    if (!inverter_enable)
+    {
+        inverter_enable = true;
+        shield.power.start(LEG3);
+        shield.power.start(LEG4);
+    }
 }
 
 /**
