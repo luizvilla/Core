@@ -4,6 +4,54 @@
     driver-pin-num = <19>;
 };
 
+/**
+ * Inverter H-bridge (schematic page 9/9, pin labels):
+ *   LEG3 = TIMD: PB14 (Spin 5) PWM_IIHigh1, PB15 (Spin 6) PWM_IILow1
+ *   LEG4 = TIME: PC8 (Spin 10) PWM_IIHigh2, PC9 (Spin 11) PWM_IILow2
+ * The PWM channel table of the same page gives CHE1 = IILow2 and
+ * CHE2 = IILow1: to check on the board before powering the bridge.
+ *
+ * 50 kHz center-aligned, independent of the 200 kHz boost legs
+ * (leg-frequency must be >= min-frequency = 50 kHz of the Twist 1.4.2).
+ *
+ * To check before powering:
+ * - dead time: 100 ns is the Twist default, not chosen for these switches;
+ * - driver enable: no driver-pin-num, the enable pin of the inverter
+ *   drivers is not identified (PC12 / Spin 19 is driven by LEG2);
+ * - ADC: no trigger. ADC_2 is triggered by LEG2; HRTIM ADC trigger
+ *   registers are overwritten, so ADC_2 can follow LEG3 only if LEG2
+ *   gives it up (set LEG2 to "UNKNOWN_ADC" and LEG3 to "ADC_2").
+ */
+&powershield {
+    leg3: leg3 {
+        leg-name = "LEG3";
+        pwms = <&pwmd 1 0>, <&pwmd 2 0>;
+        pwm-pin-num = <5 6>;
+        default-adc = "UNKNOWN_ADC";
+        default-adc-decim = <1>;
+        default-edge-trigger = "EdgeTrigger_up";
+        default-dead-time = <100 100>;
+        default-modulation = "UpDwn";
+        default-phase-shift = <0>;
+        leg-frequency = <50000>;
+        status = "okay";
+    };
+
+    leg4: leg4 {
+        leg-name = "LEG4";
+        pwms = <&pwme 1 0>, <&pwme 2 0>;
+        pwm-pin-num = <10 11>;
+        default-adc = "UNKNOWN_ADC";
+        default-adc-decim = <1>;
+        default-edge-trigger = "EdgeTrigger_up";
+        default-dead-time = <100 100>;
+        default-modulation = "UpDwn";
+        default-phase-shift = <0>;
+        leg-frequency = <50000>;
+        status = "okay";
+    };
+};
+
 
 // &v1low {
 //     sensor-name = "V_LOW";
