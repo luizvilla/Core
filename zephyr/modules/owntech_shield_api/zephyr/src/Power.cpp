@@ -715,6 +715,13 @@ void PowerAPI::setFrequency(uint32_t frequency)
     for (int8_t i = 0; i < dt_leg_count; i++)
     {
         hrtim_tu_number_t leg_tu = spinNumberToTu(dt_pwm_pin[i]);
+
+        /* Legs with their own frequency did not change */
+        if (spin.pwm.hasOwnFrequency(leg_tu))
+        {
+            continue;
+        }
+
         uint16_t period = tu_channel[leg_tu]->pwm_conf.period;
 
         tu_channel[leg_tu]->pwm_conf.duty_min_user =
@@ -727,6 +734,33 @@ void PowerAPI::setFrequency(uint32_t frequency)
 uint32_t PowerAPI::getFrequency()
 {
     return timer_frequency;
+}
+
+int8_t PowerAPI::setFrequency(leg_t leg, uint32_t frequency)
+{
+    if (leg == ALL)
+    {
+        setFrequency(frequency);
+        return 0;
+    }
+
+    if (leg < 0 || leg >= dt_leg_count)
+    {
+        return -1;
+    }
+
+    /* Also rescales the duty cycle limits of the leg */
+    return spin.pwm.setFrequency(spinNumberToTu(dt_pwm_pin[leg]), frequency);
+}
+
+uint32_t PowerAPI::getFrequency(leg_t leg)
+{
+    if (leg == ALL || leg < 0 || leg >= dt_leg_count)
+    {
+        return timer_frequency;
+    }
+
+    return spin.pwm.getFrequency(spinNumberToTu(dt_pwm_pin[leg]));
 }
 
 uint32_t PowerAPI::getFrequencyMin()
