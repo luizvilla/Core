@@ -1,0 +1,20 @@
+/**
+ * Per-leg switching frequency on the Ownverter:
+ *   LEG1 (TIMA): common default-frequency, 200 kHz
+ *   LEG2 (TIMC): leg-frequency 100 kHz
+ *   LEG3 (TIME): leg-frequency 50 kHz
+ *
+ * min-frequency is lowered from 200 kHz to 50 kHz: it sets the HRTIM clock
+ * prescaler shared by all the timers, and no leg-frequency can be below it.
+ */
+&powershield {
+    min-frequency = <50000>;
+};
+
+&leg2 {
+    leg-frequency = <100000>;
+};
+
+&leg3 {
+    leg-frequency = <50000>;
+};
