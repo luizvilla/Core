@@ -237,7 +237,7 @@ void loop_critical_task()
     if (meas_data != NO_VALUE) V_dc_value = meas_data;
 
 
-    if(V_dc_value > 3200.0)  //800 = 100V  1600= 200V 3200= 400V
+    if(V_dc_value > 4000.0)  //800 = 100V  1600= 200V 3200= 400V 4000= 500V
     {
         mode = IDLEMODE;
         printk("V_dc_value is too high, stopping the converter\n");
