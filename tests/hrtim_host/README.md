@@ -25,4 +25,5 @@ layers (checked by building the firmware).
 | test_c3 | units with their own frequency are not reset by the master, phase shift / current mode refused |
 | test_c4 | runtime frequency change of one unit, CMP1 / CMP3 rescaled |
 | test_c5 | synchronous counter reset (one CR2 write) |
+| test_c6 | inverter legs in up-down mode: buck (timer D) and boost (timer E) only differ by the swap bit, dead time on both, re-init clears the swap |
 | test_seq | the `PowerAPI::initMode()` call order for the micro-verter legs |
