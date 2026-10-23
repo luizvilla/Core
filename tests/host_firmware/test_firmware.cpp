@@ -172,6 +172,16 @@ int main()
     run(3);
     CHECK(find(SUPPLY_OFF) >= 0, "supply switched off again");
 
+    printf("== fixed u starts without DC bus (ramped by hand)\n");
+    reset_world();
+    shield.sensors.value[V_HIGH] = 0.0F;
+    key('v'); run(HV_SUPPLY_SETTLE_TICKS + 5);
+    CHECK(find("start 3") >= 0 && find("start 4") >= 0, "v with V_DC = 0: PWM on");
+    CHECK(inverter_state == INV_FIXED && find(SUPPLY_OFF) < 0, "still running, supply on");
+    shield.sensors.value[V_HIGH] = VDC_OK; run(10);
+    CHECK(shield.power.on[2], "bus ramped up: still running");
+    key('x'); run(3);
+
     printf("== open-loop sine\n");
     reset_world();
     shield.sensors.value[V_HIGH] = VDC_OK;

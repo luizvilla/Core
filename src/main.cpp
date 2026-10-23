@@ -142,8 +142,8 @@ static constexpr float32_t I_AC_MAX = MEASUREMENTS_CALIBRATED ? 3.0F : 4000.0F;
 static constexpr float32_t INVERTER_DUTY_MIN = 0.05F;
 static constexpr float32_t INVERTER_DUTY_MAX = 0.95F;
 static constexpr float32_t U_MAX = 0.9F;
-/* Minimum DC bus voltage to start the inverter: 10 V calibrated, 100 counts
- * raw (about 11 V with the schematic gain) */
+/* Minimum DC bus voltage to start the inverter (not checked in fixed u):
+ * 10 V calibrated, 100 counts raw (about 11 V with the schematic gain) */
 static constexpr float32_t V_DC_MIN_START = MEASUREMENTS_CALIBRATED ? 10.0F : 100.0F;
 /* [V] DC bus voltage used by the inverter library before it is measured */
 static constexpr float32_t V_DC_FALLBACK = 20.0F;
@@ -886,9 +886,10 @@ void inverter_control()
         }
         inverter_phase = (inverter_state == INV_FOLLOWING) ? PHASE_SYNC
                                                            : PHASE_RUNNING;
-        if (inverter_phase == PHASE_RUNNING)
+        if (inverter_phase == PHASE_RUNNING && inverter_state != INV_FIXED)
         {
-            /* Start interlock: the bus must be there */
+            /* Start interlock: the bus must be there. Not in fixed u, where
+             * the DC bus is ramped up by hand with the inverter running */
             if (V_dc_value < V_DC_MIN_START)
             {
                 printk("inverter: V_DC %.1f V below %.1f V, not started\n",
