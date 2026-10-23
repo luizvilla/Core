@@ -142,8 +142,9 @@ static constexpr float32_t I_AC_MAX = MEASUREMENTS_CALIBRATED ? 3.0F : 4000.0F;
 static constexpr float32_t INVERTER_DUTY_MIN = 0.05F;
 static constexpr float32_t INVERTER_DUTY_MAX = 0.95F;
 static constexpr float32_t U_MAX = 0.9F;
-/* Minimum DC bus voltage to start the inverter (not checked in fixed u):
- * 10 V calibrated, 100 counts raw (about 11 V with the schematic gain) */
+/* Minimum DC bus voltage to start the inverter, when the bus check is on
+ * (key d): 10 V calibrated, 100 counts raw (about 11 V with the schematic
+ * gain) */
 static constexpr float32_t V_DC_MIN_START = MEASUREMENTS_CALIBRATED ? 10.0F : 100.0F;
 /* [V] DC bus voltage used by the inverter library before it is measured */
 static constexpr float32_t V_DC_FALLBACK = 20.0F;
@@ -249,6 +250,9 @@ static bool supply_only_request = false;
  * i and by any fault */
 static bool relay_request = false;
 static bool relay_closed = false;
+/* DC bus start check (key d): off by default, so that the bus can be
+ * ramped up by hand with the inverter running */
+static bool bus_check_enabled = false;
 static modulation_scheme modulation = MODULATION_DEFAULT;
 
 static singlePhaseInverter inverter;
@@ -357,7 +361,7 @@ void loop_communication_task()
 
     /* Keys of a disabled converter are refused */
     const char *boost_keys = "pgoluUjJ";
-    const char *inverter_keys = "vsfwxkmebnz";
+    const char *inverter_keys = "vsfwxkmebnzd";
     bool is_boost_key = strchr(boost_keys, received_serial_char) != NULL;
     bool is_inverter_key = strchr(inverter_keys, received_serial_char) != NULL;
 
@@ -396,15 +400,18 @@ void loop_communication_task()
                "|     press z : bridge supply only on/off|\n"
                "|               (inverter off, no PWM)   |\n"
                "|     press r : grid relay on/off        |\n"
+               "|     press d : DC bus start check on/off|\n"
                "|     press k / m : u, m, V or A ref +/- |\n"
                "|     press n / b : unipolar / bipolar   |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
-        printk("boost %s, inverter %s, modulation %s, measurements %s\n",
+        printk("boost %s, inverter %s, modulation %s, measurements %s, "
+               "bus check %s\n",
                BOOST_ENABLE ? "enabled" : "disabled",
                INVERTER_ENABLE ? "enabled" : "disabled",
                modulation == UNIPOLAR ? "unipolar" : "bipolar",
-               MEASUREMENTS_CALIBRATED ? "V / A" : "raw counts");
+               MEASUREMENTS_CALIBRATED ? "V / A" : "raw counts",
+               bus_check_enabled ? "on" : "off");
         break;
     case 'i':
         printk("idle mode\n");
@@ -509,6 +516,11 @@ void loop_communication_task()
         }
         relay_request = !relay_request;
         printk("relay %s\n", relay_request ? "closed" : "open");
+        break;
+    case 'd':
+        bus_check_enabled = !bus_check_enabled;
+        printk("DC bus start check %s (minimum %.0f)\n",
+               bus_check_enabled ? "on" : "off", (double)V_DC_MIN_START);
         break;
     case 'z':
         /* Bridge supply alone: no PWM, no DC bus check. Applied by the
@@ -886,10 +898,9 @@ void inverter_control()
         }
         inverter_phase = (inverter_state == INV_FOLLOWING) ? PHASE_SYNC
                                                            : PHASE_RUNNING;
-        if (inverter_phase == PHASE_RUNNING && inverter_state != INV_FIXED)
+        if (inverter_phase == PHASE_RUNNING && bus_check_enabled)
         {
-            /* Start interlock: the bus must be there. Not in fixed u, where
-             * the DC bus is ramped up by hand with the inverter running */
+            /* Start interlock (key d): the bus must be there */
             if (V_dc_value < V_DC_MIN_START)
             {
                 printk("inverter: V_DC %.1f V below %.1f V, not started\n",

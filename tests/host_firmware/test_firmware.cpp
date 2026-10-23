@@ -163,16 +163,25 @@ int main()
     CHECK(!relay_closed, "r refused (stays open) during a fault");
     shield.sensors.value[V_HIGH] = 0.0F; key('i'); run(2);
 
-    printf("== start interlock (no DC bus)\n");
+    printf("== start interlock (no DC bus, check on)\n");
     reset_world();
+    CHECK(!bus_check_enabled, "bus check off by default");
+    key('d');
+    CHECK(bus_check_enabled, "d: bus check on");
     shield.sensors.value[V_HIGH] = VDC_LOW;
     key('s'); run(HV_SUPPLY_SETTLE_TICKS + 10);
     CHECK(find("start 3") < 0, "not started with V_DC = %.0f (below %.0f)", VDC_LOW, V_DC_MIN_START);
     CHECK(inverter_state == INV_OFF, "inverter back to off");
     run(3);
     CHECK(find(SUPPLY_OFF) >= 0, "supply switched off again");
+    events.clear();
+    key('v'); run(HV_SUPPLY_SETTLE_TICKS + 10);
+    CHECK(find("start 3") < 0 && inverter_state == INV_OFF, "fixed u refused too with the check on");
+    run(3);
+    key('d');
+    CHECK(!bus_check_enabled, "d again: bus check off");
 
-    printf("== fixed u starts without DC bus (ramped by hand)\n");
+    printf("== check off: starts without DC bus (ramped by hand)\n");
     reset_world();
     shield.sensors.value[V_HIGH] = 0.0F;
     key('v'); run(HV_SUPPLY_SETTLE_TICKS + 5);
@@ -180,6 +189,11 @@ int main()
     CHECK(inverter_state == INV_FIXED && find(SUPPLY_OFF) < 0, "still running, supply on");
     shield.sensors.value[V_HIGH] = VDC_OK; run(10);
     CHECK(shield.power.on[2], "bus ramped up: still running");
+    key('x'); run(3);
+    events.clear();
+    shield.sensors.value[V_HIGH] = 0.0F;
+    key('s'); run(HV_SUPPLY_SETTLE_TICKS + 5);
+    CHECK(find("start 3") >= 0, "s with V_DC = 0 and the check off: PWM on");
     key('x'); run(3);
 
     printf("== open-loop sine\n");
