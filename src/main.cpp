@@ -152,6 +152,9 @@ static constexpr float32_t V_DC_FALLBACK = 20.0F;
  * (VPS8701B, isolated +12V_HV). Level that turns the supply ON: assumed
  * active-high EN as on the VPS8505, TO CONFIRM (TP703 with PB9 high / low) */
 static constexpr uint8_t DIS_HV_PIN = 21;
+/* Grid relay K1: Relay net, PC13 (Spin 22), drives Q11 directly (page 2):
+ * high = relay closed */
+static constexpr uint8_t RELAY_PIN = 22;
 static constexpr bool HV_SUPPLY_ON_LEVEL = true;
 /* [task periods] wait after turning the supply on, before the PWM (20 ms) */
 static constexpr uint32_t HV_SUPPLY_SETTLE_TICKS = 200;
@@ -242,6 +245,10 @@ static bool inverter_pwm_on = false;
 /* Bridge supply state (DIS_HV), and the supply-only request of key z */
 static bool hv_supply_on = false;
 static bool supply_only_request = false;
+/* Grid relay: requested by key r, applied by the critical task; opened by
+ * i and by any fault */
+static bool relay_request = false;
+static bool relay_closed = false;
 static modulation_scheme modulation = MODULATION_DEFAULT;
 
 static singlePhaseInverter inverter;
@@ -303,6 +310,10 @@ void setup_routine()
     /* Inverter bridge supply off until the inverter starts */
     spin.gpio.configurePin(DIS_HV_PIN, OUTPUT);
     inverter_supply(false);
+
+    /* Grid relay open */
+    spin.gpio.configurePin(RELAY_PIN, OUTPUT);
+    spin.gpio.resetPin(RELAY_PIN);
 
     shield.sensors.enableDefaultTwistSensors();
 
@@ -384,6 +395,7 @@ void loop_communication_task()
                "|     press x : inverter off             |\n"
                "|     press z : bridge supply only on/off|\n"
                "|               (inverter off, no PWM)   |\n"
+               "|     press r : grid relay on/off        |\n"
                "|     press k / m : u, m, V or A ref +/- |\n"
                "|     press n / b : unipolar / bipolar   |\n"
                "|________________________________________|\n\n");
@@ -399,6 +411,11 @@ void loop_communication_task()
         boost_state = BOOST_OFF;
         inverter_state = INV_OFF;
         supply_only_request = false;
+        if (relay_request)
+        {
+            relay_request = false;
+            printk("relay open\n");
+        }
         if (fault)
         {
             printk("fault cleared (%s)\n", fault_reason);
@@ -484,6 +501,15 @@ void loop_communication_task()
         printk("inverter off\n");
         inverter_state = INV_OFF;
         break;
+    case 'r':
+        if (fault && !relay_request)
+        {
+            printk("fault: %s, relay stays open (press i)\n", fault_reason);
+            break;
+        }
+        relay_request = !relay_request;
+        printk("relay %s\n", relay_request ? "closed" : "open");
+        break;
     case 'z':
         /* Bridge supply alone: no PWM, no DC bus check. Applied by the
          * critical task (inverter_control) */
@@ -541,7 +567,8 @@ void loop_application_task()
 
     /* Measurements in raw counts unless MEASUREMENTS_CALIBRATED.
        V_low : V_DC : boost duty : V_AC : I_AC : inverter state :
-       inverter phase : duty LEG3 : duty LEG4 : sync : bridge supply */
+       inverter phase : duty LEG3 : duty LEG4 : sync : bridge supply :
+       relay */
     printk("%.3f:", (double)V_low_value);
     printk("%.1f:", (double)V_dc_value);
     printk("%.3f:", (double)duty_cycle);
@@ -552,7 +579,8 @@ void loop_application_task()
     printk("%.3f:", (double)duty_leg3);
     printk("%.3f:", (double)duty_leg4);
     printk("%d:", inverter.getSync());
-    printk("%d", hv_supply_on);
+    printk("%d:", hv_supply_on);
+    printk("%d", relay_closed);
     if (fault)
     {
         printk(":FAULT %s", fault_reason);
@@ -575,6 +603,20 @@ void loop_critical_task()
     if (check_protections())
     {
         return;
+    }
+
+    /* Grid relay (key r) */
+    if (relay_request != relay_closed)
+    {
+        relay_closed = relay_request;
+        if (relay_closed)
+        {
+            spin.gpio.setPin(RELAY_PIN);
+        }
+        else
+        {
+            spin.gpio.resetPin(RELAY_PIN);
+        }
     }
 
     if (BOOST_ENABLE)
@@ -667,6 +709,9 @@ void stop_all()
     inverter_phase = PHASE_STOPPED;
     supply_only_request = false;
     inverter_supply(false);
+    relay_request = false;
+    relay_closed = false;
+    spin.gpio.resetPin(RELAY_PIN);
 }
 
 void boost_control()

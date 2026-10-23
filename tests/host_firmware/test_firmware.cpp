@@ -147,6 +147,22 @@ int main()
     shield.sensors.value[I_HIGH] = IAC_ZERO; key('i'); run(2);
     CHECK(!fault && !hv_supply_on, "fault cleared, supply still off");
 
+    printf("== grid relay (key r)\n");
+    reset_world();
+    key('r'); run(1);
+    CHECK(find("pin 22 high") >= 0 && relay_closed, "r: relay closed (pin 22 high)");
+    events.clear();
+    key('r'); run(1);
+    CHECK(find("pin 22 low") >= 0 && !relay_closed, "r again: relay open");
+    key('r'); run(1); key('i'); run(1);
+    CHECK(!relay_closed, "i opens the relay");
+    key('r'); run(1);
+    shield.sensors.value[V_HIGH] = VDC_TRIP; run(1);
+    CHECK(fault && !relay_closed, "fault opens the relay");
+    key('r'); run(1);
+    CHECK(!relay_closed, "r refused (stays open) during a fault");
+    shield.sensors.value[V_HIGH] = 0.0F; key('i'); run(2);
+
     printf("== start interlock (no DC bus)\n");
     reset_world();
     shield.sensors.value[V_HIGH] = VDC_LOW;
