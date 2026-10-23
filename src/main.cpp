@@ -239,6 +239,9 @@ static uint8_t inverter_state = INV_OFF;
 static uint8_t inverter_phase = PHASE_STOPPED;
 static uint32_t supply_ticks = 0;
 static bool inverter_pwm_on = false;
+/* Bridge supply state (DIS_HV), and the supply-only request of key z */
+static bool hv_supply_on = false;
+static bool supply_only_request = false;
 static modulation_scheme modulation = MODULATION_DEFAULT;
 
 static singlePhaseInverter inverter;
@@ -343,7 +346,7 @@ void loop_communication_task()
 
     /* Keys of a disabled converter are refused */
     const char *boost_keys = "pgoluUjJ";
-    const char *inverter_keys = "vsfwxkmebn";
+    const char *inverter_keys = "vsfwxkmebnz";
     bool is_boost_key = strchr(boost_keys, received_serial_char) != NULL;
     bool is_inverter_key = strchr(inverter_keys, received_serial_char) != NULL;
 
@@ -379,6 +382,8 @@ void loop_communication_task()
                "|     press w : grid following (calib.)  |\n"
                "|     press e : following power on/off   |\n"
                "|     press x : inverter off             |\n"
+               "|     press z : bridge supply only on/off|\n"
+               "|               (inverter off, no PWM)   |\n"
                "|     press k / m : u, m, V or A ref +/- |\n"
                "|     press n / b : unipolar / bipolar   |\n"
                "|________________________________________|\n\n");
@@ -393,6 +398,7 @@ void loop_communication_task()
         printk("idle mode\n");
         boost_state = BOOST_OFF;
         inverter_state = INV_OFF;
+        supply_only_request = false;
         if (fault)
         {
             printk("fault cleared (%s)\n", fault_reason);
@@ -478,6 +484,17 @@ void loop_communication_task()
         printk("inverter off\n");
         inverter_state = INV_OFF;
         break;
+    case 'z':
+        /* Bridge supply alone: no PWM, no DC bus check. Applied by the
+         * critical task (inverter_control) */
+        if (inverter_state != INV_OFF || inverter_phase != PHASE_STOPPED)
+        {
+            printk("stop the inverter (x) before switching the supply alone\n");
+            break;
+        }
+        supply_only_request = !supply_only_request;
+        printk("bridge supply only: %s\n", supply_only_request ? "on" : "off");
+        break;
     case 'k':
     case 'm':
     {
@@ -524,7 +541,7 @@ void loop_application_task()
 
     /* Measurements in raw counts unless MEASUREMENTS_CALIBRATED.
        V_low : V_DC : boost duty : V_AC : I_AC : inverter state :
-       inverter phase : duty LEG3 : duty LEG4 : sync */
+       inverter phase : duty LEG3 : duty LEG4 : sync : bridge supply */
     printk("%.3f:", (double)V_low_value);
     printk("%.1f:", (double)V_dc_value);
     printk("%.3f:", (double)duty_cycle);
@@ -534,7 +551,8 @@ void loop_application_task()
     printk("%d:", inverter_phase);
     printk("%.3f:", (double)duty_leg3);
     printk("%.3f:", (double)duty_leg4);
-    printk("%d", inverter.getSync());
+    printk("%d:", inverter.getSync());
+    printk("%d", hv_supply_on);
     if (fault)
     {
         printk(":FAULT %s", fault_reason);
@@ -647,6 +665,7 @@ void stop_all()
     boost_state = BOOST_OFF;
     inverter_state = INV_OFF;
     inverter_phase = PHASE_STOPPED;
+    supply_only_request = false;
     inverter_supply(false);
 }
 
@@ -678,6 +697,7 @@ void boost_control()
 
 void inverter_supply(bool on)
 {
+    hv_supply_on = on;
     if (on == HV_SUPPLY_ON_LEVEL)
     {
         spin.gpio.setPin(DIS_HV_PIN);
@@ -737,6 +757,12 @@ void inverter_control()
         {
             inverter_supply(false);
             inverter_phase = PHASE_STOPPED;
+            supply_only_request = false;
+        }
+        /* Key z: bridge supply alone, inverter stopped */
+        if (supply_only_request != hv_supply_on)
+        {
+            inverter_supply(supply_only_request);
         }
         sine_angle = 0.0F;
         following_power_on = false;
@@ -745,9 +771,11 @@ void inverter_control()
         return;
     }
 
-    /* Bridge supply */
+    /* Bridge supply (already on if key z was used: the start sequence takes
+     * it over, x / i / a fault turn it off) */
     if (inverter_phase == PHASE_STOPPED)
     {
+        supply_only_request = false;
         inverter_supply(true);
         supply_ticks = 0;
         inverter_phase = PHASE_SUPPLY;

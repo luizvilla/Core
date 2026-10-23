@@ -115,6 +115,38 @@ int main()
     for (const Event &e : events) { if (e.what == "stop 3") { stop_first = true; break; } if (e.what == SUPPLY_OFF) break; }
     CHECK(stop_first, "stop 3 logged before the supply off");
 
+    printf("== bridge supply only (key z)\n");
+    reset_world();
+    key('z'); run(1000);
+    CHECK(find(SUPPLY_ON) >= 0 && find(SUPPLY_OFF) < 0, "z: supply on and kept on (100 ms)");
+    CHECK(find("start 3") < 0 && find("start 4") < 0, "z: no PWM");
+    CHECK(hv_supply_on, "log field: supply on");
+    events.clear();
+    key('z'); run(2);
+    CHECK(find(SUPPLY_OFF) >= 0 && !hv_supply_on, "z again: supply off");
+    /* z with no DC bus does not try to start anything */
+    events.clear();
+    shield.sensors.value[V_HIGH] = 0.0F;
+    key('z'); run(500);
+    CHECK(find(SUPPLY_OFF) < 0, "z with no DC bus: supply stays on (no start check)");
+    /* inverter start takes over the supply */
+    shield.sensors.value[V_HIGH] = VDC_OK;
+    events.clear();
+    key('v'); run(HV_SUPPLY_SETTLE_TICKS + 5);
+    CHECK(find("start 3") >= 0 && find(SUPPLY_OFF) < 0, "z then v: supply kept, PWM after the wait");
+    key('z');
+    CHECK(hv_supply_on && shield.power.on[2], "z refused while the inverter runs");
+    events.clear();
+    key('x'); run(3);
+    CHECK(find(SUPPLY_OFF) >= 0 && !hv_supply_on, "x: supply off");
+    key('z'); run(2); key('i'); run(2);
+    CHECK(!hv_supply_on, "z then i: supply off");
+    key('z'); run(2);
+    shield.sensors.value[I_HIGH] = IAC_TRIP; run(1);
+    CHECK(fault && !hv_supply_on, "z then fault: supply off");
+    shield.sensors.value[I_HIGH] = IAC_ZERO; key('i'); run(2);
+    CHECK(!fault && !hv_supply_on, "fault cleared, supply still off");
+
     printf("== start interlock (no DC bus)\n");
     reset_world();
     shield.sensors.value[V_HIGH] = VDC_LOW;
