@@ -97,6 +97,17 @@ static constexpr float32_t W0 = 2.0F * PI * F0;
 static constexpr float32_t GRID_VPK = 325.0F;
 
 /**
+ * Measurements: false = raw ADC counts (gain 1, offset 0 on every sensor)
+ * until the measurement chains are calibrated; true = V and A on the
+ * inverter side with the nominal gains below. Grid forming / following
+ * need true (the inverter library works in V and A).
+ */
+#ifndef MEASUREMENTS_CALIBRATED_DEFAULT
+#define MEASUREMENTS_CALIBRATED_DEFAULT false
+#endif
+static constexpr bool MEASUREMENTS_CALIBRATED = MEASUREMENTS_CALIBRATED_DEFAULT;
+
+/**
  * Measurement chains, nominal values from the schematic (pages 4 to 6),
  * ADC 12 bits on 2.048 V (2000 counts per volt). To calibrate on the
  * board: offsets first, at zero voltage / current.
@@ -107,7 +118,8 @@ static constexpr float32_t GRID_VPK = 325.0F;
  *   0.2977 V/A, full scale +/- 3.36 A.
  * V_DCBus (V_HIGH, PC3): 20k / (4 x 1.13M + 20k) divider, AMC1311 (x1),
  *   x1: 4.405 mV/V.
- * The boost side (V1_LOW, I1_LOW, I2_LOW) stays in raw ADC counts.
+ * Used only with MEASUREMENTS_CALIBRATED. The boost side (V1_LOW, I1_LOW,
+ * I2_LOW) stays in raw ADC counts in both cases.
  */
 static constexpr float32_t V_AC_GAIN = 0.18758F;
 static constexpr float32_t V_AC_OFFSET = -375.15F;
@@ -116,20 +128,23 @@ static constexpr float32_t I_AC_OFFSET = -3.3595F;
 static constexpr float32_t V_DC_GAIN = 0.11351F;
 static constexpr float32_t V_DC_OFFSET = 0.0F;
 
-/* [V] DC bus overvoltage trip. The former raw trip was 3200 counts,
- * commented as 400 V (8 counts/V); the schematic gives 8.81 counts/V
- * (3200 counts = 363 V): to settle with the calibration. A 230 V grid needs
- * at least 325 / U_MAX = 361 V of bus */
-static constexpr float32_t V_DC_MAX = 400.0F;
-/* [A] AC current trip (measurement full scale is 3.36 A) */
-static constexpr float32_t I_AC_MAX = 3.0F;
+/* DC bus overvoltage trip. Raw: 3200 counts, the former trip (commented as
+ * 400 V, 8 counts/V; the schematic gives 8.81 counts/V, i.e. 363 V).
+ * Calibrated: 400 V (a 230 V grid needs at least 325 / U_MAX = 361 V) */
+static constexpr float32_t V_DC_MAX = MEASUREMENTS_CALIBRATED ? 400.0F : 3200.0F;
+/* AC overcurrent trip. Raw: 4000 counts, at the top of the range, for now.
+ * Zero current reads about 2000 counts (1 V offset): only a large positive
+ * current trips, a negative one reads towards 0 and does not.
+ * Calibrated: +/- 3 A (measurement full scale is 3.36 A) */
+static constexpr float32_t I_AC_MAX = MEASUREMENTS_CALIBRATED ? 3.0F : 4000.0F;
 
 /* [-] inverter leg duty cycle limits, and the |u| they allow */
 static constexpr float32_t INVERTER_DUTY_MIN = 0.05F;
 static constexpr float32_t INVERTER_DUTY_MAX = 0.95F;
 static constexpr float32_t U_MAX = 0.9F;
-/* [V] minimum DC bus voltage to start the inverter */
-static constexpr float32_t V_DC_MIN_START = 10.0F;
+/* Minimum DC bus voltage to start the inverter: 10 V calibrated, 100 counts
+ * raw (about 11 V with the schematic gain) */
+static constexpr float32_t V_DC_MIN_START = MEASUREMENTS_CALIBRATED ? 10.0F : 100.0F;
 /* [V] DC bus voltage used by the inverter library before it is measured */
 static constexpr float32_t V_DC_FALLBACK = 20.0F;
 
@@ -230,8 +245,9 @@ static singlePhaseInverter inverter;
 
 /* [-] INV_FIXED: normalised output voltage u = v / V_DC */
 static float32_t inverter_u = 0.0F;
-/* [V] INV_OPEN_LOOP: sine amplitude */
-static float32_t sine_amplitude = 0.0F;
+/* [-] INV_OPEN_LOOP: modulation index, u = m sin(wt) (independent of the
+ * measurements) */
+static float32_t sine_index = 0.0F;
 static float32_t sine_angle = 0.0F;
 /* [V] INV_FORMING: d-axis voltage reference (peak) */
 static float32_t vd_reference = 0.0F;
@@ -287,14 +303,20 @@ void setup_routine()
 
     shield.sensors.enableDefaultTwistSensors();
 
-    /* Boost side in raw ADC counts */
+    /* All sensors in raw ADC counts: gain 1, offset 0 */
     shield.sensors.setConversionParametersLinear(V1_LOW,1.0,0.0);
     shield.sensors.setConversionParametersLinear(I1_LOW,1.0,0.0);
     shield.sensors.setConversionParametersLinear(I2_LOW,1.0,0.0);
-    /* DC bus and inverter side in V and A */
-    shield.sensors.setConversionParametersLinear(V_HIGH, V_DC_GAIN, V_DC_OFFSET);
-    shield.sensors.setConversionParametersLinear(V2_LOW, V_AC_GAIN, V_AC_OFFSET);
-    shield.sensors.setConversionParametersLinear(I_HIGH, I_AC_GAIN, I_AC_OFFSET);
+    shield.sensors.setConversionParametersLinear(V_HIGH,1.0,0.0);
+    shield.sensors.setConversionParametersLinear(V2_LOW,1.0,0.0);
+    shield.sensors.setConversionParametersLinear(I_HIGH,1.0,0.0);
+    if (MEASUREMENTS_CALIBRATED)
+    {
+        /* DC bus and inverter side in V and A */
+        shield.sensors.setConversionParametersLinear(V_HIGH, V_DC_GAIN, V_DC_OFFSET);
+        shield.sensors.setConversionParametersLinear(V2_LOW, V_AC_GAIN, V_AC_OFFSET);
+        shield.sensors.setConversionParametersLinear(I_HIGH, I_AC_GAIN, I_AC_OFFSET);
+    }
 
     pid.init(pid_params);
 
@@ -352,19 +374,20 @@ void loop_communication_task()
                "|     press U / J : V_DC ref +/- 10 V    |\n"
                "|     --- inverter (LEG3/LEG4) ---       |\n"
                "|     press v : fixed u (gate checks)    |\n"
-               "|     press s : open-loop 50 Hz sine     |\n"
-               "|     press f : grid forming             |\n"
-               "|     press w : grid following           |\n"
+               "|     press s : open-loop sine, index m  |\n"
+               "|     press f : grid forming (calib.)    |\n"
+               "|     press w : grid following (calib.)  |\n"
                "|     press e : following power on/off   |\n"
                "|     press x : inverter off             |\n"
-               "|     press k / m : u, V or A ref +/-    |\n"
+               "|     press k / m : u, m, V or A ref +/- |\n"
                "|     press n / b : unipolar / bipolar   |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
-        printk("boost %s, inverter %s, modulation %s\n",
+        printk("boost %s, inverter %s, modulation %s, measurements %s\n",
                BOOST_ENABLE ? "enabled" : "disabled",
                INVERTER_ENABLE ? "enabled" : "disabled",
-               modulation == UNIPOLAR ? "unipolar" : "bipolar");
+               modulation == UNIPOLAR ? "unipolar" : "bipolar",
+               MEASUREMENTS_CALIBRATED ? "V / A" : "raw counts");
         break;
     case 'i':
         printk("idle mode\n");
@@ -416,6 +439,12 @@ void loop_communication_task()
         inverter_state = INV_OPEN_LOOP;
         break;
     case 'f':
+        if (!MEASUREMENTS_CALIBRATED)
+        {
+            printk("grid forming needs calibrated measurements "
+                   "(MEASUREMENTS_CALIBRATED)\n");
+            break;
+        }
         printk("inverter grid forming\n");
         if (inverter_state != INV_FORMING)
         {
@@ -425,6 +454,12 @@ void loop_communication_task()
         inverter_state = INV_FORMING;
         break;
     case 'w':
+        if (!MEASUREMENTS_CALIBRATED)
+        {
+            printk("grid following needs calibrated measurements "
+                   "(MEASUREMENTS_CALIBRATED)\n");
+            break;
+        }
         printk("inverter grid following\n");
         if (inverter_state != INV_FOLLOWING)
         {
@@ -450,7 +485,7 @@ void loop_communication_task()
         if (inverter_state == INV_FIXED)
             inverter_u = saturate(inverter_u + sign * 0.01F, -U_MAX, U_MAX);
         else if (inverter_state == INV_OPEN_LOOP)
-            sine_amplitude = saturate(sine_amplitude + sign * 5.0F, 0.0F, 400.0F);
+            sine_index = saturate(sine_index + sign * 0.05F, 0.0F, U_MAX);
         else if (inverter_state == INV_FORMING)
             vd_reference = saturate(vd_reference + sign * 5.0F, 0.0F, 400.0F);
         else if (inverter_state == INV_FOLLOWING)
@@ -487,7 +522,8 @@ void loop_application_task()
         spin.led.turnOff();
     }
 
-    /* V_low (raw) : V_DC : boost duty : V_AC : I_AC : inverter state :
+    /* Measurements in raw counts unless MEASUREMENTS_CALIBRATED.
+       V_low : V_DC : boost duty : V_AC : I_AC : inverter state :
        inverter phase : duty LEG3 : duty LEG4 : sync */
     printk("%.3f:", (double)V_low_value);
     printk("%.1f:", (double)V_dc_value);
@@ -579,7 +615,9 @@ bool check_protections()
             fault = true;
             fault_reason = "DC bus overvoltage";
         }
-        else if (I_ac_value > I_AC_MAX || I_ac_value < -I_AC_MAX)
+        else if (MEASUREMENTS_CALIBRATED ?
+                 (I_ac_value > I_AC_MAX || I_ac_value < -I_AC_MAX) :
+                 (I_ac_value > I_AC_MAX))
         {
             fault = true;
             fault_reason = "AC overcurrent";
@@ -728,8 +766,7 @@ void inverter_control()
     case INV_OPEN_LOOP:
     {
         sine_angle = ot_modulo_2pi(sine_angle + W0 * TS);
-        float32_t u = sine_amplitude * ot_sin(sine_angle) / v_bus;
-        u = saturate(u, -U_MAX, U_MAX);
+        float32_t u = sine_index * ot_sin(sine_angle);
         d3 = 0.5F * (1.0F + u);
         d4 = leg4_duty(d3);
         break;

@@ -75,6 +75,14 @@ static void reset_world()
 static const char *SUPPLY_ON = "pin 21 high";
 static const char *SUPPLY_OFF = "pin 21 low";
 
+/* DC bus present, AC overcurrent and DC overvoltage values, in the units of
+ * the build (raw counts by default, V / A with MEASUREMENTS_CALIBRATED) */
+static const float32_t VDC_OK = MEASUREMENTS_CALIBRATED ? 100.0F : 1000.0F;
+static const float32_t VDC_LOW = MEASUREMENTS_CALIBRATED ? 2.0F : 20.0F;
+static const float32_t VDC_TRIP = MEASUREMENTS_CALIBRATED ? 450.0F : 3300.0F;
+static const float32_t IAC_TRIP = MEASUREMENTS_CALIBRATED ? 3.5F : 4001.0F;
+static const float32_t IAC_ZERO = MEASUREMENTS_CALIBRATED ? 0.0F : 2000.0F;
+
 int main()
 {
     firmware_main();
@@ -87,7 +95,7 @@ int main()
 
     printf("== inverter fixed u, start sequence\n");
     reset_world();
-    shield.sensors.value[V_HIGH] = 100.0F;
+    shield.sensors.value[V_HIGH] = VDC_OK;
     key('v'); key('k'); key('k'); key('k');    /* u = 0.03 */
     run(HV_SUPPLY_SETTLE_TICKS + 10);
     long t_on = find(SUPPLY_ON), t_l3 = find("start 3"), t_l4 = find("start 4");
@@ -109,17 +117,17 @@ int main()
 
     printf("== start interlock (no DC bus)\n");
     reset_world();
-    shield.sensors.value[V_HIGH] = 2.0F;
+    shield.sensors.value[V_HIGH] = VDC_LOW;
     key('s'); run(HV_SUPPLY_SETTLE_TICKS + 10);
-    CHECK(find("start 3") < 0, "not started with V_DC = 2 V");
+    CHECK(find("start 3") < 0, "not started with V_DC = %.0f (below %.0f)", VDC_LOW, V_DC_MIN_START);
     CHECK(inverter_state == INV_OFF, "inverter back to off");
     run(3);
     CHECK(find(SUPPLY_OFF) >= 0, "supply switched off again");
 
     printf("== open-loop sine\n");
     reset_world();
-    shield.sensors.value[V_HIGH] = 100.0F;
-    key('s'); for (int i = 0; i < 8; i++) key('k');   /* 40 V */
+    shield.sensors.value[V_HIGH] = VDC_OK;
+    key('s'); for (int i = 0; i < 8; i++) key('k');   /* m = 0.4 */
     run(HV_SUPPLY_SETTLE_TICKS + 5);
     float32_t dmin3 = 1, dmax3 = 0, worst_sum = 0;
     for (int i = 0; i < 400; i++)
@@ -131,7 +139,7 @@ int main()
         if (fabsf(d3 + d4 - 1.0F) > worst_sum) worst_sum = fabsf(d3 + d4 - 1.0F);
     }
     CHECK(fabsf(dmax3 - 0.7F) < 0.01F && fabsf(dmin3 - 0.3F) < 0.01F,
-          "40 V on 100 V: d3 from %.3f to %.3f (0.3 - 0.7)", dmin3, dmax3);
+          "m = 0.4: d3 from %.3f to %.3f (0.3 - 0.7)", dmin3, dmax3);
     CHECK(worst_sum < 1e-5F, "unipolar: d3 + d4 = 1 all along");
 
     printf("== modulation switch\n");
@@ -150,23 +158,36 @@ int main()
 
     printf("== protections\n");
     reset_world();
-    shield.sensors.value[V_HIGH] = 100.0F;
+    shield.sensors.value[V_HIGH] = VDC_OK;
+    shield.sensors.value[I_HIGH] = IAC_ZERO;
     key('p'); key('v'); run(HV_SUPPLY_SETTLE_TICKS + 5);
     CHECK(shield.power.on[1] && shield.power.on[2], "boost and inverter running");
     events.clear();
-    shield.sensors.value[I_HIGH] = 3.5F;
+    shield.sensors.value[I_HIGH] = IAC_TRIP;
     run(1);
     CHECK(fault && find("stop ALL") >= 0 && find(SUPPLY_OFF) >= 0, "AC overcurrent: stop ALL, supply off");
     CHECK(!shield.power.on[1] && !shield.power.on[3], "all legs off");
-    shield.sensors.value[I_HIGH] = 0.0F;
+    shield.sensors.value[I_HIGH] = IAC_ZERO;
     key('p');
     CHECK(boost_state == BOOST_OFF, "keys refused while in fault");
     key('i'); run(2);
     CHECK(!fault, "fault cleared with i");
-    shield.sensors.value[V_HIGH] = 450.0F;
+    shield.sensors.value[V_HIGH] = VDC_TRIP;
     key('p'); run(2);
     CHECK(fault && !shield.power.on[1], "DC overvoltage trips the boost");
-    shield.sensors.value[V_HIGH] = 100.0F;
+    shield.sensors.value[V_HIGH] = VDC_OK;
+    if (!MEASUREMENTS_CALIBRATED)
+    {
+        /* raw: only the upper side trips (zero current reads ~2000) */
+        key('i'); run(2);
+        shield.sensors.value[I_HIGH] = 0.0F;
+        run(2);
+        CHECK(!fault, "raw: I_AC = 0 counts does not trip (no lower threshold)");
+        shield.sensors.value[I_HIGH] = 4000.0F;
+        run(2);
+        CHECK(!fault, "raw: I_AC = 4000 counts does not trip (> 4000 only)");
+        shield.sensors.value[I_HIGH] = IAC_ZERO;
+    }
 
     printf("== boost voltage loop\n");
     reset_world();
@@ -176,55 +197,70 @@ int main()
     CHECK(duty_cycle > 0.0F && duty_cycle <= 0.7F, "PID duty within 0 - 0.7 (%.3f)", duty_cycle);
     key('i'); run(2);
 
-    printf("== grid forming\n");
-    reset_world();
-    shield.sensors.value[V_HIGH] = 100.0F;
-    key('f'); for (int i = 0; i < 4; i++) key('k');   /* Vd ref 20 V */
-    run(HV_SUPPLY_SETTLE_TICKS + 5);
-    CHECK(shield.power.on[2] && shield.power.on[3], "forming: PWM on after the supply wait");
-    float32_t worst = 0;
-    for (int i = 0; i < 400; i++)
+    if (!MEASUREMENTS_CALIBRATED)
     {
-        run(1);
-        float32_t e = fabsf(shield.power.duty[2] + shield.power.duty[3] - 1.0F);
-        if (e > worst) worst = e;
+        printf("== grid forming / following refused with raw measurements\n");
+        reset_world();
+        shield.sensors.value[V_HIGH] = VDC_OK;
+        key('f');
+        CHECK(inverter_state == INV_OFF, "f refused");
+        key('w');
+        CHECK(inverter_state == INV_OFF, "w refused");
+        run(HV_SUPPLY_SETTLE_TICKS + 5);
+        CHECK(find(SUPPLY_ON) < 0 && find("start 3") < 0, "no supply, no PWM");
     }
-    CHECK(worst < 1e-4F, "forming, unipolar: LEG4 = 1 - LEG3 from getDutyLeg2()");
-    key('x'); run(3);
+    else
+    {
+        printf("== grid forming\n");
+        reset_world();
+        shield.sensors.value[V_HIGH] = 100.0F;
+        key('f'); for (int i = 0; i < 4; i++) key('k');   /* Vd ref 20 V */
+        run(HV_SUPPLY_SETTLE_TICKS + 5);
+        CHECK(shield.power.on[2] && shield.power.on[3], "forming: PWM on after the supply wait");
+        float32_t worst = 0;
+        for (int i = 0; i < 400; i++)
+        {
+            run(1);
+            float32_t e = fabsf(shield.power.duty[2] + shield.power.duty[3] - 1.0F);
+            if (e > worst) worst = e;
+        }
+        CHECK(worst < 1e-4F, "forming, unipolar: LEG4 = 1 - LEG3 from getDutyLeg2()");
+        key('x'); run(3);
 
-    printf("== grid following\n");
-    reset_world();
-    grid_on = true;
-    /* Bus too low to reproduce a 325 V peak grid (300 x 0.9 < 325) */
-    shield.sensors.value[V_HIGH] = 300.0F;
-    key('w');
-    run(20000);
-    CHECK(inverter.getSync(), "PLL locked on the 50 Hz sine");
-    CHECK(find("start 3") < 0, "no PWM while V_DC x U_MAX < grid peak");
-    /* Bus high enough */
-    shield.sensors.value[V_HIGH] = 380.0F;
-    run(400);
-    long t_start = find("start 3");
-    CHECK(t_start >= 0, "PWM on once the bus is high enough");
-    CHECK(!inverter.getSync() || t_start > find(SUPPLY_ON), "PWM after the supply");
-    /* PWM reproduces the grid voltage before any injection: u = v / V_DC */
-    float32_t worst_v = 0;
-    for (int i = 0; i < 400; i++)
-    {
-        run(1);
-        float32_t v = shield.sensors.value[V2_LOW];
-        float32_t u = 2.0F * shield.power.duty[2] - 1.0F;
-        float32_t e = fabsf(u * 380.0F - v);
-        if (e > worst_v) worst_v = e;
+        printf("== grid following\n");
+        reset_world();
+        grid_on = true;
+        /* Bus too low to reproduce a 325 V peak grid (300 x 0.9 < 325) */
+        shield.sensors.value[V_HIGH] = 300.0F;
+        key('w');
+        run(20000);
+        CHECK(inverter.getSync(), "PLL locked on the 50 Hz sine");
+        CHECK(find("start 3") < 0, "no PWM while V_DC x U_MAX < grid peak");
+        /* Bus high enough */
+        shield.sensors.value[V_HIGH] = 380.0F;
+        run(400);
+        long t_start = find("start 3");
+        CHECK(t_start >= 0, "PWM on once the bus is high enough");
+        CHECK(!inverter.getSync() || t_start > find(SUPPLY_ON), "PWM after the supply");
+        /* PWM reproduces the grid voltage before any injection: u = v / V_DC */
+        float32_t worst_v = 0;
+        for (int i = 0; i < 400; i++)
+        {
+            run(1);
+            float32_t v = shield.sensors.value[V2_LOW];
+            float32_t u = 2.0F * shield.power.duty[2] - 1.0F;
+            float32_t e = fabsf(u * 380.0F - v);
+            if (e > worst_v) worst_v = e;
+        }
+        printf("  max |u V_DC - v_grid| = %.1f V\n", worst_v);
+        CHECK(worst_v < 30.0F, "duty follows the grid voltage before injection (< 30 V)");
+        CHECK(fabsf(shield.power.duty[2] + shield.power.duty[3] - 1.0F) < 1e-4F, "unipolar LEG4 = 1 - LEG3");
+        key('e');
+        CHECK(following_power_on, "e: power injection requested");
+        key('x'); run(3);
+        CHECK(!shield.power.on[2] && find(SUPPLY_OFF, (uint32_t)t_start) >= 0, "stopped, supply off");
+        grid_on = false;
     }
-    printf("  max |u V_DC - v_grid| = %.1f V\n", worst_v);
-    CHECK(worst_v < 30.0F, "duty follows the grid voltage before injection (< 30 V)");
-    CHECK(fabsf(shield.power.duty[2] + shield.power.duty[3] - 1.0F) < 1e-4F, "unipolar LEG4 = 1 - LEG3");
-    key('e');
-    CHECK(following_power_on, "e: power injection requested");
-    key('x'); run(3);
-    CHECK(!shield.power.on[2] && find(SUPPLY_OFF, (uint32_t)t_start) >= 0, "stopped, supply off");
-    grid_on = false;
 
     printf("%d failure(s)\n", failures);
     return failures != 0;
