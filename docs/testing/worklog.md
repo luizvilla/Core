@@ -48,3 +48,18 @@ The procedure tests existing features. It must not change behaviour. Each entry 
 The leg enables are read before `scope.acquire()` instead of after; the scope does not touch the boost controller, so the values are the same. Operator commands are captured once per tick at the call to `controlStep`; the communication task cannot preempt the critical task, so this matches the previous reads.
 
 **Signature.** The procedure sketched `controlStep(Measurements, OperatorCommands)`; the implementation also takes the `ControlState` explicitly, so tests and the L1 firmware block can hold independent instances instead of sharing hidden globals.
+
+## 2026-11-05 — Temporarily build against the library fix for finding #1
+
+| Field | Value |
+|---|---|
+| Commit | the `build(app): temporarily fetch …` commit that adds this entry |
+| Files | `src/app.ini` |
+| Reason | Evaluate the proposed fix for finding [#1](https://github.com/luizvilla/Core/issues/1) (PLL never synchronizes away from 50.00 Hz) in the firmware and on hardware before it is merged upstream |
+| Behaviour change | **Yes, intended and temporary.** `lib_deps` fetches `luizvilla/single_phase_inverter` branch `fix/sogi-frequency-adaptive` (`4378319`, PR jalinei/single_phase_inverter#1) instead of `jalinei/single_phase_inverter` `main` (`0f22378`). Both SOGIs run at the PLL estimate clamped to ±5 % of ω_ref instead of the fixed ω_ref |
+| Evidence | Firmware builds (`pio run -e USB`). L0 campaign on the fetched copy: 85 pass, 0 fail, 11 info; the record lists #1 as ready to close. Measured effects: Vq ripple at 51 Hz 3.27 V → 0.039 V; cold-start synchronization at 47.6–52.4 Hz now passes; cold-start lock at 50 Hz 0.19 s → 0.29 s; app grid-qualified-to-synchronized 1.12 s → 1.14 s |
+| Hardware check | Not done |
+
+**Revert condition.** When the PR is merged into jalinei `main` (or replaced by another remedy), restore `single_phase_inverter = https://github.com/jalinei/single_phase_inverter`, delete `owntech/lib/USB/single_phase_inverter` so PlatformIO re-fetches it, run `tests/run_all.sh --l0`, close #1 with that campaign ID and mark it `Closed` in the findings register. If the PR is rejected, revert the same way and reopen the triage on #1.
+
+**Re-fetching.** PlatformIO does not always refresh a git dependency when only the URL or branch changes; deleting the library folder forces it.
