@@ -51,6 +51,14 @@ def git_state(path: Path) -> str:
     return sha + ("-dirty" if dirty else "")
 
 
+def library_source(path: Path) -> str:
+    """Where the library checkout comes from: remote repository and branch."""
+    url = run(["git", "remote", "get-url", "origin"], path)
+    repo = re.sub(r"(\.git)?$", "", re.sub(r"^.*github\.com[:/]", "", url)) if url else "unknown remote"
+    branch = run(["git", "branch", "--show-current"], path) or "detached"
+    return f"{repo} `{branch}`"
+
+
 def procedure_version() -> str:
     match = re.search(r"Procedure version \| ([^|]+)\|", PROCEDURE.read_text(encoding="utf-8"))
     return match.group(1).strip() if match else "unknown"
@@ -170,6 +178,7 @@ def main() -> int:
             f"procedure_version: {procedure_version()}",
             f"core_commit: {core}",
             f"library_commit: {library}",
+            f"library_source: {library_source(LIBRARY).replace('`', '')}",
             f"plant_model: {plant}",
             "contract_version: v0",
             f'toolchain: {{ gcc: "{gcc}", python: "{platform.python_version()}", '
@@ -206,7 +215,8 @@ def main() -> int:
             "| Item | Value |", "|---|---|",
             f"| Core commit | `{core}` |",
             f"| Library commit | `{library}` (single_phase_inverter, "
-            + (f"override `{LIBRARY}`" if LIBRARY_OVERRIDDEN else "jalinei `main`") + ") |",
+            + library_source(LIBRARY)
+            + (f", override `{LIBRARY}`" if LIBRARY_OVERRIDDEN else "") + ") |",
             f"| Plant model | {plant} |",
             "| Contract | v0 |",
             "| Control period | 100 µs (cold loop every 10 ticks) |",
