@@ -276,6 +276,31 @@ int main() {
             c.check("staleness counter at 150", state.grid_voltage_age_ticks == 150U);
         }
     }
+    {
+        // Sources: gridObserver.cpp, "An unacceptable grid at startup inhibits
+        // connection without latching a trip"; control_step.h, VAC is invalid
+        // when "no new VAC sample arrives for 20 ms". One missing sample on the
+        // very first control step (e.g. no ADC conversion ready yet at boot) is
+        // neither.
+        /** @test L0-APP-03.c: A VAC sample missing on the first control step does not latch a trip; the grid still qualifies and the inverter synchronizes */
+        tc::Criterion c("L0-APP-03.c", "A VAC sample missing on the first control step does not latch a trip; grid qualifies and inverter synchronizes (3 s)");
+        ControlState state;
+        Grid grid;
+        float held = 0.0F;
+        OperatorCommands cmd;
+        cmd.sync_requested = true;
+        c.check("controlInit", controlInit(state) == 0);
+        gridStep(state, grid, cmd, false, held);  // boot: no VAC sample yet
+        bool qualified = false, synced = false;
+        for (int n = 0; n < 3 * ticks_per_s; ++n) {
+            gridStep(state, grid, cmd, true, held);
+            qualified |= state.grid_observer.canOperate();
+            synced |= state.inverter.getSync();
+        }
+        c.check("no trip latched", !state.grid_observer.isTripped());
+        c.check("observer qualifies the grid", qualified);
+        c.check("inverter synchronizes", synced);
+    }
 
     // ---------------------------------------------------------------- L0-APP-04
     {

@@ -34,9 +34,15 @@ These are exactly the sources the firmware compiles behind `controlStep()`.
 |---|---|---|
 | L0-APP-01 | .a – .c | `controlInit` applies the app tuning; a mode change is flagged on its tick only and runs the cold loop on that tick; leg enables and duties are the controller's; IDLE leaves the legs untouched |
 | L0-APP-02 | .a, .b | Cold loop on the change tick then every 10th tick (20 in 200 ticks); a new mode change restarts the phase |
-| L0-APP-03 | .a, .b | VAC stale for exactly 200 periods trips the observer with `InvalidMeasurement`; one fresh sample restarts the count |
+| L0-APP-03 | .a – .c | VAC stale for exactly 200 periods trips the observer with `InvalidMeasurement`; one fresh sample restarts the count; one sample missing at boot does not latch a trip |
 | L0-APP-04 | .a | Over every mode, with and without a sync request, `bridge_enable` stays false and the inverter never requests PWM or the relay |
 | L0-APP-05 | .a, .d; INFO .b, .c | Synchronization only after the observer qualifies (and 1000 calls later); an under-voltage trip removes synchronization on the trip tick; times to qualification and synchronization |
+
+## Known findings
+
+| Criterion | Status | Issue |
+|---|---|---|
+| L0-APP-03.c | `FAIL`: one missing VAC sample on the first control step latches `InvalidMeasurement`; nothing calls `clearTrip()`, so the inverter never synchronizes until reset | [luizvilla/Core#2](https://github.com/luizvilla/Core/issues/2) |
 
 ## History
 
