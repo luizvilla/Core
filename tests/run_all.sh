@@ -47,6 +47,7 @@ object_code() {
         grid_observer) echo GOB ;;
         inverter_following) echo GFL ;;
         app) echo APP ;;
+        l1) echo FWB ;;
         *) echo "$1" | tr '[:lower:]' '[:upper:]' ;;
     esac
 }
@@ -69,8 +70,8 @@ run_script() {
 
 for level in "${levels[@]}"; do
     dir="$repo/tests/${level,,}"
-    if [ "$level" = L1 ] && [ -x "$dir/run.sh" ]; then
-        run_script L1 "$dir/run.sh"
+    if [ "$level" = L1 ] && [ -f "$dir/run.sh" ]; then
+        L1_OUT_DIR="$out" run_script L1 "$dir/run.sh"
         continue
     fi
     shopt -s nullglob

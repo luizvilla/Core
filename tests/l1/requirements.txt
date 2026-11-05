@@ -1,0 +1,4 @@
+# L1 simulation environment (procedure §7.2). Pinned: simulator behaviour affects results.
+pulsim==2.0.0
+numpy
+matplotlib

@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Procedure version | 0.8 (draft) |
+| Procedure version | 0.9 (draft) |
 | Firmware under test | Core2 branch `test/microinverter-validation`, application in `src/` |
 | Hardware target | Spin 1.2.0 + uSolarVerter 0.9.0 |
 | Owner | Luiz Villa |
@@ -75,9 +75,9 @@ ControlOutputs controlStep(ControlState&, const Measurements&, const OperatorCom
 
 `main.cpp` keeps reading sensors and writing PWM through the shield API. On the host, L0 calls `controlStep` directly. For L1, `controlStep` and the controller sources are compiled into a shared library that exports the Pulsim C-Block ABI (`pulsim_cblock_step`) and runs every 100 µs. Pulsim holds the outputs (zero-order hold) between steps.
 
-## 3. Model ↔ firmware block contract (v0)
+## 3. Model ↔ firmware block contract (v1)
 
-> **v0, to be revised when the plant model arrives.** Any change is recorded in the [changelog](#10-changelog) and the version number goes up.
+> **v1, to be revised when the plant model arrives.** Any change is recorded in the [changelog](#10-changelog) and the version number goes up. The order below is the wire order of the C-block; it is implemented in `tests/l1/firmware_block/firmware_block.cpp` and `contract.py`, which check each other's version at load time.
 
 All values are physical units, sampled every 100 µs (control-task period).
 
@@ -99,7 +99,14 @@ All values are physical units, sampled every 100 µs (control-task period).
 | Block → model | `duty_bridge` | 0–1 | Inverter leg duty |
 | Block → model | `en_bridge` | 0/1 | Inverter bridge PWM enable |
 | Block → model | `relay_request` | 0/1 | Optional; relay close request |
-| Block → log | `theta`, `w`, observer RMS, observer frequency, trip reason, inverter mode, burst paused | — | Logged, not fed back |
+| Block → log | `theta`, `w`, `obs_rms`, `obs_freq`, `trip_reason`, `inv_mode`, `sync`, `burst_paused`, `mode_changed`, `status` | — | Logged, not fed back. `status` 0 = running; negative = `controlInit` failed or wrong wire count |
+
+**Wiring rules (Pulsim 2.0.0).**
+
+- Every block output is a controlled voltage source to `gnd` and **must be loaded**; `contract.add_firmware_block()` adds 1 MΩ on each. An unloaded output makes the circuit matrix singular and node voltages diverge without an error.
+- The firmware block is the **only C-block** in a circuit: Pulsim 2.0.0 sums the output vectors of several C-blocks with different lengths and fails. Operator commands therefore come from ordinary step sources (`contract.add_command_timeline()`), not from a scenario C-block.
+- C-blocks are added **after** every other component, because Pulsim resolves their wires when they are added.
+- Pulsim calls the block once at t = 0 before solving the circuit (all inputs 0). The block skips that call; the first control step runs at t = 100 µs. Inputs are sampled at the block's next run, so a command or measurement change is seen within one control period, as on the board.
 
 ## 4. Test case identification
 
@@ -111,6 +118,7 @@ Format: `<level>-<object>-<nn>`. A criterion inside a case adds a letter: `L1-AP
 | `GOB` | Grid observer |
 | `GFL` | Grid-following inverter controller (library) |
 | `APP` | Application control step |
+| `FWB` | Firmware block in the simulator (L1 infrastructure) |
 
 When the same criterion runs once per mode, the mode is appended: `L0-BST-07.a-startup`, `L0-BST-07.a-busreg`.
 
@@ -191,7 +199,15 @@ The "Source" column names the symbol that states the behaviour or the limit. Sym
 | L1-APP-08 | VAC samples lost for more than 20 ms | trip with reason `InvalidMeasurement` | averaged | BLOCKED (model) |
 | L1-APP-09 | Every mode → every other mode | legs stopped on the switching tick; peak current `INFO` | averaged | BLOCKED (model) |
 
-### 6.6 L1-GFL — library only, through a test harness
+### 6.6 L1-FWB — firmware block (infrastructure)
+
+Checks that the simulation tooling itself is sound before any L1-APP result is trusted. Uses a stand-in circuit of fixed sources, not the plant model.
+
+| ID | Behaviour | Status |
+|---|---|---|
+| L1-FWB-01 | Firmware block loads with the matching contract; runs every 100 µs and holds outputs; grid voltage arrives in volts (observer reads 230 V / 50 Hz); commands arrive within one period; an output drives a circuit element; bridge and relay never requested; inverter synchronizes; no node diverges; time to sync and wall time per simulated second `INFO` | Implemented |
+
+### 6.7 L1-GFL — library only, through a test harness
 
 These cases exercise library features the application does not use. They run the library through a small test-only harness, **not** through `controlStep`, so nobody reads them as application behaviour.
 
@@ -238,7 +254,7 @@ A failing observation does not stop the test, so every criterion gets a verdict.
 |---|---|
 | C++ compiler | `g++` with C++17 and UBSan (`-fsanitize=undefined`) |
 | Python | ≥ 3.10, in a `.venv` at the repo root |
-| Pulsim | `pulsim==2.0.0`, from `tests/l1/plant/requirements.txt` |
+| Pulsim | `pulsim==2.0.0`, from `tests/l1/requirements.txt`: `python3 -m venv .venv && .venv/bin/pip install -r tests/l1/requirements.txt`. Without it, every L1 case is reported `BLOCKED` |
 | Inverter library | Fetched by PlatformIO into `owntech/lib/USB/single_phase_inverter` from the `lib_deps` entry in `src/app.ini` (jalinei `main`; temporarily the #1 fix branch); its remote, branch and commit are stamped in each record |
 
 ### 7.3 Test code documentation
@@ -350,7 +366,7 @@ On branch `test/microinverter-validation` (from `dts_uverter`), pushed to `luizv
 | 4 | `test(l0)` | L0-GFL cases | No |
 | 5 | `refactor(app)` | Extract `controlStep` into `src/app/`; worklog entry | **Yes** |
 | 6 | `test(l0)` | L0-APP cases | No |
-| 7 | `test(l1)` | Firmware block `.so` build, pinned Pulsim environment, connection check against a stand-in RC circuit | No |
+| 7 | `test(l1)` | Firmware block `.so` build, pinned Pulsim environment, L1-FWB-01 against a stand-in circuit; contract v1 | No |
 | 8 | `test(l1)` | Scenario runner and all L1 case scripts (`BLOCKED`) | No |
 | 9 | `test(l1)` | Import the averaged plant model (authored by the colleague); contract revised | No |
 | gate | — | Finding [#1](https://github.com/luizvilla/Core/issues/1) closed (fix merged in the library, L0-GFL-03.b and L0-GFL-08 pass); otherwise L1-APP-06 and -07 cannot be judged | No (library) |
@@ -378,6 +394,7 @@ flowchart LR
 | 0.6 | 2026-11-05 | L0-APP implemented against `controlStep` with the application's real tuning and real-time grid delays. |
 | 0.7 | 2026-11-05 | L0-GFL-08 added (cold-start synchronization across the frequency window), after an experimental fix for #1 synchronized on a 51 Hz step but diverged on a 49 Hz cold start, which L0-GFL-03 does not cover. §11 findings register; records mark known and new failures and findings ready to close. Gate on #1 before commit 10. `SINGLE_PHASE_INVERTER_DIR` tests a library branch before merge. |
 | 0.8 | 2026-11-05 | `src/app.ini` temporarily fetches the #1 fix branch (worklog). Records stamp the library's remote and branch, not only its commit. |
+| 0.9 | 2026-11-05 | Contract v1: outputs `sync`, `mode_changed`, `status` added; Pulsim wiring rules (loaded outputs, single C-block, blocks last, t = 0 skipped, one-period input latency). L1-FWB-01 added (§6.6); L1-GFL becomes §6.7. Pulsim environment in `tests/l1/requirements.txt`. Records read the contract version from §3. |
 
 ## 11. Findings register
 

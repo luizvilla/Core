@@ -34,7 +34,7 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
 | `g++` with C++17 and UBSan | L0 |
 | `python3` ≥ 3.10 (standard library only) | Writing the record |
 | A PlatformIO build of the USB environment, once | Fetches `control_library` and `single_phase_inverter` into `owntech/lib/USB/` |
-| Pulsim (`pulsim==2.0.0`) in `.venv` | L1 (not yet available) |
+| `.venv` with [`l1/requirements.txt`](l1/requirements.txt) (`pulsim==2.0.0`) | L1; without it L1 is reported `BLOCKED` |
 
 ## Layout
 
@@ -45,7 +45,7 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
 | [`l0/boost/`](l0/boost/README.md) | L0-BST: boost converter controller |
 | [`l0/grid_observer/`](l0/grid_observer/README.md) | L0-GOB: grid observer |
 | [`l0/inverter_following/`](l0/inverter_following/README.md) | L0-GFL: grid-following inverter library |
-| `l1/` | L1: firmware block in Pulsim (planned, commits 7–10) |
+| [`l1/`](l1/README.md) | L1: firmware block in Pulsim; L1-FWB-01 now, plant model and L1-APP to come |
 | `out/` | Generated test records (git-ignored) |
 
 ## Adding a test

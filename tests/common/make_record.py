@@ -59,6 +59,12 @@ def library_source(path: Path) -> str:
     return f"{repo} `{branch}`"
 
 
+def contract_version() -> str:
+    """Contract version from the procedure's §3 heading, e.g. "v1"."""
+    match = re.search(r"## 3\. Model .* contract \((v\d+)\)", PROCEDURE.read_text(encoding="utf-8"))
+    return match.group(1) if match else "unknown"
+
+
 def procedure_version() -> str:
     match = re.search(r"Procedure version \| ([^|]+)\|", PROCEDURE.read_text(encoding="utf-8"))
     return match.group(1).strip() if match else "unknown"
@@ -180,7 +186,7 @@ def main() -> int:
             f"library_commit: {library}",
             f"library_source: {library_source(LIBRARY).replace('`', '')}",
             f"plant_model: {plant}",
-            "contract_version: v0",
+            f"contract_version: {contract_version()}",
             f'toolchain: {{ gcc: "{gcc}", python: "{platform.python_version()}", '
             f'pulsim: "{pulsim_version()}" }}',
             f"levels: [{', '.join(levels)}]",
@@ -218,7 +224,7 @@ def main() -> int:
             + library_source(LIBRARY)
             + (f", override `{LIBRARY}`" if LIBRARY_OVERRIDDEN else "") + ") |",
             f"| Plant model | {plant} |",
-            "| Contract | v0 |",
+            f"| Contract | {contract_version()} |",
             "| Control period | 100 µs (cold loop every 10 ticks) |",
             f"| Toolchain | gcc {gcc}, Python {platform.python_version()}, "
             f"Pulsim {pulsim_version()} |",
