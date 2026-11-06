@@ -178,8 +178,9 @@
 			sensor-name = "IAC";
 			default-adc = "ADC_2";
 			default-order = <2>;
-			default-gain = <0x3ba3d70a>;
-			default-offset = <0xc1200000>;
+			/* I[A] = ADC counts * (0.0005 / 0.29766) - (1.02368866 / 0.29766). */
+			default-gain = <0x3adc2bb1>; /* 0.00167976886 A/count */
+			default-offset = <0xc05c1a8e>; /* -3.43912069 A */
 			sensor-conv-type = "LINEAR";
 			i-ac-adc1 {
 				io-channels = <&adc1 8>;
