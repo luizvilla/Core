@@ -137,6 +137,12 @@ static bool relay_closed = false;
 static uint16_t relay_hold_ticks = 0U;
 /* Critical task load: longest run since the last telemetry line, in µs (period 100 µs). */
 static volatile uint32_t critical_max_us = 0U;
+/* Critical task calls, to check the real call rate against the 10 kHz the controllers assume. */
+static volatile uint32_t critical_calls = 0U;
+static uint32_t rate_prev_calls = 0U;
+static int64_t rate_prev_ms = 0;
+/* Menu 'v': 10 kHz capture in CONNECT/INJECT (default) or 2 kHz as in the other stages. */
+static bool scope_fast_connect = true;
 /* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
 static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
 static inline void notePart(int part, uint32_t from, uint32_t to)
@@ -320,6 +326,7 @@ void loop_communication_task()
                "|     press r : retrieve scope data      |\n"
                "|     press q : restart scope acquisition|\n"
                "|     press f : force scope trigger now  |\n"
+               "|     press v : CONNECT scope 10k/2k Hz  |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
         break;
@@ -435,6 +442,10 @@ void loop_communication_task()
         scope.start();
         printk("scope acquisition restarted\n");
         break;
+    case 'v':
+        scope_fast_connect = !scope_fast_connect;
+        printk("scope in CONNECT/INJECT: %s\n", scope_fast_connect ? "10 kHz" : "2 kHz");
+        break;
     case 'f':
         scope_force_trigger = true;
         printk("scope trigger forced: wait 70 ms, then r\n");
@@ -485,9 +496,16 @@ void loop_application_task()
     const dqo_t pq = control.inverter.getPower();
     const uint32_t load_us = critical_max_us;
     critical_max_us = 0U;
-    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u\n", static_cast<unsigned int>(load_us),
+    const uint32_t calls = critical_calls;
+    const int64_t now_ms = k_uptime_get();
+    const uint32_t rate_hz = now_ms > rate_prev_ms ?
+        static_cast<uint32_t>((static_cast<int64_t>(calls - rate_prev_calls) * 1000) / (now_ms - rate_prev_ms)) : 0U;
+    rate_prev_calls = calls;
+    rate_prev_ms = now_ms;
+    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u, rate %u Hz\n", static_cast<unsigned int>(load_us),
            static_cast<unsigned int>(part_max_us[0]), static_cast<unsigned int>(part_max_us[1]),
-           static_cast<unsigned int>(part_max_us[2]), static_cast<unsigned int>(part_max_us[3]));
+           static_cast<unsigned int>(part_max_us[2]), static_cast<unsigned int>(part_max_us[3]),
+           static_cast<unsigned int>(rate_hz));
     for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
     /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
     const dqo_t vdq_avg = control.inverter.getVdqAverage();
@@ -516,6 +534,7 @@ void loop_application_task()
 void loop_critical_task()
 {
     const uint32_t critical_start = k_cycle_get_32();
+    ++critical_calls;
     /*----- Read sensors, holding the last valid value ----- */
     meas_data = shield.sensors.getLatestValue(ILow1);
     if (meas_data != NO_VALUE) i_low_1_value = meas_data;
@@ -680,7 +699,8 @@ void loop_critical_task()
     scope_bridge_on = control.bridge_pwm_applied ? 1.0F : 0.0F;
     scope_bridge_duty = control.bridge_pwm_applied ? out.bridge_duty : 0.0F;
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
-    const uint16_t divider = (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) ? 1U : scope_sample_divider;
+    const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT)) ?
+                             1U : scope_sample_divider;
     if (++scope_sample_tick >= divider)
     {
         scope_sample_tick = 0U;

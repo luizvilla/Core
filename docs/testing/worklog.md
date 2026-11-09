@@ -281,3 +281,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | The `sync:` line ends with `fault <vsi_fault_reason_t>`. In CONNECT and INJECT the scope also triggers when the inverter enters FAULT, and `g` / `n` re-arm it (armed during `c`, it fills on the synchronization before `g`). No control change |
 | Evidence | Firmware builds |
 | Hardware check | Bench: `c`, `g`; read `fault`, download the capture |
+
+## 2026-11-09 — Telemetry: critical task call rate; CONNECT capture rate selectable
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(telemetry): critical task call rate …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench L2-INV-04, capture 2026-11-09_20-24-38: about 6 ms after `g` (relay never commanded) the inverter faults. After `g`, VAC advances irregularly from one tick to the next (1–2 V steps then 25–30 V steps near the zero crossing, where a 50 Hz sine moves about 10 V per 100 µs tick), and the PLL frequency climbs from 310 to 337 rad/s while the grid stays at 50 Hz. Same PLL code as step 1, where it holds for minutes; `g` adds a 10 kHz capture and the library's settle counter (double precision, software-emulated on the M4) to a task already at about 80 µs of its 100 µs |
+| Behaviour change | The `load us:` line ends with `rate <Hz>`, the measured call rate of the critical task (expected 10000). Menu `v` switches the CONNECT/INJECT capture between 10 kHz (default) and 2 kHz. No control change |
+| Evidence | Firmware builds |
+| Hardware check | Bench: `rate` in `c` and after `g`; `g` with `v` (2 kHz capture) |
