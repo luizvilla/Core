@@ -215,3 +215,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds; RAM 30 % |
 | Hardware check | Bench: `load_us` in each stage |
 
+## 2026-11-09 — Critical task overrun: per-part timing, constant-cost averaging window
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(load): …` commit that adds this entry; library `fix/sync-period-average` at `3eac7db` |
+| Files | `src/main.cpp`, `tests/l1/dependencies.lock.json` |
+| Reason | Bench: `load_us` read 118 µs with the inverter OFF and 119 µs in `c`, above the 100 µs period; after `o` the telemetry stopped (background tasks starved) |
+| Behaviour change | Library: the averaging window no longer recomputes its sums over all samples once per period (about 3000 cycles in one call); shadow sums replace them at constant cost. Firmware: a `load us:` line every 100 ms gives the longest run of the whole task and of each part (sensors, control step, PWM and relay application, scope) |
+| Evidence | L0-GFL-10/13 results unchanged (averaged \|Vq\| ≤ 0.055 V); firmware builds |
+| Hardware check | Bench: the `load us:` line in OFF, `c` and `o` |
+

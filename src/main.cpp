@@ -137,6 +137,13 @@ static bool relay_closed = false;
 static uint16_t relay_hold_ticks = 0U;
 /* Critical task load: longest run since the last telemetry line, in µs (period 100 µs). */
 static volatile uint32_t critical_max_us = 0U;
+/* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
+static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
+static inline void notePart(int part, uint32_t from, uint32_t to)
+{
+    const uint32_t us = k_cyc_to_us_floor32(to - from);
+    if (us > part_max_us[part]) part_max_us[part] = us;
+}
 
 /* The burst generator is running on leg 1. */
 static bool burst_running = false;
@@ -468,6 +475,10 @@ void loop_application_task()
     const dqo_t pq = control.inverter.getPower();
     const uint32_t load_us = critical_max_us;
     critical_max_us = 0U;
+    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u\n", static_cast<unsigned int>(load_us),
+           static_cast<unsigned int>(part_max_us[0]), static_cast<unsigned int>(part_max_us[1]),
+           static_cast<unsigned int>(part_max_us[2]), static_cast<unsigned int>(part_max_us[3]));
+    for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
     printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f:%u\n", static_cast<unsigned int>(inverter_stage),
            static_cast<unsigned int>(control.inverter.getMode()), static_cast<unsigned int>(relay_command),
            static_cast<unsigned int>(relay_closed), (double)idq.d, (double)idq.q, (double)pq.d, (double)pq.q,
@@ -514,6 +525,8 @@ void loop_critical_task()
         v_dc_bus_value = meas_data;
     }
 
+    const uint32_t t_sensed = k_cycle_get_32();
+    notePart(0, critical_start, t_sensed);
     /*----- Control logic (hardware-free, see app/control_step.h) ----- */
     Measurements meas{};
     meas.i_low_1 = i_low_1_value;
@@ -532,6 +545,8 @@ void loop_critical_task()
     cmd.v_bus_ref = voltage_reference;
 
     const ControlOutputs out = controlStep(control, meas, cmd);
+    const uint32_t t_controlled = k_cycle_get_32();
+    notePart(1, t_sensed, t_controlled);
     boost_duty = out.boost_duty;
     grid_angle = out.grid_angle;
 
@@ -621,6 +636,8 @@ void loop_critical_task()
         relay_closed = relay_command;
     }
 
+    const uint32_t t_applied = k_cycle_get_32();
+    notePart(2, t_controlled, t_applied);
     /* Snapshot after this tick's control, grid verdict and PWM application. */
     const clarke_t grid_voltage_ab = control.inverter.getVab();
     const dqo_t grid_voltage_dq = control.inverter.getVdq();
@@ -642,7 +659,9 @@ void loop_critical_task()
         scope_sample_tick = 0U;
         if (!is_scope_downloading) scope.acquire();
     }
-    const uint32_t critical_us = k_cyc_to_us_floor32(k_cycle_get_32() - critical_start);
+    const uint32_t t_end = k_cycle_get_32();
+    notePart(3, t_applied, t_end);
+    const uint32_t critical_us = k_cyc_to_us_floor32(t_end - critical_start);
     if (critical_us > critical_max_us) critical_max_us = critical_us;
 }
 
