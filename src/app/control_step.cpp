@@ -35,6 +35,10 @@ int8_t controlInit(ControlState &state)
                          app::boost_current_params, app::leg1_current_limit) != 0 ||
         state.inverter.init(app::initial_voltage_reference, app::grid_voltage_peak,
                             app::grid_angular_frequency, app::hot_loop_period) != 0 ||
+        !state.inverter.setCurrentPiGains(app::inverter_current_kp, app::inverter_current_ti) ||
+        !state.inverter.setCurrentPiLimit(app::inverter_current_limit) ||
+        !state.inverter.setCurrentSogiGain(app::inverter_current_sogi_gain) ||
+        !state.inverter.setOutputPhaseAdvance(app::inverter_output_phase_advance) ||
         !state.grid_observer.init(app::grid_observer_config))
     {
         return -1;

@@ -50,6 +50,10 @@ inline constexpr uint8_t cold_loop_divider = 10U;
 
 /** @brief Minimum PWM duty cycle applied to every leg. */
 inline constexpr float32_t duty_cycle_min = 0.005F;
+/** @brief Maximum PWM duty cycle of the inverter high sides (LEG1_HIGH, LEG2_HIGH). The driver intersects the
+ * two legs' limits, so the bridge duty spans 1 - 0.95 to 0.95: ±360 V at 400 V against a 325 V grid peak (the
+ * driver default 0.1-0.9 gives ±320 V and clips, docs/testing/inverter-current-loop-design.md §3.4). */
+inline constexpr float32_t duty_cycle_max_high_side = 0.95F;
 
 /* Controller timing and initial tuning; validate gains/current limits on hardware. */
 /** @brief Hot (current) loop period, in s. */
@@ -142,6 +146,22 @@ inline constexpr uint16_t relay_contact_ticks = 200U;
 /** @brief Relay closing time, command to contact (bench 2026-11-09: 9.7 ms). The command is issued this long
  * before a grid-voltage zero crossing, so the contact closes near zero voltage; 0 commands at once. */
 inline constexpr float32_t relay_close_delay = 0.0097F;
+
+/*
+ * Inverter current loop: initial values set on the library at controlInit() (the library defaults are
+ * Kp 0.001 V/A, Ti 0.3 ms, current SOGI 500 rad/s, no advance: no current control in practice). Candidate C of
+ * docs/testing/inverter-current-loop-design.md, 500 µH without output chokes; L1-GFL-09…13.
+ */
+/** @brief Current PI proportional gain, in V/A. */
+inline constexpr float32_t inverter_current_kp = 1.0F;
+/** @brief Current PI integral time, in s. */
+inline constexpr float32_t inverter_current_ti = 0.005F;
+/** @brief Current PI output limit (correction added to the voltage feedforward), in V. */
+inline constexpr float32_t inverter_current_limit = 30.0F;
+/** @brief Current SOGI resonance gain, in rad/s (dq low-pass at half this value on the measured current). */
+inline constexpr float32_t inverter_current_sogi_gain = 2000.0F;
+/** @brief Output rotation advance compensating the actuation delay, in control periods. */
+inline constexpr float32_t inverter_output_phase_advance = 0.5F;
 
 }  // namespace app
 

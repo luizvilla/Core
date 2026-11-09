@@ -846,5 +846,90 @@ int main() {
         inv.setPwmSettleCycles(10);
     }
 
+    // ---------------------------------------------------------------- L0-GFL-17
+    {
+        /** @test L0-GFL-17.a: Current-loop settings default to the library's historical values */
+        tc::Criterion c("L0-GFL-17.a", "Current-loop settings default to the library's historical values");
+        singlePhaseInverterFollowing inv;
+        c.check("init", initDefault(inv));
+        c.near("Kp (V/A)", inv.getCurrentPiKp(), 0.001, 1e-9);
+        c.near("Ti (s)", inv.getCurrentPiTi(), 0.0003, 1e-9);
+        c.near("limit (V)", inv.getCurrentPiLimit(), 30.0, 1e-6);
+        c.near("current SOGI gain (rad/s)", inv.getCurrentSogiGain(), 500.0, 1e-6);
+        c.near("output advance (periods)", inv.getOutputPhaseAdvance(), 0.0, 0.0);
+    }
+    {
+        /** @test L0-GFL-17.b: Invalid current-loop settings are rejected and leave the configuration unchanged */
+        tc::Criterion c("L0-GFL-17.b", "Invalid current-loop settings are rejected and leave the configuration unchanged");
+        singlePhaseInverterFollowing inv;
+        c.check("init", initDefault(inv));
+        for (float x : {0.0F, -1.0F, f_nan, f_inf}) {
+            c.check("Kp rejected", !inv.setCurrentPiGains(x, 0.005F));
+            c.check("Ti rejected", !inv.setCurrentPiGains(1.0F, x));
+            c.check("limit rejected", !inv.setCurrentPiLimit(x));
+            c.check("SOGI gain rejected", !inv.setCurrentSogiGain(x));
+        }
+        c.check("SOGI gain with Kr·Ts = 1 rejected", !inv.setCurrentSogiGain(1.0F / Ts));
+        for (float x : {-0.1F, 2.1F, f_nan, f_inf})
+            c.check("advance rejected", !inv.setOutputPhaseAdvance(x));
+        c.near("Kp unchanged", inv.getCurrentPiKp(), 0.001, 1e-9);
+        c.near("Ti unchanged", inv.getCurrentPiTi(), 0.0003, 1e-9);
+        c.near("limit unchanged", inv.getCurrentPiLimit(), 30.0, 1e-6);
+        c.near("SOGI gain unchanged", inv.getCurrentSogiGain(), 500.0, 1e-6);
+        c.near("advance unchanged", inv.getOutputPhaseAdvance(), 0.0, 0.0);
+    }
+    {
+        /** @test L0-GFL-17.c: Settings made before or after init() are kept across init() */
+        tc::Criterion c("L0-GFL-17.c", "Settings made before or after init() are kept across init()");
+        singlePhaseInverterFollowing inv;
+        c.check("SOGI gain accepted before init", inv.setCurrentSogiGain(2000.0F));
+        c.check("init", initDefault(inv));
+        c.check("gains accepted", inv.setCurrentPiGains(1.0F, 0.005F));
+        c.check("limit accepted", inv.setCurrentPiLimit(20.0F));
+        c.check("advance accepted", inv.setOutputPhaseAdvance(0.5F));
+        c.check("init again", initDefault(inv));
+        c.near("Kp", inv.getCurrentPiKp(), 1.0, 1e-7);
+        c.near("Ti", inv.getCurrentPiTi(), 0.005, 1e-9);
+        c.near("limit", inv.getCurrentPiLimit(), 20.0, 1e-6);
+        c.near("SOGI gain", inv.getCurrentSogiGain(), 2000.0, 1e-6);
+        c.near("advance", inv.getOutputPhaseAdvance(), 0.5, 1e-7);
+    }
+    {
+        /** @test L0-GFL-17.d: While the current loop runs, gains and advance change live; limit and SOGI gain are refused */
+        tc::Criterion c("L0-GFL-17.d", "While the current loop runs, gains and advance change live; limit and SOGI gain are refused");
+        singlePhaseInverterFollowing inv;
+        Grid grid;
+        if (reachRun(c, inv, grid)) {
+            // I_d ref 1 A, measured 0: the PI correction is Kp · 1 A on the first step after the change.
+            step(inv, grid);
+            const float low = inv.getVdqOut().d - inv.getVdq().d;
+            c.check("gains accepted in RUN", inv.setCurrentPiGains(5.0F, 0.005F));
+            step(inv, grid);
+            const float high = inv.getVdqOut().d - inv.getVdq().d;
+            c.check("still RUN", inv.getMode() == VSI_RUN);
+            c.check("default correction below 0.1 V", std::fabs(low) < 0.1F);
+            c.check("Kp 5 V/A: correction above 4 V", high > 4.0F);
+            c.check("limit refused in RUN", !inv.setCurrentPiLimit(10.0F));
+            c.check("SOGI gain refused in RUN", !inv.setCurrentSogiGain(2000.0F));
+            c.check("advance accepted in RUN", inv.setOutputPhaseAdvance(1.0F));
+            c.near("limit unchanged", inv.getCurrentPiLimit(), 30.0, 1e-6);
+            c.near("SOGI gain unchanged", inv.getCurrentSogiGain(), 500.0, 1e-6);
+        }
+    }
+    {
+        /** @test L0-GFL-17.e: The output advance rotates the output voltage by advance · w · Ts, magnitude unchanged */
+        tc::Criterion c("L0-GFL-17.e", "The output advance rotates the output voltage by advance · w · Ts, magnitude unchanged");
+        singlePhaseInverterFollowing a, b;
+        Grid ga, gb;
+        c.check("advance accepted", b.setOutputPhaseAdvance(1.0F));
+        c.check("reach GRID_CONNECT (no advance)", reachConnect(c, a, ga));
+        c.check("reach GRID_CONNECT (advance 1)", reachConnect(c, b, gb));
+        const clarke_t va = a.getVabOutput(), vb = b.getVabOutput();
+        // Each controller links its waveform at its own tick, so compare angles relative to each one's theta.
+        const double angle = wrap((std::atan2(vb.beta, vb.alpha) - b.getTheta()) - (std::atan2(va.beta, va.alpha) - a.getTheta()));
+        c.near("same magnitude (V)", std::hypot(vb.alpha, vb.beta), std::hypot(va.alpha, va.beta), 1e-2);
+        c.near("rotated by w·Ts (rad)", angle, b.getw() * Ts, 1e-4);
+    }
+
     return tc::finish();
 }

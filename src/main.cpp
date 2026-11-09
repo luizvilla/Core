@@ -252,6 +252,8 @@ void setup_routine()
     shield.power.setDutyCycleMin(LEG1_LOW, app::duty_cycle_min);
     shield.power.setDutyCycleMin(LEG1_HIGH, app::duty_cycle_min);
     shield.power.setDutyCycleMin(LEG2_HIGH, app::duty_cycle_min);
+    shield.power.setDutyCycleMax(LEG1_HIGH, app::duty_cycle_max_high_side);
+    shield.power.setDutyCycleMax(LEG2_HIGH, app::duty_cycle_max_high_side);
     shield.power.setDutyCycleMax(LEG1_LOW, app::duty_cycle_max);
     // shield.power.setDutyCycleMax(LEG2_LOW, app::duty_cycle_max);
     

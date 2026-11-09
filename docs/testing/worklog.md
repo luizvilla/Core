@@ -347,3 +347,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Menu `z` (amended the same day: it re-arms the scope with the bench trip as trigger, and the 3 A sample comes 100 ms later so the pre-trigger half is filled; the CONNECT trigger otherwise fires on the relay closing): one control period reads IAC as 3 A (above `app::bench_inverter_current_trip`, 1.5 A); the scope's IAC channel shows it. The trip logic itself is unchanged (covered by L0-APP-08). L2-INV-04 gets criterion .f |
 | Evidence | Firmware builds |
 | Hardware check | Bench L2-INV-04.f: `z` in GRID_CONNECTED → fault, bridge stopped and relay command dropped in the same period, latched until `x` |
+
+## 2026-11-10 — Inverter current loop set from the application; inverter duty limit 0.95
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): inverter current-loop settings …` commit that adds this entry; library `luizvilla/single_phase_inverter` `ab35e2f` (`fix/sync-period-average`) |
+| Files | `owntech/lib/USB/single_phase_inverter/src/singlePhaseInverterFollowing.{h,cpp}`, `src/app/control_step.{h,cpp}`, `src/main.cpp`, `tests/l1/dependencies.lock.json` |
+| Reason | The current PI was hard-coded in the library (Kp 0.001 V/A, Ti 0.3 ms: no current control in practice, [design note](inverter-current-loop-design.md)). Luiz Villa asked for setters and getters so the values are set from the application and can be explored in experiments, and for the inverter duty limit 0.95 as a named constant (`duty_cycle_max_high_side`) |
+| Behaviour change | Yes. Library: new setters/getters, defaults unchanged; the INVALID_CONTROL_STATE recovery now re-initializes the current SOGI with the configured gain instead of 500. Application: `controlInit()` sets candidate C (Kp 1 V/A, Ti 5 ms, limit 30 V, current SOGI 2000 rad/s, advance 0.5 period). `main.cpp`: LEG1_HIGH and LEG2_HIGH maximum duty 0.95 (Luiz Villa's two lines, now with the constant); with the 0.005 minimum the bridge duty spans 0.05–0.95 |
+| Evidence | Firmware builds. L0: L0-GFL-17.a–e pass (new); the other L0 results are unchanged, L0-APP-03.c fails as before (finding #2). L1 (switched model, 2026-11-10): with today's library behaviour the connection trips at the contact whatever the gains (no current PI in GRID_CONNECT; through the bulb the PLL locks on the inverter's own voltage), see the design note §6; the C gains alone do not make step 2 pass |
+| Hardware check | Not done |
