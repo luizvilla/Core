@@ -149,6 +149,8 @@ static inline void notePart(int part, uint32_t from, uint32_t to)
 static bool burst_running = false;
 /* Stage neutral bridge duty for one control tick before enabling PWM. */
 static bool inverter_pwm_staged = false;
+/* Bridge outputs started (start/stop are applied on changes only, not every tick). */
+static bool bridge_outputs_on = false;
 
 /* Bench calibration of this board (2026-11-09), applied on top of the default conversion:
  * - VDCBus: meter 99.54 V read 96.4 V, meter 399.4 V read 357.4 V, so
@@ -589,8 +591,12 @@ void loop_critical_task()
     {
         if (inverter_pwm_staged)
         {
-            shield.power.start(LEG1_HIGH);
-            shield.power.start(LEG2_HIGH);
+            if (!bridge_outputs_on)
+            {
+                shield.power.start(LEG1_HIGH);
+                shield.power.start(LEG2_HIGH);
+                bridge_outputs_on = true;
+            }
             control.bridge_pwm_applied = true;
         }
         else
@@ -598,6 +604,7 @@ void loop_critical_task()
             /* Allow the initial neutral duty to latch before starting outputs. */
             shield.power.stop(LEG1_HIGH);
             shield.power.stop(LEG2_HIGH);
+            bridge_outputs_on = false;
             control.bridge_pwm_applied = false;
             inverter_pwm_staged = true;
         }
@@ -605,8 +612,12 @@ void loop_critical_task()
     else
     {
         if (out.bridge_enable) control.inverter.tripFault(VSI_FAULT_PWM_UPDATE_FAILED);
-        shield.power.stop(LEG1_HIGH);
-        shield.power.stop(LEG2_HIGH);
+        if (bridge_outputs_on || inverter_pwm_staged)
+        {
+            shield.power.stop(LEG1_HIGH);
+            shield.power.stop(LEG2_HIGH);
+            bridge_outputs_on = false;
+        }
         control.bridge_pwm_applied = false;
         inverter_pwm_staged = false;
     }

@@ -226,3 +226,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | L0-GFL-10/13 results unchanged (averaged \|Vq\| ≤ 0.055 V); firmware builds |
 | Hardware check | Bench: the `load us:` line in OFF, `c` and `o` |
 
+## 2026-11-09 — Speed optimization; bridge outputs started once
+
+| Field | Value |
+|---|---|
+| Commit | the `perf: speed optimization …` commit that adds this entry |
+| Files | `zephyr/prj.conf`, `src/main.cpp` |
+| Reason | Bench: the critical task runs 77–84 µs of its 100 µs period (control step about 53 µs) with the inverter OFF or synchronizing; the bridge application adds to it in the open loop |
+| Behaviour change | Build optimized for speed (`CONFIG_SPEED_OPTIMIZATIONS=y`) instead of size (`-Os`). The bridge outputs are started once when the bridge starts and stopped once when it stops, instead of `start()` (or `stop()`) on both legs every tick; the duty is still applied every tick. No control change |
+| Evidence | Firmware builds; flash 72 % → see the build log, RAM 30 % |
+| Hardware check | Bench: the `load us:` line in OFF, `c` and `o` |
+
