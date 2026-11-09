@@ -16,7 +16,7 @@ def emit(id,ok,description,measured):
 
 def experiment():
     """Run actual ABI outputs through a source, R and C and back to VDCBus."""
-    b=p.CircuitBuilder();values=[40,0,0,None,0,0,1,1,0,400];wires=[]
+    b=p.CircuitBuilder();values=[40,0,0,None,0,0,1,1,0,400,0];wires=[]  # app-v3: inject_current 0
     for i,value in enumerate(values):
         if value is None:wires.append(('v','bus'));continue
         node='input'+str(i);b.add_voltage_source('input_source'+str(i),node,'0',value);wires.append(('v',node))

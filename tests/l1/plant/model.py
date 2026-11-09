@@ -13,7 +13,12 @@ HERE=Path(__file__).resolve().parent
 SENSORS={'VLow':'DC1_Vin','ILow1':'DC1_Iin','ILow2':'DC2_Iin','VDCBus':'DC_bus','VAC':'Grid_voltage','IAC':'Grid_current'}
 class Model:
     """Native electrical elements plus exact physical-probe bindings."""
-    def __init__(self,project=None):
+    def __init__(self,project=None,options=None):
+        """@param options inverter-test plant variants, each recorded by the runner:
+        output_chokes (False: FL1/FL2 windings shorted, the bench board has none),
+        grid_series_ohm / grid_series_h (impedance between the ideal grid source and the PCC,
+        where the VAC sensor is: series bulb, reference grid impedance)."""
+        options=options or {}
         if project is None:
             meta=json.loads((HERE/'params.yaml').read_text())
             if hashlib.sha256((HERE/'full_model.pulsim').read_bytes()).hexdigest()!=meta['model_sha256']:raise ValueError('Accepted model hash no longer matches params.yaml')
@@ -40,12 +45,20 @@ class Model:
                 if q.get('pv_lambertw'):self.pv_lambertw=dict(q['pv_lambertw'])
                 b.add_current_source(name,*ns[:2],q['waveform']['value'])
             elif kind=='TRANSFORMER':b.add_transformer(name,*ns[:4],q['lm'],q['lm']/q['turns_ratio']**2,q['coupling'])
+            elif kind=='COUPLED_INDUCTOR' and name in ('FL1','FL2') and options.get('output_chokes',True) is False:
+                b.add_resistor(name+'_w1',ns[0],ns[1],1e-3);b.add_resistor(name+'_w2',ns[2],ns[3],1e-3)
             elif kind=='COUPLED_INDUCTOR':
                 k=q['coupling_coefficient']
                 if abs(q['mutual_inductance']-k*np.sqrt(q['l1']*q['l2']))>1e-12:raise ValueError(f'Inconsistent mutual coupling: {name}')
                 b.add_transformer(name,*ns[:4],q['l1'],q['l2'],k)
             elif kind=='VOLTAGE_SOURCE':
                 w=q['waveform']
+                if name=='Vgrid' and (options.get('grid_series_ohm') or options.get('grid_series_h')):
+                    # Ideal source behind the impedance; the PCC keeps the original node (VAC sensor).
+                    pcc=ns[0];ns=['Vgrid_src',ns[1]];mid='Vgrid_src'
+                    if options.get('grid_series_h'):
+                        b.add_inductor('Grid_series_L',mid,'Vgrid_mid',options['grid_series_h']);mid='Vgrid_mid'
+                    b.add_resistor('Grid_series_R',mid,pcc,options.get('grid_series_ohm') or 1e-3)
                 if w['type']=='dc':b.add_voltage_source(name,*ns[:2],w['value'])
                 elif w['type']=='sine':b.add_sine_voltage_source(name,*ns[:2],w.get('offset',0),w['amplitude'],w['frequency'],np.deg2rad(w.get('phase',0)))
                 else:raise ValueError(f'Unsupported waveform {name}')
@@ -54,7 +67,7 @@ class Model:
             elif kind=='VOLTAGE_PROBE':
                 out='measurement_'+name;b.add_vcvs('measure_'+name,*ns[:2],out,'0',1);self.probes[name]=('v',out)
             elif kind=='C_BLOCK':
-                if name!='Core_controlStep' or q['n_inputs']!=10 or q['n_outputs']!=len(json.loads((HERE.parent/'contract.json').read_text())['outputs']) or q.get('contract')!=json.loads((HERE.parent/'contract.json').read_text())['version']:raise ValueError('Unexpected firmware block contract '+name)
+                if name!='Core_controlStep' or q['n_inputs']!=len(json.loads((HERE.parent/'contract.json').read_text())['inputs']) or q['n_outputs']!=len(json.loads((HERE.parent/'contract.json').read_text())['outputs']) or q.get('contract')!=json.loads((HERE.parent/'contract.json').read_text())['version']:raise ValueError('Unexpected firmware block contract '+name)
                 expected=HERE.parent/'firmware_block/build/libcore_control.so'
                 if Path(q['lib_path']).resolve()!=expected.resolve():raise ValueError('GUI block library is not the verified Core build')
             elif kind=='CONSTANT':

@@ -14,7 +14,7 @@ inv="${SINGLE_PHASE_INVERTER_DIR:-$libs/single_phase_inverter}"
 for file in "$inv/src/singlePhaseInverterFollowing.cpp" "$libs/control_library/src/pid.cpp"; do
     if [ ! -f "$file" ]; then echo "Missing dependency: $file. See tests/l1/README.md." >&2; exit 1; fi
 done
-out="$repo/tests/l1/firmware_block/build"
+out="${L1_BUILD_DIR:-$repo/tests/l1/firmware_block/build}"  # a study variant builds elsewhere
 mkdir -p "$out"
 work=$(mktemp -d "$out/objects.XXXXXX")
 trap 'rm -rf "$work"' EXIT

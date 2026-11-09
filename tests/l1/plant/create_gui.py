@@ -37,7 +37,7 @@ def create(pv=False,scenario=None,dest=None):
         else:label='command_'+logical
         input_labels.append(label)
     p=Component(type=T.C_BLOCK,name='Core_controlStep',x=center,y=bottom,
-        parameters={'n_inputs':10,'n_outputs':len(NAMES),'implementation':'library','lib_path':str(LIB),
+        parameters={'n_inputs':len(CONTRACT['inputs']),'n_outputs':len(NAMES),'implementation':'library','lib_path':str(LIB),
             'sample_time':.0001,'inputs':input_labels,'contract':CONTRACT['version'],
             'scenario_timeline':scenario['commands'] if scenario else [],
             'scenario_name':scenario['name'] if scenario else 'gui-core-app',

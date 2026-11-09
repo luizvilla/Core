@@ -1,0 +1,56 @@
+{
+  "name": "inverter-bench-iec",
+  "title": "Bench sequence on the IEC 60725 reference grid",
+  "purpose": "Ideal 400 V bus, output filter 500 \u00b5H without chokes (bench board), the grid behind the IEC 60725 reference impedance (0.4 \u03a9 + 0.8 mH), duty limits 0.05\u20130.95. The application runs the bench stages: OFF at t = 0, step 1 at 10 ms, step 2 at 1.3 s (10 periods of settling, relay commanded ahead of a zero crossing, contact 9.7 ms later, feedback 20 ms after the command), injection of 0.1 A (the application's bench cap) at 1.6 s. Checks the connection and the current loop.",
+  "criteria": [
+    "L1-GFL-09",
+    "L1-GFL-10"
+  ],
+  "duration_s": 2.0,
+  "dt_s": 5e-08,
+  "store_period_s": 2e-05,
+  "bridge": {
+    "duty_min": 0.05,
+    "duty_max": 0.95
+  },
+  "commands": [
+    {
+      "time_s": 0,
+      "mode": 0,
+      "sync_request": 0,
+      "v_bus_ref": 400,
+      "vac_updated": 1,
+      "inject_current": 0.0
+    },
+    {
+      "time_s": 0.01,
+      "mode": 0,
+      "sync_request": 1,
+      "v_bus_ref": 400,
+      "vac_updated": 1,
+      "inject_current": 0.0
+    },
+    {
+      "time_s": 1.3,
+      "mode": 0,
+      "sync_request": 3,
+      "v_bus_ref": 400,
+      "vac_updated": 1,
+      "inject_current": 0.0
+    },
+    {
+      "time_s": 1.6,
+      "mode": 0,
+      "sync_request": 4,
+      "v_bus_ref": 400,
+      "vac_updated": 1,
+      "inject_current": 0.1
+    }
+  ],
+  "plant_options": {
+    "output_chokes": false,
+    "grid_series_ohm": 0.4,
+    "grid_series_h": 0.0008,
+    "ideal_bus_V": 400.0
+  }
+}

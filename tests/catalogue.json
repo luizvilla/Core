@@ -851,6 +851,61 @@
    "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
   },
   {
+   "id": "L1-GFL-09",
+   "title": "Bench connection on the switched model through the application: step 1 → step 2 → relay at a voltage zero crossing → GRID_CONNECTED",
+   "criterion": ".a sequence PWM_SETTLE → GRID_CONNECT → GRID_CONNECTED with no fault and no bench trip; .b contact instant within ±10° of a grid zero crossing; .c closing current peak < 1.5 A; .d residual current in GRID_CONNECTED < 0.05 A RMS from 100 ms after the contact; INFO .e connection transient",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); grid behind the cold bulb (40 Ω) and behind the IEC 60725 reference impedance (0.4 Ω + 0.8 mH)",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-10",
+   "title": "Current loop: I_d step 0 → 0.1 A on the IEC 60725 reference grid",
+   "criterion": ".a overshoot ≤ 20 %; .b 5 % settling ≤ 50 ms; .c final I_d within ±5 % (fundamental of the line current); .d |I_q| ≤ 0.02 A in steady state; INFO .e rise time, current THD",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); IEC 60725 reference impedance",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-11",
+   "title": "Current loop: I_d step 0 → 0.1 A through the cold bulb (bench replica)",
+   "criterion": ".a no bench trip; .b final I_d within ±10 % after 0.4 s; INFO .c overshoot, settling, residual drift before the step (the PCC voltage feedforward cancels the bulb resistance)",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); grid behind 40 Ω",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-12",
+   "title": "Bridge duty limits at 400 V: driver default 0.1–0.9 against 0.05–0.95",
+   "criterion": "INFO: fraction of periods with the duty clipped, line-current peak and THD with I_d,ref = 0; with 0.1–0.9 the bridge reaches only ±320 V against the 325 V grid peak",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.1–0.9 and 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s)",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-13",
+   "title": "Current-loop candidates compared (library today and tuned variants)",
+   "criterion": "INFO: per candidate (current SOGI gain, Kp, Ti, delay compensation) and per grid: L1-GFL-09…11 metrics side by side; feeds the tuning decision (docs/testing/inverter-current-loop-design.md)",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); candidates built from patched copies of single_phase_inverter (tests/l1/design/variant.py)",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
    "id": "L2-INV-00",
    "tab": "inverter",
    "level": "L2",

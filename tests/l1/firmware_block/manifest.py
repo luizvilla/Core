@@ -26,5 +26,6 @@ manifest={'core_commit':git(REPO,'rev-parse','HEAD'),'core_dirty':bool(git(REPO,
  'dependency_tracking':'compiler -MMD transitive headers',
  'flags':['-std=c++17','-O1','-g','-fPIC','-fsanitize=undefined','-fno-sanitize-recover=undefined'],
  'sources':{str(p):digest(p) for p in sorted(set(paths))},'library_sha256':digest(Path(__file__).parent/'build/libcore_control.so')}
-(Path(__file__).parent/'build/manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+import os
+(Path(os.environ.get('L1_BUILD_DIR',Path(__file__).parent/'build'))/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
 print('Built real Core controlStep C-Block:',manifest['inverter_commit'])
