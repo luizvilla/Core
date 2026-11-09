@@ -314,3 +314,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | `OperatorCommands::settle_count_test` (menu `e`, default off): in SETTLE, the settle count is `app::settle_count_test_cycles` (65535 periods, never reached) instead of 0, so the counter runs while the relay stays inhibited. Default behaviour unchanged |
 | Evidence | Firmware builds; L0-APP: no new failure (L0-APP-03.c fails before and after this change) |
 | Hardware check | Bench: `e`, then `c`: fault 12 in step 1 means the counting itself (or its timing) causes it; no fault means the cause is elsewhere in the switch to CONNECT |
+
+## 2026-11-09 — Inverter library: single-precision settle counter (fault 12 after `g`)
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(deps): single-precision settle counter …` commit that adds this entry; library `luizvilla/single_phase_inverter` `b7fa96c` on `fix/sync-period-average` |
+| Files | library `src/singlePhaseInverterFollowing.{h,cpp}`; `tests/l1/dependencies.lock.json` |
+| Reason | Bench: from PWM_SETTLE, `g` gave fault 12 (SYNC_LOST) within about 6 ms, with the 10 kHz or the 2 kHz capture, `gap max` 105–120 µs and no stale VAC sample. With menu `e` (step 1 running the settle counter, relay still inhibited) step 1 faulted the same way; with `e` off it held. The counter was a `double` accumulation, software-emulated on the M4. How it disturbs the synchronization on the board is not explained; on the host the same code passes (L0-APP-09.d) |
+| Behaviour change | `_pwm_settle_cycles` is a `float32_t`, incremented by ω·Ts/2π in single precision. It counts the same PLL periods; rounding over 10 periods is well under 0.01 period |
+| Evidence | L0-GFL: no failure; L0-APP: no new failure (L0-APP-03.c fails before and after); firmware builds |
+| Hardware check | Bench 2026-11-09, dry run L2-INV-04 (relay power contacts unwired): `g` goes PWM_SETTLE → GRID_CONNECT → GRID_CONNECTED, the relay closes about 9.7 ms after the command. Captures in `docs/testing/bench/2026-11-09_inverter/` |
