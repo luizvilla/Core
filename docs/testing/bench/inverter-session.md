@@ -50,20 +50,27 @@ The firmware scope (`r` downloads, `q` re-arms) records 10 channels: VAC, V_alph
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| a | **Relay, dead bench** (board powered, DC source off, mains unplugged; ohmmeter across the relay contacts, scope CH4 on GPIO 22):<br>1. At start-up: contacts **open** (GPIO 22 reset = open). If closed, the polarity is inverted: stop, swap `setPin`/`resetPin` for `relay_pin` in `main.cpp`.<br>2. Press `R` (manual relay test): the relay clicks, contacts **closed**, GPIO 22 high, telemetry `relay` 11 after 20 ms.<br>3. Press `R` again: contacts **open**, `relay` 00. | open → closed → open; the firmware refuses `R` unless the inverter is OFF, the boost IDLE, the bridge stopped and VAC below 20 V RMS, and opens it on any stage key or if a grid voltage appears. **Never with mains connected:** with the bridge off, a closed relay rectifies the mains onto the bus through the bridge diodes | |
-| b | Menu `h` prints the inverter bench keys; telemetry runs; `stage` 0, `inverter_state` 0, relay `00` | as written | |
-| c | DC source: 400 V, current limit 0.5 A, output off | set | |
-| d | Bulb in series with the mains feed, mains breaker reachable | yes | |
+| a | **Relay, dead bench** (board powered, DC source off, mains unplugged; ohmmeter across the relay contacts, scope CH4 on GPIO 22):<br>1. At start-up: contacts **open** (GPIO 22 reset = open). If closed, the polarity is inverted: stop, swap `setPin`/`resetPin` for `relay_pin` in `main.cpp`.<br>2. Press `R` (manual relay test): the relay clicks, contacts **closed**, GPIO 22 high, telemetry `relay` 11 after 20 ms.<br>3. Press `R` again: contacts **open**, `relay` 00. | open → closed → open; the firmware refuses `R` unless the inverter is OFF, the boost IDLE, the bridge stopped and VAC below 20 V RMS, and opens it on any stage key or if a grid voltage appears. **Never with mains connected:** with the bridge off, a closed relay rectifies the mains onto the bus through the bridge diodes | Pass. the Relay is in open state by default|
+| b | Menu `h` prints the inverter bench keys; telemetry runs; `stage` 0, `inverter_state` 0, relay `00` | as written | h works, telemetry runds stage is 0, inverter state is zero, relay is 00 |
+| c | DC source: 400 V, current limit 0.5 A, output off | set | limit set at 410 protection at 450V |
+| d | Bulb in series with the mains feed, mains breaker reachable | yes | yes there is a switch near the setup |
 
 ## L2-INV-00 · Step 0: open-loop 230 V RMS, no grid
 
-**Conditions.** Mains unplugged from the AC terminals (the relay stays open in this stage, but the grid side must be dead for this step). DC bus at 400 V. Boost IDLE.
+**Conditions.** Mains unplugged from the AC terminals (the relay stays open in this stage, but the grid side must be dead for this step). DC bus from 100 V up to 400 V. Boost IDLE.
+
+The index aims at 325.3 V / VDCBus and saturates at 0.95 below 342 V, so the output is 0.95·VDCBus/√2 up to there, then 230 V RMS:
+
+| VDCBus | 100 V | 200 V | 300 V | 340 V | 400 V |
+|---|---|---|---|---|---|
+| Index | 0.95 | 0.95 | 0.95 | 0.95 | 0.81 |
+| Expected RMS | 67.2 V | 134.4 V | 201.5 V | 228.4 V | 230 V |
 
 **Sequence.**
-1. Switch the DC source on; check `VDCBus` ≈ 400 V in the telemetry.
-2. Press `o`. The modulation index ramps from 0 to 325.3 V / VDCBus (0.81 at 400 V) in about 0.8 s, 50 Hz, no feedback.
-3. Record CH1 (inverter side) over 100 ms: RMS, frequency, THD if the scope computes it; the DC source current.
-4. Lower the bus to 340 V, then 300 V, and record again (below 342 V the index saturates at 0.95: the RMS falls to 0.95·VDCBus/√2).
+1. Set the DC source to **100 V** first; switch it on; check `VDCBus` ≈ 100 V in the telemetry.
+2. Press `o`. The index ramps from 0 to 0.95 in about 1 s, 50 Hz, no feedback.
+3. Record CH1 (inverter side) over 100 ms: RMS, frequency, waveform shape; the DC source current. Everything except the voltage level is checked here (.b, .c, .d, .f).
+4. Press `x`, raise the bus to 200 V, press `o`, record; then 300 V, 340 V, and **400 V** for .a. (Raising the bus while running is also possible: the index follows the measured bus at the next period.)
 5. Press `x`. The bridge stops at once.
 
 **Acceptance.**
@@ -74,7 +81,8 @@ The firmware scope (`r` downloads, `q` re-arms) records 10 channels: VAC, V_alph
 | .b Frequency | 49.9–50.1 Hz | 50.0 Hz | |
 | .c No trip, relay command 0 throughout | yes | — | |
 | .d INFO: THD, DC source current (no-load losses), waveform shape near zero crossings | record | L1-MOD-04: THD < 2 % at m ≥ 0.6 | |
-| .e INFO: RMS at 340 V and 300 V | record | 0.95·VDCBus/√2 at 300 V = 201.5 V | |
+| .e INFO: RMS at 100, 200, 300 and 340 V against 0.95·VDCBus/√2 | record | 67.2 / 134.4 / 201.5 / 228.4 V | |
+| .f At 100 V (first run): 50 Hz, clean sine shape, no trip, relay open, DC source current recorded | yes | — | |
 
 Note: the L1 model switches the bridge at 200 kHz, the board at 50 kHz (finding #6): expect more ripple on the board.
 
