@@ -37,11 +37,12 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 Every 100 ms the board prints one line, fields separated by `:`:
 
-`ILow1 : VLow : duty1 : VAC : VAC_rms : grid_angle : IAC : VDCBus : boost_mode : burst_skip : stage : inverter_state : relay(cmd)(fb) : Id : Iq : P : Q : Id_ref`
+`ILow1 : VLow : duty1 : VAC : VAC_rms : grid_angle : IAC : VDCBus : boost_mode : burst_skip : stage : inverter_state : relay(cmd)(fb) : Id : Iq : P : Q : Id_ref : load_us`
 
 - `stage`: 0 OFF, 1 SETTLE, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT.
 - `inverter_state`: 0 OFF, 1 VOLTAGE_SYNC, 2 GRID_CONNECT, 3 GRID_CONNECTED, 4 RUN, 5 STOPPING, 6 DISCONNECT, 7 FAULT, 8 PWM_SETTLE, 9 PWM_WAIT.
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
+- `load_us`: the critical task's longest run since the previous line, in µs. Its period is 100 µs: above about 80 µs the serial menu and the telemetry slow down or stop.
 - `Id`, `Iq` in A peak (dq frame of the grid voltage: Id in phase), `P` in W and `Q` in var from the inverter's measurements.
 
 The DC bus voltage is the 8th telemetry field (`VDCBus`) and the DC source display; it needs no oscilloscope channel.
@@ -80,11 +81,11 @@ The index aims at 325.3 V / VDCBus and saturates at 0.95 below 342 V, so the out
 | Criterion | Limit | Simulation reference | Result |
 |---|---|---|---|
 | .a Output RMS at 400 V | 218–242 V (±5 % of 230 V) | 226.7 V at m = 0.8 unloaded (L1-MOD-04: about 230 V at m = 0.81) | |
-| .b Frequency | 49.9–50.1 Hz | 50.0 Hz | |
-| .c No trip, relay command 0 throughout | yes | — | |
-| .d INFO: THD, DC source current (no-load losses), waveform shape near zero crossings | record | L1-MOD-04: THD < 2 % at m ≥ 0.6 | |
-| .e INFO: RMS at 100, 200, 300 and 340 V against 0.95·VDCBus/√2 | record | 67.2 / 134.4 / 201.5 / 228.4 V | |
-| .f At 100 V (first run): 50 Hz, clean sine shape, no trip, relay open, DC source current recorded | yes | — | |
+| .b Frequency | 49.9–50.1 Hz | 50.0 Hz | yes 50 Hz|
+| .c No trip, relay command 0 throughout | yes | — | no trip command at 0 throughout|
+| .d INFO: THD, DC source current (no-load losses), waveform shape near zero crossings | record | L1-MOD-04: THD < 2 % at m ≥ 0.6 | I do not have the current |
+| .e INFO: RMS at 100, 200, 300 and 340 V against 0.95·VDCBus/√2 | record | 67.2 / 134.4 / 201.5 / 228.4 V | got similar values |
+| .f At 100 V (first run): 50 Hz, clean sine shape, no trip, relay open, DC source current recorded | yes | — | The sine wave seems to saturate somehow |
 
 Note: the L1 model switches the bridge at 200 kHz, the board at 50 kHz (finding #6): expect more ripple on the board.
 

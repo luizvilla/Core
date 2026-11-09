@@ -27,6 +27,7 @@
 
 /*--------------Zephyr---------------------------------------- */
 #include <zephyr/console/console.h>
+#include <zephyr/kernel.h>
 
 /*--------------CMSIS----------------------------------------- */
 #include <arm_math.h>
@@ -134,6 +135,9 @@ static bool relay_test = false;
 static constexpr float32_t relay_test_vac_max = 20.0F;  /* V RMS: above this, a grid is present */
 static bool relay_closed = false;
 static uint16_t relay_hold_ticks = 0U;
+/* Critical task load: longest run since the last telemetry line, in µs (period 100 µs). */
+static volatile uint32_t critical_max_us = 0U;
+
 /* The burst generator is running on leg 1. */
 static bool burst_running = false;
 /* Stage neutral bridge duty for one control tick before enabling PWM. */
@@ -462,10 +466,12 @@ void loop_application_task()
     /* Inverter: stage, library mode, relay command/feedback, Id, Iq (A), P (W), Q (var), Id ref. */
     const dqo_t idq = control.inverter.getIdq();
     const dqo_t pq = control.inverter.getPower();
-    printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f\n", static_cast<unsigned int>(inverter_stage),
+    const uint32_t load_us = critical_max_us;
+    critical_max_us = 0U;
+    printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f:%u\n", static_cast<unsigned int>(inverter_stage),
            static_cast<unsigned int>(control.inverter.getMode()), static_cast<unsigned int>(relay_command),
            static_cast<unsigned int>(relay_closed), (double)idq.d, (double)idq.q, (double)pq.d, (double)pq.q,
-           (double)inject_current);
+           (double)inject_current, static_cast<unsigned int>(load_us));
     task.suspendBackgroundMs(100);
 }
 
@@ -480,6 +486,7 @@ void loop_application_task()
  */
 void loop_critical_task()
 {
+    const uint32_t critical_start = k_cycle_get_32();
     /*----- Read sensors, holding the last valid value ----- */
     meas_data = shield.sensors.getLatestValue(ILow1);
     if (meas_data != NO_VALUE) i_low_1_value = meas_data;
@@ -635,6 +642,8 @@ void loop_critical_task()
         scope_sample_tick = 0U;
         if (!is_scope_downloading) scope.acquire();
     }
+    const uint32_t critical_us = k_cyc_to_us_floor32(k_cycle_get_32() - critical_start);
+    if (critical_us > critical_max_us) critical_max_us = critical_us;
 }
 
 /**

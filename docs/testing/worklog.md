@@ -204,3 +204,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 
 **Revert condition.** When the fix is merged into jalinei `main` (pull request to open with these tests and the bench data), restore `single_phase_inverter = https://github.com/jalinei/single_phase_inverter`, pin the merged commit in the test lock, run L0, and close #7 with that campaign ID.
 
+## 2026-11-09 — Telemetry: critical task load
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(telemetry): critical task load …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench: after `o`, the board became very slow and stopped answering; a capture taken after `c` shows the control step still at stage OFF (inverter state 0), so keys were not processed |
+| Behaviour change | The critical task measures its run time (cycle counter) and the telemetry prints the longest run since the previous line (`load_us`, last field); no control change |
+| Evidence | Firmware builds; RAM 30 % |
+| Hardware check | Bench: `load_us` in each stage |
+
