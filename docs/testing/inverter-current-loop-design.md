@@ -69,4 +69,26 @@ Full tables: run the script (about 5 minutes).
 
 ## 6. L1 verification on the switched model
 
-L1 runs the real application through the bench stages on the switched model, with the candidates built from patched library copies ([`variant.py`](../../tests/l1/design/variant.py)). The harness extension is contract app-v3: the C-Block drives the bridge and the relay. Results: to be added (L1-GFL-09…13).
+L1 runs the real application through the bench stages on the switched model, with the candidates built from patched library copies ([`variant.py`](../../tests/l1/design/variant.py)). The harness extension is contract app-v3: the C-Block drives the bridge and the relay.
+
+### 6.1 First batch (2026-11-10): every candidate trips at the connection
+
+Scenarios [`bench_bulb`](../../tests/l1/scenarios/inverter/bench_bulb.json) and [`bench_iec`](../../tests/l1/scenarios/inverter/bench_iec.json). Relay commanded at 1.500 s, contact 9.7 ms later at a voltage zero crossing (within 1.8°), feedback 20 ms after the command.
+
+| Run | Fault | Closing peak (A) |
+|---|---|---|
+| A, cold bulb | 1.518 s, code 12 (sync lost) | 0.82 |
+| A, IEC grid | 1.510 s, bench trip | 1.52 |
+| C, cold bulb | 1.560 s, bench trip | 1.62 |
+| C, IEC grid | 1.516 s, bench trip | 1.63 |
+| D, cold bulb | 1.560 s, bench trip | 1.62 |
+| D, IEC grid | 1.516 s, bench trip | 1.63 |
+
+None reached the injection step. Two mechanisms, neither one about the gains:
+
+1. **No current loop between the contact and the feedback.** The library runs the current PI only in GRID_CONNECTED, RUN and STOPPING. In GRID_CONNECT the output is the voltage feedforward alone, and the application reports the relay closed 20 ms after the command, about 10 ms after the contact. On the IEC grid the feedforward error drives the current to the 1.5 A trip within 6 ms of the contact, at the voltage peak. The trip is identical for C and D: their PIs never ran.
+2. **Through the bulb, the PLL locks on the inverter's own voltage.** VAC is measured between the relay and the bulb. After the contact it is the inverter's voltage plus R·i, so the PLL and the feedforward both follow the inverter itself: Vq swings ±15 V and the PLL frequency runs to 333 rad/s (53 Hz). With today's gains that ends in fault 12 within 8 ms. With C and D the current grows to the trip about 40 ms after the feedback. The averaged model (§2) used an ideal PLL angle, so it did not show this.
+
+### 6.2 Second batch (running): current PI from GRID_CONNECT
+
+Variant F: the library with the setters (`ab35e2f`), candidate C set from the application, and the current PI also active in GRID_CONNECT with a zero reference. With the relay open the measured current is zero, so the PI stays at zero until the contact. Runs: cold bulb, hot bulb (500 Ω), IEC grid, stiff grid. Variant E (the same library without the GRID_CONNECT change, C from the application) on the IEC grid checks that the application path reproduces candidate C. Results: to be added.
