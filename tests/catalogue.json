@@ -879,7 +879,7 @@
    "tab": "inverter",
    "level": "L2",
    "title": "Step 1b: dry run of the connection, relay power contacts unwired",
-   "criterion": ".a state 8 → 2 → 3 held, relay command and feedback, no fault; .b relay closing time + bounce ≤ 15 ms (20 ms contact time); .c disconnect with x without fault, release time ≤ 15 ms; .d inverter side within ±3 %/±3° of the grid after 10 s in GRID_CONNECTED on an open circuit; INFO .e timings over 3 operations",
+   "criterion": ".a state 8 → 2 → 3 held, relay command and feedback, no fault; .b relay closing time + bounce ≤ 15 ms (20 ms contact time); .c disconnect with x without fault, release time ≤ 15 ms; .d inverter side within ±3 %/±3° of the grid after 10 s in GRID_CONNECTED on an open circuit; INFO .e timings over 3 operations; .f protection test (menu z, 3 A for one period in GRID_CONNECTED): fault and bridge stop in the same period, relay command dropped, latched until x",
    "conditions": "Stage INV_CONNECT (menu g) with both relay power terminals disconnected, VAC still on the mains, bus 400 V; relay contact timed with a 5 V / 1 kΩ circuit against GPIO 22. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
    "source": "docs/testing/bench/inverter-session.md",
    "status": "planned",

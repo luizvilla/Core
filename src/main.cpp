@@ -150,6 +150,10 @@ static int64_t rate_prev_ms = 0;
 static bool scope_fast_connect = true;
 /* Menu 'e': step 1 with the library's settle counter running (diagnostic for the fault after 'g'). */
 static bool settle_count_test = false;
+/* Menu 'z': protection test, one control period sees an artificial AC current above the bench trip
+ * (app::bench_inverter_current_trip); the scope's IAC channel shows it. */
+static volatile bool trip_test_request = false;
+static constexpr float32_t trip_test_current = 3.0F;  /* A */
 /* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
 static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
 static inline void notePart(int part, uint32_t from, uint32_t to)
@@ -335,6 +339,7 @@ void loop_communication_task()
                "|     press f : force scope trigger now  |\n"
                "|     press v : CONNECT scope 10k/2k Hz  |\n"
                "|     press e : step 1 settle counter on |\n"
+               "|     press z : protection test (3 A)    |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
         break;
@@ -449,6 +454,11 @@ void loop_communication_task()
     case 'q':
         scope.start();
         printk("scope acquisition restarted\n");
+        break;
+    case 'z':
+        trip_test_request = true;
+        printk("protection test: one period at %.1f A (trip above %.1f A)\n", (double)trip_test_current,
+               (double)app::bench_inverter_current_trip);
         break;
     case 'e':
         settle_count_test = !settle_count_test;
@@ -583,6 +593,11 @@ void loop_critical_task()
 
     meas_data = shield.sensors.getLatestValue(IAC);
     if (meas_data != NO_VALUE) i_ac_value = meas_data;
+    if (trip_test_request)
+    {
+        trip_test_request = false;
+        i_ac_value = trip_test_current;
+    }
 
     meas_data = shield.sensors.getLatestValue(VDCBus);
     if (meas_data != NO_VALUE)

@@ -336,3 +336,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | When the inverter requests the connection (GRID_CONNECT), the application issues the relay command once θ + ω̄·`app::relay_close_delay` reaches a zero crossing (θ = π/2 mod π, since v = Vd·cos θ when locked), ω̄ being the one-period averaged frequency; the command is then held while the inverter requests the connection. `app::relay_close_delay` = 9.7 ms; 0 restores the immediate command. The relay command comes up to half a period (10 ms) later than before; GRID_CONNECT's 1 s timeout is unaffected |
 | Evidence | New L0-APP-07.d: contact instant within 1.8° of a zero crossing (limit 4°) at 4 start phases × 49.5/50/50.5 Hz; it failed before the change (11/36). L0-APP-07.a: settle window widened to 0.2–0.21 s. L0-APP-09.d passes; L0-APP: no new failure (L0-APP-03.c fails before and after). Firmware builds |
 | Hardware check | Bench: CH4 on the relay command, a voltage probe on the grid side; the contact closes within about ±1 ms of a zero crossing (relay closing-time spread) |
+
+## 2026-11-09 — Bench: protection test key (artificial 3 A for one period)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(bench): protection test key …` commit that adds this entry |
+| Files | `src/main.cpp`, `tests/catalogue.json` |
+| Reason | Luiz Villa asked for a last dry-run check before connecting to the mains: the bench current trip exercised end to end on the board |
+| Behaviour change | Menu `z`: the next control period reads IAC as 3 A (above `app::bench_inverter_current_trip`, 1.5 A); the scope's IAC channel shows it. The trip logic itself is unchanged (covered by L0-APP-08). L2-INV-04 gets criterion .f |
+| Evidence | Firmware builds |
+| Hardware check | Bench L2-INV-04.f: `z` in GRID_CONNECTED → fault, bridge stopped and relay command dropped in the same period, latched until `x` |
