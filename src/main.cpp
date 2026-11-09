@@ -481,6 +481,13 @@ void loop_application_task()
            static_cast<unsigned int>(part_max_us[0]), static_cast<unsigned int>(part_max_us[1]),
            static_cast<unsigned int>(part_max_us[2]), static_cast<unsigned int>(part_max_us[3]));
     for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
+    /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
+    const dqo_t vdq_avg = control.inverter.getVdqAverage();
+    printk("sync: Vd_avg %.1f (293-358) Vq_avg %.2f (|.|<3.25) w_avg %.2f (298.5-329.9) window %u grid_ok %u trip %u\n",
+           (double)vdq_avg.d, (double)vdq_avg.q, (double)control.inverter.getwAverage(),
+           static_cast<unsigned int>(control.inverter.isSyncWindowFull()),
+           static_cast<unsigned int>(control.grid_observer.canOperate()),
+           static_cast<unsigned int>(control.grid_observer.getTripReason()));
     printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f:%u\n", static_cast<unsigned int>(inverter_stage),
            static_cast<unsigned int>(control.inverter.getMode()), static_cast<unsigned int>(relay_command),
            static_cast<unsigned int>(relay_closed), (double)idq.d, (double)idq.q, (double)pq.d, (double)pq.q,

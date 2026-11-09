@@ -42,6 +42,8 @@ Every 100 ms the board prints one line, fields separated by `:`:
 - `stage`: 0 OFF, 1 SETTLE, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT.
 - `inverter_state`: 0 OFF, 1 VOLTAGE_SYNC, 2 GRID_CONNECT, 3 GRID_CONNECTED, 4 RUN, 5 STOPPING, 6 DISCONNECT, 7 FAULT, 8 PWM_SETTLE, 9 PWM_WAIT.
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
+- A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.
+- A `load us:` line: the critical task's longest run (total and per part).
 - `load_us`: the critical task's longest run since the previous line, in µs. Its period is 100 µs: above about 80 µs the serial menu and the telemetry slow down or stop.
 - `Id`, `Iq` in A peak (dq frame of the grid voltage: Id in phase), `P` in W and `Q` in var from the inverter's measurements.
 

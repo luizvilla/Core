@@ -237,3 +237,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds; flash 72 % → see the build log, RAM 30 % |
 | Hardware check | Bench: the `load us:` line in OFF, `c` and `o` |
 
+## 2026-11-09 — Telemetry: synchronization criterion and grid verdict
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(telemetry): synchronization criterion …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench: `c` held for a long time without synchronizing; captures taken without re-arming showed earlier events. The criterion itself is needed live |
+| Behaviour change | A `sync:` line every 100 ms: averaged Vd, Vq, ω (with their limits), window full, grid observer verdict (`canOperate`) and trip reason. No control change |
+| Evidence | Firmware builds |
+| Hardware check | Bench: `sync:` line during `c` |
+
