@@ -36,6 +36,8 @@
  * | L0-GFL-05 | Grid quality gating |
  * | L0-GFL-06 | Fault latching and clearing |
  * | L0-GFL-07 | Duty formula |
+ * | L0-GFL-10 | Synchronization with grid harmonics (bench levels, EN 50160 limits) |
+ * | L0-GFL-13 | Synchronization with a DC offset on VAC |
  * | L0-GFL-16 | PWM start-up before relay closure (PWM_WAIT, PWM_SETTLE) |
  *
  * The grid is a synthetic sine fed sample by sample; nothing the controller
@@ -47,8 +49,9 @@
  * 50 Hz, 100 µs control period.
  *
  * Limits come from the library's own documentation and constants:
- * - synchronization: Vd within ±10 % of the nominal peak, |Vq| < 0.1 V,
- *   |w - w_ref| < 5 % of w_ref, for 1000 consecutive calls;
+ * - synchronization, on one-period averages (luizvilla/Core#7): Vd within ±10 % of
+ *   the nominal peak, |Vq| < 1 % of the nominal peak, |w - w_ref| < 5 % of w_ref,
+ *   for 1000 consecutive calls;
  * - connection and disconnection timeouts: 1 s;
  * - duty = alpha_output / (2 V_bus) + 0.5, unclamped;
  * - PWM start-up: PWM at exactly 0.5 until acknowledged, waveform linked within
@@ -620,6 +623,82 @@ int main() {
         tc::info("L0-GFL-08.f", "Worst cold-start time to synchronization over the cases that locked", worst_lock_s, "s");
         /** @test L0-GFL-08.g: worst transient deviation of the 20 ms mean frequency estimate during cold start (INFO) */
         tc::info("L0-GFL-08.g", "Worst transient error of the 20 ms mean frequency estimate during cold start", worst_transient_hz, "Hz");
+    }
+
+    // ---------------------------------------------------------------- L0-GFL-10, L0-GFL-13
+    // Real-grid distortion (luizvilla/Core#7): synchronization judged on one-period averages.
+    // Bench levels measured on 2026-11-09: 3rd 3.4 %, 5th 4.6 %, 7th 2 %, VAC offset -5.7 V.
+    struct Distortion { double h3, h5, h7, h9, h11, h13, offset; };
+    auto syncOn = [&](const Distortion &k, double hz, double &vq_inst, double &vq_avg, double &w_err) {
+        singlePhaseInverterFollowing inv;
+        if (!initDefault(inv)) return -1;
+        inv.requestSync();
+        double ph = 1.0;
+        int synced = -1;
+        vq_inst = vq_avg = w_err = 0.0;
+        for (int n = 1; n <= 8 * ticks_per_s; ++n) {
+            const double v = V_pk * (std::cos(ph) + k.h3 * std::cos(3 * ph) + k.h5 * std::cos(5 * ph) + k.h7 * std::cos(7 * ph) +
+                                     k.h9 * std::cos(9 * ph) + k.h11 * std::cos(11 * ph) + k.h13 * std::cos(13 * ph)) + k.offset;
+            inv.calculateDuty(static_cast<float>(v), 0.0F);
+            ph = std::fmod(ph + two_pi * hz * Ts, two_pi);
+            if (synced < 0 && inv.getSync()) synced = n;
+            if (n > 6 * ticks_per_s) {
+                vq_inst = std::fmax(vq_inst, std::fabs(inv.getVdq().q));
+                vq_avg = std::fmax(vq_avg, std::fabs(inv.getVdqAverage().q));
+                w_err = std::fmax(w_err, std::fabs(inv.getwAverage() / (two_pi * hz) - 1.0));
+            }
+        }
+        return synced;
+    };
+    const double tol = 0.01 * V_pk;  // library tolerance on the averaged |Vq|
+    {
+        /** @test L0-GFL-10.a: Bench-measured harmonics: synchronizes within 8 s at 47.6-52.4 Hz, averaged |Vq| below 1 % of the peak */
+        tc::Criterion c("L0-GFL-10.a", "Bench harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %): synchronizes at 47.6-52.4 Hz, averaged |Vq| < 1 % of the peak");
+        const Distortion bench{0.034, 0.046, 0.02, 0, 0, 0, 0};
+        double worst_inst = 0, worst_avg = 0;
+        for (double hz : {47.6, 49.5, 50.0, 50.5, 52.4}) {
+            double vi, va, we;
+            const int t = syncOn(bench, hz, vi, va, we);
+            c.check(("synchronizes at " + std::to_string(hz).substr(0, 4) + " Hz").c_str(), t > 0);
+            c.range("averaged |Vq| (V)", va, 0.0, tol);
+            c.range("averaged w error vs the grid", we, 0.0, 0.01);
+            worst_inst = std::fmax(worst_inst, vi);
+            worst_avg = std::fmax(worst_avg, va);
+        }
+        /** @test L0-GFL-10.b: Bench harmonics: instantaneous |Vq| ripple, and its average (INFO) */
+        tc::info("L0-GFL-10.b", "Bench harmonics: peak instantaneous |Vq| (the ripple the old criterion judged)", worst_inst, "V");
+        tc::info("L0-GFL-10.c", "Bench harmonics: peak averaged |Vq|", worst_avg, "V");
+    }
+    {
+        /** @test L0-GFL-10.d: EN 50160 limit harmonics (3rd 5 %, 5th 6 %, 7th 5 %, 9th 1.5 %, 11th 3.5 %, 13th 3 %) at 50 Hz: synchronizes */
+        tc::Criterion c("L0-GFL-10.d", "EN 50160 limit harmonics (5 / 6 / 5 / 1.5 / 3.5 / 3 %) at 50 Hz: synchronizes, averaged |Vq| < 1 % of the peak");
+        double vi, va, we;
+        const int t = syncOn({0.05, 0.06, 0.05, 0.015, 0.035, 0.03, 0}, 50.0, vi, va, we);
+        c.check("synchronizes", t > 0);
+        c.range("averaged |Vq| (V)", va, 0.0, tol);
+        /** @test L0-GFL-10.e: EN 50160 harmonics: instantaneous |Vq| ripple (INFO) */
+        tc::info("L0-GFL-10.e", "EN 50160 harmonics: peak instantaneous |Vq|", vi, "V");
+    }
+    {
+        /** @test L0-GFL-13.a: A DC offset of -5.7 V (bench) or +/-10 V on VAC: synchronizes, averaged |Vq| below 1 % of the peak */
+        tc::Criterion c("L0-GFL-13.a", "VAC offset -5.7 V (bench) and +/-10 V: synchronizes, averaged |Vq| < 1 % of the peak");
+        double worst = 0;
+        for (double off : {-5.7, -10.0, 10.0}) {
+            double vi, va, we;
+            const int t = syncOn({0, 0, 0, 0, 0, 0, off}, 50.0, vi, va, we);
+            c.check("synchronizes", t > 0);
+            c.range("averaged |Vq| (V)", va, 0.0, tol);
+            worst = std::fmax(worst, vi);
+        }
+        /** @test L0-GFL-13.b: Offset: instantaneous |Vq| ripple (INFO) */
+        tc::info("L0-GFL-13.b", "VAC offset: peak instantaneous |Vq|", worst, "V");
+    }
+    {
+        /** @test L0-GFL-13.c: The bench grid as measured (harmonics and -5.7 V offset): synchronizes */
+        tc::Criterion c("L0-GFL-13.c", "Bench grid as measured (harmonics and -5.7 V offset) at 50 Hz: synchronizes");
+        double vi, va, we;
+        c.check("synchronizes", syncOn({0.034, 0.046, 0.02, 0, 0, 0, -5.7}, 50.0, vi, va, we) > 0);
+        c.range("averaged |Vq| (V)", va, 0.0, tol);
     }
 
     // ---------------------------------------------------------------- L0-GFL-16

@@ -191,3 +191,16 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds. Two-point fit: 1.14898·96.4 − 11.221 = 99.54 V; 1.14898·357.4 − 11.221 = 399.4 V |
 | Hardware check | Bench: VDCBus telemetry against the meter at 100 V and 400 V; IAC near 0 with no current |
 
+## 2026-11-09 — Temporarily build against the library fix for finding #7 (period-averaged synchronization)
+
+| Field | Value |
+|---|---|
+| Commit | the `build(app): fetch the single_phase_inverter fix for #7 …` commit that adds this entry |
+| Files | `src/app.ini`, `tests/l1/dependencies.lock.json` |
+| Reason | Bench step 1 never synchronized on the real mains (finding [#7](https://github.com/luizvilla/Core/issues/7)); Luiz asked to implement the averaging now and open the pull request later with the tests and the bench data |
+| Behaviour change | **Yes, intended and temporary.** `lib_deps` fetches `luizvilla/single_phase_inverter` branch `fix/sync-period-average` (`9bfbaee`) instead of `jalinei/single_phase_inverter` `main` (`1b4fd06` + this commit). Synchronization is judged on Vd, Vq and ω averaged over one grid period (window of 2π/(ω̄·Ts) samples, at most 256, following the averaged frequency), with \|Vq\| below 1 % of the nominal peak instead of an instantaneous 0.1 V. SOGI gain unchanged (500): a gain of 50 makes the SOGI–PLL loop oscillate with the frequency-adaptive SOGI (host check, #7) |
+| Evidence | Host, library alone: the bench grid never synchronized before (instantaneous \|Vq\| up to 58 V); with the fix, L0-GFL-10 (bench harmonics at 47.6–52.4 Hz, EN 50160 limits) and L0-GFL-13 (offsets, the bench grid as measured) pass, averaged \|Vq\| ≤ 0.055 V on the bench grid; all earlier L0-GFL pass, including the SYNC_LOST and PWM start-up tests. Full L0: 103 pass, 7 known fails. Firmware builds and installs the library at `9bfbaee` |
+| Hardware check | Bench L2-INV-01 retest (menu `c`): telemetry state 1 → 9 → 8 |
+
+**Revert condition.** When the fix is merged into jalinei `main` (pull request to open with these tests and the bench data), restore `single_phase_inverter = https://github.com/jalinei/single_phase_inverter`, pin the merged commit in the test lock, run L0, and close #7 with that campaign ID.
+

@@ -686,11 +686,11 @@
    "tab": "inverter",
    "level": "L0",
    "title": "SOGI and PLL with grid harmonics",
-   "criterion": ".a synchronization holds and Vq ripple stays below the 0.1 V sync tolerance (PASS/FAIL); INFO: per-harmonic gain of α and β (3rd–13th) against the discrete transfer functions, THD of α and β, Vd ripple",
-   "conditions": "EN 50160-like distortion (3rd 5 %, 5th 6 %, 7th 5 %, 9th 1.5 %, 11th 3.5 %, 13th 3 %) and each harmonic alone",
+   "criterion": ".a bench-measured harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %) at 47.6, 49.5, 50, 50.5 and 52.4 Hz: synchronizes within 8 s, period-averaged |Vq| below 1 % of the peak and averaged ω within 1 % of the grid (PASS/FAIL); .d EN 50160 limit harmonics (5 / 6 / 5 / 1.5 / 3.5 / 3 %) at 50 Hz: synchronizes (PASS/FAIL); INFO .b peak instantaneous |Vq| (the ripple the earlier instantaneous criterion judged), .c peak averaged |Vq|, .e instantaneous |Vq| with EN 50160 harmonics",
+   "conditions": "Library alone on a synthetic grid with harmonics; synchronization judged on one-period averages (library fix 9bfbaee, #7)",
    "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-   "status": "planned",
-   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (#7)"
   },
   {
    "id": "L0-GFL-11",
@@ -719,11 +719,11 @@
    "tab": "inverter",
    "level": "L0",
    "title": "SOGI with a DC offset on VAC",
-   "criterion": "INFO: DC in α and β, Vd ripple at 1ω, frequency estimate error, against offset 0.5–5 V",
+   "criterion": ".a VAC offset −5.7 V (bench) and ±10 V: synchronizes, averaged |Vq| below 1 % of the peak (PASS/FAIL); .b peak instantaneous |Vq| (INFO); .c the bench grid as measured (harmonics and −5.7 V offset) at 50 Hz synchronizes (PASS/FAIL)",
    "conditions": "Clean 50 Hz grid plus a constant offset",
    "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-   "status": "planned",
-   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (#7)"
   },
   {
    "id": "L0-GFL-14",
