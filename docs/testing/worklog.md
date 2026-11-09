@@ -292,3 +292,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | The `load us:` line ends with `rate <Hz>`, the measured call rate of the critical task (expected 10000). Menu `v` switches the CONNECT/INJECT capture between 10 kHz (default) and 2 kHz. No control change |
 | Evidence | Firmware builds |
 | Hardware check | Bench: `rate` in `c` and after `g`; `g` with `v` (2 kHz capture) |
+
+## 2026-11-09 — Telemetry: longest gap between control periods, stale VAC periods
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(telemetry): longest gap …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench L2-INV-04: `g` from PWM_SETTLE gives fault 12 (SYNC_LOST) within 0.2–6 ms, on the board only (the same sequence on the bench-grid model passes, L0-APP-09.d). The call rate stays at 10 kHz over 100 ms, and VAC advances irregularly from one period to the next. Capture 2026-11-09_20-38-23 (10 kHz): at the first sample after `g` the PLL is already off (ω 342 rad/s, Vq 48 V) |
+| Behaviour change | The `load us:` line ends with `gap max <µs>` (longest interval between two critical task starts, expected about 100) and `vac stale <n>` (periods without a new VAC sample, value held). No control change |
+| Evidence | Firmware builds |
+| Hardware check | Bench: both values in step 1 held, and on the line right after `g` |

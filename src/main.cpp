@@ -139,6 +139,11 @@ static uint16_t relay_hold_ticks = 0U;
 static volatile uint32_t critical_max_us = 0U;
 /* Critical task calls, to check the real call rate against the 10 kHz the controllers assume. */
 static volatile uint32_t critical_calls = 0U;
+/* Longest interval between two critical task starts (µs, expected 100), and control periods without
+ * a new VAC sample (the last value is held), since the last telemetry line. */
+static volatile uint32_t critical_gap_max_us = 0U;
+static uint32_t critical_prev_start = 0U;
+static volatile uint32_t vac_stale_count = 0U;
 static uint32_t rate_prev_calls = 0U;
 static int64_t rate_prev_ms = 0;
 /* Menu 'v': 10 kHz capture in CONNECT/INJECT (default) or 2 kHz as in the other stages. */
@@ -502,10 +507,16 @@ void loop_application_task()
         static_cast<uint32_t>((static_cast<int64_t>(calls - rate_prev_calls) * 1000) / (now_ms - rate_prev_ms)) : 0U;
     rate_prev_calls = calls;
     rate_prev_ms = now_ms;
-    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u, rate %u Hz\n", static_cast<unsigned int>(load_us),
+    const uint32_t gap_max = critical_gap_max_us;
+    critical_gap_max_us = 0U;
+    const uint32_t vac_stale = vac_stale_count;
+    vac_stale_count = 0U;
+    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u, rate %u Hz, gap max %u us, vac stale %u\n",
+           static_cast<unsigned int>(load_us),
            static_cast<unsigned int>(part_max_us[0]), static_cast<unsigned int>(part_max_us[1]),
            static_cast<unsigned int>(part_max_us[2]), static_cast<unsigned int>(part_max_us[3]),
-           static_cast<unsigned int>(rate_hz));
+           static_cast<unsigned int>(rate_hz), static_cast<unsigned int>(gap_max),
+           static_cast<unsigned int>(vac_stale));
     for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
     /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
     const dqo_t vdq_avg = control.inverter.getVdqAverage();
@@ -534,6 +545,12 @@ void loop_application_task()
 void loop_critical_task()
 {
     const uint32_t critical_start = k_cycle_get_32();
+    if (critical_calls != 0U)
+    {
+        const uint32_t gap_us = k_cyc_to_us_floor32(critical_start - critical_prev_start);
+        if (gap_us > critical_gap_max_us) critical_gap_max_us = gap_us;
+    }
+    critical_prev_start = critical_start;
     ++critical_calls;
     /*----- Read sensors, holding the last valid value ----- */
     meas_data = shield.sensors.getLatestValue(ILow1);
@@ -548,6 +565,10 @@ void loop_critical_task()
     {
         v_ac_updated = true;
         v_ac_value = meas_data;
+    }
+    else
+    {
+        ++vac_stale_count;
     }
 
     // meas_data = shield.sensors.getLatestValue(ILow2);
