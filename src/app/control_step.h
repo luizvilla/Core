@@ -139,6 +139,9 @@ inline constexpr float32_t inject_current_max = 0.1F;
 inline constexpr float32_t bench_inverter_current_trip = 1.5F;
 /** @brief Relay contact time: command held this long before the feedback changes, in control ticks (20 ms). */
 inline constexpr uint16_t relay_contact_ticks = 200U;
+/** @brief Relay closing time, command to contact (bench 2026-11-09: 9.7 ms). The command is issued this long
+ * before a grid-voltage zero crossing, so the contact closes near zero voltage; 0 commands at once. */
+inline constexpr float32_t relay_close_delay = 0.0097F;
 
 }  // namespace app
 
@@ -206,6 +209,7 @@ struct ControlState {
     float32_t open_loop_theta = 0.0F;           ///< Open-loop stage: oscillator angle (rad).
     bool bench_tripped = false;                 ///< Bench current protection latched (cleared in the OFF stage).
     bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
+    bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
 };
 
 /**

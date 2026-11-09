@@ -185,7 +185,29 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
         state.open_loop_m = 0.0F;
     }
     state.open_loop_active = open_loop && out.bridge_enable;
-    out.relay_close = state.inverter.isGridConnectionRequested();
+    /* Relay: once the inverter requests the connection, issue the command app::relay_close_delay before a
+     * grid-voltage zero crossing, so the contact closes near zero voltage. Locked, v = Vd·cos(theta): zero
+     * crossings at theta = pi/2 (mod pi). The averaged frequency projects the angle over the closing time. */
+    if (!state.inverter.isGridConnectionRequested())
+    {
+        state.relay_command_latched = false;
+    }
+    else if (!state.relay_command_latched)
+    {
+        if (app::relay_close_delay <= 0.0F)
+        {
+            state.relay_command_latched = true;
+        }
+        else
+        {
+            const float32_t w = state.inverter.getwAverage();
+            float32_t phi = fmodf(state.inverter.getTheta() + w * app::relay_close_delay - 0.5F * PI, PI);
+            if (phi < 0.0F) phi += PI;
+            /* Within 1.5 periods' advance past the target: the angle steps at most about 1.1·w·Ts per period. */
+            if (phi < 1.5F * w * app::hot_loop_period) state.relay_command_latched = true;
+        }
+    }
+    out.relay_close = state.relay_command_latched;
     out.bench_trip = state.bench_tripped;
     return out;
 }

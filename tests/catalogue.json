@@ -978,7 +978,7 @@
    "level": "L0",
    "title": "Bench step 0: open-loop 230 V RMS",
    "criterion": ".a ramp to 325.3 V / VDCBus in index/rate seconds, 50 Hz, bridge on, relay never commanded, no grid needed; .b low bus saturates the index at 0.95, invalid bus stops the bridge, OFF stops it and re-entry ramps from zero",
-   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`, `relay_close_delay`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-09"
   },
@@ -987,7 +987,7 @@
    "tab": "app",
    "level": "L0",
    "title": "Bench steps 1–3: settle, connect through the relay, inject",
-   "criterion": ".a CONNECT settles 10 periods with PWM and the relay open, then commands the relay and reaches GRID_CONNECTED after the 20 ms contact time; .b INJECT runs the current loop with the reference capped at 0.1 A, back to CONNECT stops it; .c OFF from the grid opens the relay and stops the bridge, SETTLE from the grid goes through OFF",
+   "criterion": ".a CONNECT settles 10 periods with PWM and the relay open, then commands the relay (within half a period, at its zero-crossing instant) and reaches GRID_CONNECTED after the 20 ms contact time; .b INJECT runs the current loop with the reference capped at 0.1 A, back to CONNECT stops it; .c OFF from the grid opens the relay and stops the bridge, SETTLE from the grid goes through OFF; .d the relay command leads a grid-voltage zero crossing by the relay closing time (app::relay_close_delay), within 4°, at several start phases and 49.5/50.5 Hz",
    "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-09"

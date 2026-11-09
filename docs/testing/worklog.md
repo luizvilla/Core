@@ -325,3 +325,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | `_pwm_settle_cycles` is a `float32_t`, incremented by ω·Ts/2π in single precision. It counts the same PLL periods; rounding over 10 periods is well under 0.01 period |
 | Evidence | L0-GFL: no failure; L0-APP: no new failure (L0-APP-03.c fails before and after); firmware builds |
 | Hardware check | Bench 2026-11-09, dry run L2-INV-04 (relay power contacts unwired): `g` goes PWM_SETTLE → GRID_CONNECT → GRID_CONNECTED, the relay closes about 9.7 ms after the command. Captures in `docs/testing/bench/2026-11-09_inverter/` |
+
+## 2026-11-09 — Relay commanded ahead of a voltage zero crossing
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): relay commanded ahead of a voltage zero crossing` commit that adds this entry |
+| Files | `src/app/control_step.h`, `src/app/control_step.cpp`, `tests/l0/app/test_app.cpp`, `tests/catalogue.json` |
+| Reason | Bench L2-INV-04: the relay closes 9.7 ms after its command. Luiz Villa asked for the contact to close at a voltage zero crossing: the residual inverter/grid mismatch from an amplitude error is smallest there, and the contact switches at low voltage |
+| Behaviour change | When the inverter requests the connection (GRID_CONNECT), the application issues the relay command once θ + ω̄·`app::relay_close_delay` reaches a zero crossing (θ = π/2 mod π, since v = Vd·cos θ when locked), ω̄ being the one-period averaged frequency; the command is then held while the inverter requests the connection. `app::relay_close_delay` = 9.7 ms; 0 restores the immediate command. The relay command comes up to half a period (10 ms) later than before; GRID_CONNECT's 1 s timeout is unaffected |
+| Evidence | New L0-APP-07.d: contact instant within 1.8° of a zero crossing (limit 4°) at 4 start phases × 49.5/50/50.5 Hz; it failed before the change (11/36). L0-APP-07.a: settle window widened to 0.2–0.21 s. L0-APP-09.d passes; L0-APP: no new failure (L0-APP-03.c fails before and after). Firmware builds |
+| Hardware check | Bench: CH4 on the relay command, a voltage probe on the grid side; the contact closes within about ±1 ms of a zero crossing (relay closing-time spread) |

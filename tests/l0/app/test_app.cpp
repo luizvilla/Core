@@ -549,10 +549,41 @@ int main() {
         c.check("PWM_SETTLE reached", settle_start >= 0);
         c.check("bridge PWM on while settling", !pwm_off_while_settling);
         c.check("relay not commanded before settling", relay_at >= 0 && !relay_before_settle);
-        c.near("settling time before the relay command (s)", (relay_at - settle_start) / static_cast<double>(ticks_per_s), 0.2, 5e-4);
+        // 10 periods, then up to half a period more: the command waits for its zero-crossing instant (L0-APP-07.d).
+        const double settle_s = (relay_at - settle_start) / static_cast<double>(ticks_per_s);
+        c.check("settling time before the relay command: 0.2 s to 0.2 s + half a period", settle_s >= 0.2 - 5e-4 && settle_s <= 0.21 + 5e-4);
         c.near("relay feedback after the contact time (s)", (connected_at - relay_at) / static_cast<double>(ticks_per_s),
                app::relay_contact_ticks / static_cast<double>(ticks_per_s), 3e-4);
         c.check("GRID_CONNECTED with the relay closed", state.inverter.getMode() == VSI_GRID_CONNECTED && relay.closed);
+    }
+    {
+        /** @test L0-APP-07.d: The relay command leads a grid-voltage zero crossing by app::relay_close_delay, so the contact closes at a zero crossing (several start phases, 49.5 and 50.5 Hz) */
+        tc::Criterion c("L0-APP-07.d", "Relay command leads a voltage zero crossing by the relay closing time (start phases, 49.5/50.5 Hz)");
+        for (double hz : {49.5, 50.0, 50.5}) {
+            for (double start : {0.0, 1.0, 2.5, 4.0}) {
+                ControlState state;
+                Grid grid;
+                grid.hz = hz;
+                grid.phase = start;
+                Relay relay;
+                c.check("controlInit", controlInit(state) == 0);
+                OperatorCommands cmd;
+                cmd.inverter_stage = INV_CONNECT;
+                double phase_at_cmd = -1.0;
+                for (int n = 0; n < 4 * ticks_per_s && phase_at_cmd < 0.0; ++n) {
+                    const double phase = grid.phase;
+                    const ControlOutputs out = benchStep(state, grid, cmd, relay);
+                    if (out.relay_close) phase_at_cmd = phase;
+                }
+                c.check("relay commanded", phase_at_cmd >= 0.0);
+                // Grid::v() is a cosine: zero crossings at pi/2 + k*pi. Phase at the contact instant, folded onto them.
+                const double at_contact = phase_at_cmd + two_pi * hz * app::relay_close_delay;
+                double err = std::fmod(at_contact - two_pi / 4.0, two_pi / 2.0);
+                if (err > two_pi / 4.0) err -= two_pi / 2.0;
+                if (err < -two_pi / 4.0) err += two_pi / 2.0;
+                c.near("contact instant from the nearest zero crossing (rad)", err, 0.0, 0.07);  // 4 deg, 2 ticks
+            }
+        }
     }
     {
         /** @test L0-APP-07.b: Step 3: INJECT runs the current loop with the reference capped at inject_current_max; back to CONNECT stops it */
