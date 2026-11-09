@@ -124,6 +124,9 @@ inline constexpr uint32_t grid_voltage_stale_ticks = 200U;
  */
 /** @brief Grid periods of synchronized PWM before relay closure in the CONNECT stage. */
 inline constexpr uint16_t inverter_settle_cycles = 10U;
+/** @brief Diagnostic: settle count in SETTLE when OperatorCommands::settle_count_test is set (about 22 min at 50 Hz,
+ * never reached), so step 1 runs the library's settle counter as step 2 does, without closing the relay. */
+inline constexpr uint16_t settle_count_test_cycles = 65535U;
 /** @brief Open-loop stage: target output peak voltage (230 V RMS), in V. */
 inline constexpr float32_t open_loop_voltage_peak = 230.0F * 1.41421356F;
 /** @brief Open-loop stage: largest modulation index (keeps the duty inside 0.025-0.975). */
@@ -170,6 +173,7 @@ struct OperatorCommands {
     InverterStage inverter_stage = INV_OFF;  ///< Requested inverter bench stage.
     float32_t inject_current = 0.0F; ///< INJECT d-axis current reference, A peak (clamped to app::inject_current_max).
     float32_t v_bus_ref = app::initial_voltage_reference;  ///< VDCBus reference (V).
+    bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
 };
 
 /** @brief PWM commands for one control period. */

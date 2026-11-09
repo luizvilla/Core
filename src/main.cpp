@@ -148,6 +148,8 @@ static uint32_t rate_prev_calls = 0U;
 static int64_t rate_prev_ms = 0;
 /* Menu 'v': 10 kHz capture in CONNECT/INJECT (default) or 2 kHz as in the other stages. */
 static bool scope_fast_connect = true;
+/* Menu 'e': step 1 with the library's settle counter running (diagnostic for the fault after 'g'). */
+static bool settle_count_test = false;
 /* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
 static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
 static inline void notePart(int part, uint32_t from, uint32_t to)
@@ -332,6 +334,7 @@ void loop_communication_task()
                "|     press q : restart scope acquisition|\n"
                "|     press f : force scope trigger now  |\n"
                "|     press v : CONNECT scope 10k/2k Hz  |\n"
+               "|     press e : step 1 settle counter on |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
         break;
@@ -446,6 +449,10 @@ void loop_communication_task()
     case 'q':
         scope.start();
         printk("scope acquisition restarted\n");
+        break;
+    case 'e':
+        settle_count_test = !settle_count_test;
+        printk("step 1 settle counter: %s\n", settle_count_test ? "RUNNING (diagnostic)" : "off (normal)");
         break;
     case 'v':
         scope_fast_connect = !scope_fast_connect;
@@ -599,6 +606,7 @@ void loop_critical_task()
     OperatorCommands cmd;
     cmd.mode = mode;
     cmd.inverter_stage = inverter_stage;
+    cmd.settle_count_test = settle_count_test;
     cmd.inject_current = inject_current;
     cmd.v_bus_ref = voltage_reference;
 

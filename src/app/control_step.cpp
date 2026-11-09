@@ -100,8 +100,8 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     const bool on_grid = vsi == VSI_GRID_CONNECT || vsi == VSI_GRID_CONNECTED || vsi == VSI_RUN ||
                          vsi == VSI_STOPPING || vsi == VSI_DISCONNECT;
     /* Relay closure only in CONNECT and INJECT; SETTLE holds PWM_SETTLE (zero dwell). */
-    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT) ?
-                                      app::inverter_settle_cycles : 0U);
+    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT) ? app::inverter_settle_cycles :
+                                      (cmd.settle_count_test ? app::settle_count_test_cycles : 0U));
     /* Back to SETTLE from the grid: disconnect first (relay opens), then synchronize again. */
     if (grid_stage && !(stage == INV_SETTLE && on_grid) && !state.bench_tripped)
         state.inverter.requestConnect();

@@ -303,3 +303,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | The `load us:` line ends with `gap max <µs>` (longest interval between two critical task starts, expected about 100) and `vac stale <n>` (periods without a new VAC sample, value held). No control change |
 | Evidence | Firmware builds |
 | Hardware check | Bench: both values in step 1 held, and on the line right after `g` |
+
+## 2026-11-09 — Bench diagnostic: step 1 with the settle counter running (menu `e`)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(bench): step 1 with the settle counter running …` commit that adds this entry |
+| Files | `src/app/control_step.h`, `src/app/control_step.cpp`, `src/main.cpp` |
+| Reason | Bench L2-INV-04: with the 2 kHz capture (capture 2026-11-09_20-41-43) `g` still gives fault 12 about 6.5 ms after the key, so the 10 kHz capture is not the cause. The only control difference between step 1 and step 2 before the relay is `setPwmSettleCycles(10)`: the library starts counting periods in PWM_SETTLE (a double-precision accumulation, software-emulated on the M4) |
+| Behaviour change | `OperatorCommands::settle_count_test` (menu `e`, default off): in SETTLE, the settle count is `app::settle_count_test_cycles` (65535 periods, never reached) instead of 0, so the counter runs while the relay stays inhibited. Default behaviour unchanged |
+| Evidence | Firmware builds; L0-APP: no new failure (L0-APP-03.c fails before and after this change) |
+| Hardware check | Bench: `e`, then `c`: fault 12 in step 1 means the counting itself (or its timing) causes it; no fault means the cause is elsewhere in the switch to CONNECT |
