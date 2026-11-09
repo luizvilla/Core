@@ -270,3 +270,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | `initInverterUnipolar(LEG2_HIGH, LEG1_HIGH)` and `setInverterDutyCycle(LEG2_HIGH, …)`. VDCBus calibration from the meter: (99.54 V, 96.4 raw) and (399.4 V, 388.5 raw, back-computed from the 435.3 V reading with the old fit), so V = 1.02643 · raw + 0.592 V instead of 1.14898 · raw − 11.221 V |
 | Evidence | Firmware builds (flash 80 %) |
 | Hardware check | Bench step 1: output in phase with the grid, amplitude within ±3 %; telemetry VDCBus ≈ meter (≈ 399 V) |
+
+## 2026-11-09 — Telemetry: inverter fault reason; scope triggers on a fault in CONNECT
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(telemetry): inverter fault reason …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench L2-INV-04 (dry run): from PWM_SETTLE (state 8), `g` put the inverter in FAULT (state 7) before the relay was commanded; the telemetry did not say which fault, and the CONNECT capture only triggers on the relay closing |
+| Behaviour change | The `sync:` line ends with `fault <vsi_fault_reason_t>`. In CONNECT and INJECT the scope also triggers when the inverter enters FAULT. No control change |
+| Evidence | Firmware builds |
+| Hardware check | Bench: `c`, `g`; read `fault`, download the capture |

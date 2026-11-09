@@ -183,8 +183,10 @@ bool scope_trigger()
         scope_force_trigger = false;
         return true;
     }
-    /* Grid stages: capture the relay closing; open loop: the bridge start; otherwise the synchronization. */
-    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) return scope_relay_closed > 0.5F;
+    /* Grid stages: capture the relay closing, or an inverter fault before it; open loop: the bridge
+     * start; otherwise the synchronization. */
+    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT)
+        return scope_relay_closed > 0.5F || scope_inverter_mode == static_cast<float32_t>(VSI_FAULT);
     if (inverter_stage == INV_OPEN_LOOP) return scope_bridge_on > 0.5F;
     return scope_sync > 0.5F;
 }
@@ -487,11 +489,12 @@ void loop_application_task()
     for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
     /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
     const dqo_t vdq_avg = control.inverter.getVdqAverage();
-    printk("sync: Vd_avg %.1f (293-358) Vq_avg %.2f (|.|<3.25) w_avg %.2f (298.5-329.9) window %u grid_ok %u trip %u\n",
+    printk("sync: Vd_avg %.1f (293-358) Vq_avg %.2f (|.|<3.25) w_avg %.2f (298.5-329.9) window %u grid_ok %u trip %u fault %u\n",
            (double)vdq_avg.d, (double)vdq_avg.q, (double)control.inverter.getwAverage(),
            static_cast<unsigned int>(control.inverter.isSyncWindowFull()),
            static_cast<unsigned int>(control.grid_observer.canOperate()),
-           static_cast<unsigned int>(control.grid_observer.getTripReason()));
+           static_cast<unsigned int>(control.grid_observer.getTripReason()),
+           static_cast<unsigned int>(control.inverter.getFaultReason()));
     printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f:%u\n", static_cast<unsigned int>(inverter_stage),
            static_cast<unsigned int>(control.inverter.getMode()), static_cast<unsigned int>(relay_command),
            static_cast<unsigned int>(relay_closed), (double)idq.d, (double)idq.q, (double)pq.d, (double)pq.q,
