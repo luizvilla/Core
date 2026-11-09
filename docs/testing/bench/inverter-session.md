@@ -1,11 +1,12 @@
 # Inverter bench session
 
-The first hardware tests of the inverter: generate 230 V RMS, synchronize with the grid, close the relay, inject a small current. Each step has its own firmware stage, selected from the serial menu, and its own record. The catalogue IDs are `L2-INV-00…03` (Inverter tab, level L2: on the board); the pre-checks are `L2-INV-10`.
+The first hardware tests of the inverter: generate 230 V RMS, synchronize with the grid, close the relay, inject a small current. Each step has its own firmware stage, selected from the serial menu, and its own record. The catalogue IDs are `L2-INV-00…04` (Inverter tab, level L2: on the board); the pre-checks are `L2-INV-10`.
 
 | Step | Menu | Firmware stage | Inverter controller state | What it shows |
 |---|---|---|---|---|
 | 0 | `o` | `INV_OPEN_LOOP` | not used (OFF) | The bridge and filter make a 230 V RMS, 50 Hz wave with no grid |
 | 1 | `c` | `INV_SETTLE` | PWM_SETTLE, held | The inverter-side voltage matches the grid before the relay |
+| 1b | `g` | `INV_CONNECT`, relay power contacts unwired | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | Dry run of step 2: the sequence and the relay timing, with nothing connected (L2-INV-04) |
 | 2 | `g` | `INV_CONNECT` | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
@@ -106,11 +107,45 @@ Note: the L1 model switches the bridge at 200 kHz, the board at 50 kHz (finding 
 
 | Criterion | Limit | Why | Result |
 |---|---|---|---|
-| .a RMS difference, inverter side − grid side | within ±3 % (about ±7 V) | Sets the relay closing current: about ΔV / R_bulb (cold) = 7 V / 40 Ω ≈ 0.2 A | |
-| .b Phase difference | within ±3° (about 0.17 ms) | 3° of 325 V is 17 V of instantaneous difference | |
-| .c Frequency | equal (the inverter follows the grid) | — | |
-| .d Bulb dark, relay command 0, state 8 held | yes | relay closure inhibited in this stage | |
-| .e INFO: V_q, omega, time from `c` to state 8 | record | L0-GFL-16: link within one period, after the 1 s qualification and the 1000-call dwell | |
+| .a RMS difference, inverter side − grid side | within ±3 % (about ±7 V) | Sets the relay closing current: about ΔV / R_bulb (cold) = 7 V / 40 Ω ≈ 0.2 A | the RMS is very close |
+| .b Phase difference | within ±3° (about 0.17 ms) | 3° of 325 V is 17 V of instantaneous difference | now we have a problem with a 180 degree shift. **Fixed (`c935efb`):** LEG2 drives L on the board, so leg 2 is now leg A; capture 2026-11-10 00:10 shows both sides in phase (`docs/testing/bench/2026-11-09_inverter/L2-INV-01_in-phase.png`) |
+| .c Frequency | equal (the inverter follows the grid) | — | frequency is the same |
+| .d Bulb dark, relay command 0, state 8 held | yes | relay closure inhibited in this stage | relay remains open |
+| .e INFO: V_q, omega, time from `c` to state 8 | record | L0-GFL-16: link within one period, after the 1 s qualification and the 1000-call dwell | Held in state 8: Vd_avg 325–329 V, \|Vq_avg\| ≤ 0.22 V, ω_avg 313.8–314.3 rad/s, `grid_ok` 1; state 1 → 8 within one telemetry line (< 0.2 s) with the observer already qualified |
+
+## L2-INV-04 · Step 1b: dry run of the connection, relay power contacts unwired
+
+Step 2 run with nothing behind the relay: the firmware goes through the whole connection sequence and the relay clicks, but its contacts connect nothing. It checks the sequence and measures the relay's real timing before the relay is allowed to connect the inverter to the mains.
+
+**Why the timing matters.** The firmware has no contact feedback: it reports the relay closed 20 ms after the command (`app::relay_contact_ticks` = 200 ticks), and open 20 ms after the command is released. Until it reports the relay closed, the inverter is in GRID_CONNECT: it copies the grid voltage, with no current loop. If the contact really closes earlier, the closing current is set only by the voltage mismatch and the filter (and the bulb). If it closes later, the current loop is already running on an open circuit and can pull the output away from the grid before the contact closes.
+
+**Conditions.** As step 1: bus at 400 V (never at the 100 V of step 0: with the bus below the grid peak, about 325 V, the grid charges the bus through the bridge diodes whenever the relay is closed and the bridge stopped), mains through the bulb, boost IDLE. Both power terminals of the relay disconnected from the circuit and insulated. The grid-side voltage sensor (VAC) stays on the mains, so the firmware still synchronizes. CH1 stays on the filter output (inverter side).
+
+**Scope.** CH4 on GPIO 22 (relay command). CH3 on the relay contact, through a low-voltage circuit: a 5 V supply through 1 kΩ across the contact. CH3 reads 5 V with the contact open and 0 V with it closed. CH3 is not needed for current here: no current can flow, and the telemetry still prints IAC. Trigger: single shot on CH4 rising, 2 ms/div.
+
+**Sequence.**
+1. Mains breaker off, DC source off. Disconnect both conductors from the relay's power contacts, insulate the loose ends, wire the 5 V / 1 kΩ circuit and CH3 across the contact. The contact must be connected to nothing else: with one side still on the filter, the 5 V circuit would sit at mains potential.
+2. Power up as step 1 (DC source 400 V, then mains). Press `c` and wait for `inverter_state` 8. Check CH1 against CH2 as in step 1.
+3. Press `g`. Expected: 10 grid periods (200 ms), then `relay` 10, the click, `relay` 11 20 ms later, `inverter_state` 2 → 3. On the single shot, read:
+   - closing time: from the GPIO 22 rising edge to the first fall of CH3;
+   - bounce: from the first to the last transition of CH3.
+4. Stay in state 3 for 10 s. Compare CH1 with CH2 at about 1 s and at 10 s (RMS and phase, as step 1). The current loop is running with no current to regulate: this shows whether it pulls the output away from the grid.
+5. Re-arm the scope on CH4 falling and press `x`. Expected: `inverter_state` 5 → 6 → 0, `relay` 00. Read the release time: from the GPIO 22 falling edge to CH3 back at 5 V (last bounce).
+6. Repeat `c`, `g`, `x` twice more and record the closing time, bounce and release time each time.
+7. Download the firmware capture (`r`): relay command, state 8 → 2 → 3, IAC about 0.
+8. Protection test: `c`, `g` again, and in state 3 press `z`. One control period sees an artificial 3 A on IAC. Expected in the same period: the console prints `inverter bench current trip`, `inverter_state` 7, the bridge stops (CH1 drops to zero), GPIO 22 falls (CH4) and the relay opens. Press `r`: the capture (triggered by the fault) shows the 3 A sample, the mode going to 7 and the duty to 0 on the same sample. Press `x` to clear the latch.
+9. Mains breaker off, DC source off. Remove the 5 V circuit and reconnect the relay's power contacts before step 2.
+
+**Acceptance.**
+
+| Criterion | Limit | Why | Result |
+|---|---|---|---|
+| .a Sequence: state 8 → 2 → 3 held, `relay` 10 → 11, no fault (no PWM_UPDATE_FAILED, no connection timeout) | yes | the connection sequence works before anything is connected | **Pass** after the library fix (#10, `b7fa96c`): 8 → 2 → 3, `relay` 10 → 11, no fault. Before it, fault 12 within 6 ms of `g` |
+| .b Closing time + bounce, worst of 3 | ≤ 15 ms (5 ms margin before the 20 ms contact time) | the firmware must not report the relay closed, and start the current loop, before the contact has settled. If it fails, raise `app::relay_contact_ticks` to the worst measured value + 5 ms before step 2 | 9.7 ms command → contact on one operation (`L2-INV-04_relay-close_10ms.png`); worst of 3 still to measure. Since `48d562d` the command leads a voltage zero crossing by 9.7 ms (`app::relay_close_delay`) |
+| .c `x`: state 5 → 6 → 0, `relay` 00, no fault; release time, worst of 3 | ≤ 15 ms | the firmware treats the relay as open 20 ms after releasing the command, then stops the bridge | |
+| .d Inverter side against grid side after 10 s in state 3 | within ±3 % and ±3°, as step 1 | the current loop with no current must not pull the output away; a drift points to the IAC offset winding up the current integrator, and makes the step 2 closing current depend on the relay timing | |
+| .e INFO: the three closing times, bounces and release times; IAC and `Id`, `Iq` in state 3 | record | sets `app::relay_contact_ticks` | |
+| .f Protection test (`z`, 3 A for one period in state 3): fault in the same period, bridge stopped, relay command dropped, latched until `x` | yes | checks the bench current trip end to end before the relay connects to the mains | **Pass** (4 captures, e.g. 2026-11-09_21-44-56): on sample 129, IAC 3.00 A, `inverter_mode` 3 → 7, `bridge_duty` 0.71 → 0, `relay_cmd` 1 → 0, all in the same 100 µs period; latched until `x`. A 2 kHz capture misses the single 3 A sample (one period in five recorded) |
 
 ## L2-INV-02 · Step 2: close the relay, then zero current (GRID_CONNECT → GRID_CONNECTED)
 
@@ -161,7 +196,8 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 |---|---|---|---|---|---|---|
 | | L2-INV-10 | | | | | |
 | | L2-INV-00 | | | | | |
-| | L2-INV-01 | | | | | |
+| 2026-11-09/10 | L2-INV-01 | `c935efb` and later | 399–402 V (meter 399.4 V) | .a pass (RMS very close), .b pass after the leg-order fix, .c pass, .d pass | `2026-11-09_inverter/L2-INV-01_in-phase.png` | bridge leg order and VDCBus calibration fixed during the step |
+| 2026-11-09/10 | L2-INV-04 | `b487ba5` (fix), `f352225`/`acf1ad6` (z) | 400–404 V | .a pass, .b 9.7 ms (1 of 3), .c .d to do, .e partial, .f pass | `2026-11-09_inverter/L2-INV-04_*.png`, `src/Data_records/2026-11-09_21-4*` | findings #9 (relay pin), #10 (fault 12), #11 (scope dump) |
 | | L2-INV-02 | | | | | |
 | | L2-INV-03 | | | | | |
 
