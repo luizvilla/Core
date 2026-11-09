@@ -118,6 +118,25 @@ inline constexpr GridObserverConfig grid_observer_config = {
 /** @brief Invalidate the observer if no new VAC sample arrives for 20 ms. */
 inline constexpr uint32_t grid_voltage_stale_ticks = 200U;
 
+/*
+ * Inverter bench session (docs/testing/bench/inverter-session.md), 2026-11-09.
+ * Bench: DC source on the bus, grid through a series light bulb, relay on GPIO 22.
+ */
+/** @brief Grid periods of synchronized PWM before relay closure in the CONNECT stage. */
+inline constexpr uint16_t inverter_settle_cycles = 10U;
+/** @brief Open-loop stage: target output peak voltage (230 V RMS), in V. */
+inline constexpr float32_t open_loop_voltage_peak = 230.0F * 1.41421356F;
+/** @brief Open-loop stage: largest modulation index (keeps the duty inside 0.025-0.975). */
+inline constexpr float32_t open_loop_m_max = 0.95F;
+/** @brief Open-loop stage: modulation index ramp, per second (0 to full in about 1 s). */
+inline constexpr float32_t open_loop_m_rate = 1.0F;
+/** @brief INJECT stage: largest |d-axis current| reference, in A peak (series bulb: keep small). */
+inline constexpr float32_t inject_current_max = 0.1F;
+/** @brief Bench protection: |IAC| above this trips the inverter (latched until OFF), in A. */
+inline constexpr float32_t bench_inverter_current_trip = 1.5F;
+/** @brief Relay contact time: command held this long before the feedback changes, in control ticks (20 ms). */
+inline constexpr uint16_t relay_contact_ticks = 200U;
+
 }  // namespace app
 
 /** @brief Latest sensor values, in physical units, held from the last valid sample. */
@@ -129,12 +148,27 @@ struct Measurements {
     float32_t v_ac = 0.0F;      ///< Instantaneous grid voltage (V).
     float32_t i_ac = 0.0F;      ///< Instantaneous bridge current (A).
     bool v_ac_updated = false;  ///< A new VAC sample arrived during this period.
+    bool relay_closed = false;  ///< Relay feedback from the hardware loop (command held for the contact time).
+};
+
+/**
+ * @brief Inverter bench stages (docs/testing/bench/inverter-session.md).
+ * @details Values are the serial/scenario encoding: 1 keeps the earlier
+ * "sync request" meaning (PWM_SETTLE hold, menu 'c').
+ */
+enum InverterStage : uint8_t {
+    INV_OFF = 0,        ///< Inverter off: disconnect sequence, relay open, faults cleared once safe.
+    INV_SETTLE = 1,     ///< Step 1: synchronized PWM held in PWM_SETTLE, relay open (menu 'c').
+    INV_OPEN_LOOP = 2,  ///< Step 0: fixed 50 Hz modulation to 230 V RMS, no grid controller, relay open (menu 'o').
+    INV_CONNECT = 3,    ///< Step 2: settle, close the relay, regulate zero current (GRID_CONNECTED) (menu 'g').
+    INV_INJECT = 4      ///< Step 3: as CONNECT, then inject a fixed d-axis current (RUN) (menu 'n').
 };
 
 /** @brief Operator requests from the serial menu. */
 struct OperatorCommands {
     boost_mode mode = IDLE;          ///< Requested boost mode.
-    bool sync_requested = false;     ///< Synchronize and hold inverter at PWM_SETTLE (menu 'c').
+    InverterStage inverter_stage = INV_OFF;  ///< Requested inverter bench stage.
+    float32_t inject_current = 0.0F; ///< INJECT d-axis current reference, A peak (clamped to app::inject_current_max).
     float32_t v_bus_ref = app::initial_voltage_reference;  ///< VDCBus reference (V).
 };
 
@@ -150,6 +184,8 @@ struct ControlOutputs {
     bool boost_trip = false;          ///< Boost protection tripped (latched until IDLE).
     float32_t bridge_duty = 0.5F;     ///< Paired inverter duty to apply before enabling PWM.
     bool bridge_enable = false;       ///< Inverter bridge PWM request; hardware loop acknowledges application.
+    bool relay_close = false;         ///< Grid relay command (GPIO 22); feedback comes back as Measurements::relay_closed.
+    bool bench_trip = false;          ///< Bench current protection tripped (latched until the OFF stage).
     float32_t grid_angle = 0.0F;      ///< PLL grid angle (rad).
 };
 
@@ -162,6 +198,10 @@ struct ControlState {
     boost_mode previous_mode = IDLE;            ///< Mode applied in the previous period.
     uint32_t grid_voltage_age_ticks = app::grid_voltage_stale_ticks;  ///< Periods since the last VAC sample.
     bool bridge_pwm_applied = false;            ///< Bridge PWM enable applied last period, acknowledged to the inverter.
+    float32_t open_loop_m = 0.0F;               ///< Open-loop stage: current modulation index (ramped).
+    float32_t open_loop_theta = 0.0F;           ///< Open-loop stage: oscillator angle (rad).
+    bool bench_tripped = false;                 ///< Bench current protection latched (cleared in the OFF stage).
+    bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
 };
 
 /**
@@ -178,9 +218,12 @@ int8_t controlInit(ControlState &state);
  * Applies mode requests, runs the boost cold loop every app::cold_loop_divider
  * periods and its hot loop every period, keeps the PLL running, updates the
  * grid observer (invalidated when VAC is stale for app::grid_voltage_stale_ticks),
- * and gates inverter PWM on grid quality. Menu 'c' holds PWM_SETTLE indefinitely
- * with relay closure inhibited. The hardware loop updates bridge_pwm_applied
- * after applying the returned commands.
+ * and drives the inverter bench stage (InverterStage): OFF, SETTLE (PWM_SETTLE
+ * held, relay open), OPEN_LOOP (fixed modulation, relay open), CONNECT (relay
+ * closed after settling, zero current) and INJECT (fixed d-axis current).
+ * Grid quality gates the grid stages. The hardware loop updates
+ * bridge_pwm_applied after applying the returned commands, and reports the
+ * relay through Measurements::relay_closed.
  *
  * @param state Control state, updated in place.
  * @param meas Latest measurements.

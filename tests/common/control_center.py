@@ -228,7 +228,7 @@ regenerate: <code>python3 tests/common/control_center.py</code></div>
                  f'{bar(counts,len(tests))}<div class="sub">{len(tests)} tests: {e(summary_text(counts))}</div>')
         for note in tab.get('notes',[]):
             p.append(f'<div class="note">{e(re.sub(r"\[([^]]+)\]\([^)]+\)",r"\1",note).replace("**","").replace("`",""))}</div>')
-        for lv,name in (('L0','L0 · logic, no model'),('L1','L1 · on the switched model')):
+        for lv,name in (('L0','L0 · logic, no model'),('L1','L1 · on the switched model'),('L2','L2 · on the board (bench)')):
             rows=[t for t in tests if t['level']==lv]
             if not rows:continue
             hw=tab['id']=='model'

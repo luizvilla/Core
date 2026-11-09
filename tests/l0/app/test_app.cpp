@@ -31,6 +31,9 @@
  * | L0-APP-02 | The cold loop runs every 10th tick |
  * | L0-APP-03 | VAC stale for 20 ms invalidates the measurement and trips the observer |
  * | L0-APP-04 | Inverter PWM settles indefinitely with the relay open |
+ * | L0-APP-06 | Bench step 0: open-loop 230 V RMS |
+ * | L0-APP-07 | Bench steps 1-3: settle, connect through the relay, inject |
+ * | L0-APP-08 | Bench current protection |
  * | L0-APP-05 | Inverter synchronization is gated by the grid observer only |
  *
  * Each case builds its own ControlState with controlInit(), i.e. with the
@@ -87,6 +90,39 @@ ControlOutputs gridStep(ControlState &state, Grid &grid, const OperatorCommands 
     const ControlOutputs out = controlStep(state, m, cmd);
     // Emulate successful hardware application, reported on the next control tick.
     state.bridge_pwm_applied = out.bridge_enable;
+    grid.advance();
+    return out;
+}
+
+/** @brief Hardware relay stand-in: the feedback follows the command after the contact time (as main.cpp). */
+struct Relay {
+    bool command = false;  ///< Last relay command.
+    bool closed = false;   ///< Feedback reported to the control step.
+    int ticks = 0;         ///< Ticks the command has been held.
+    /** @brief Applies one period's outputs. @param out Control outputs. */
+    void apply(const ControlOutputs &out) {
+        if (out.relay_close != command) { command = out.relay_close; ticks = 0; }
+        else if (ticks < static_cast<int>(app::relay_contact_ticks)) ++ticks;
+        else closed = command;
+    }
+};
+
+/**
+ * @brief One bench period: measurements from the synthetic grid (or none), the relay stand-in,
+ * an AC current sample and the bus; bridge PWM acknowledged as applied, as the hardware loop does.
+ * @return The step's outputs.
+ */
+ControlOutputs benchStep(ControlState &state, Grid &grid, const OperatorCommands &cmd, Relay &relay,
+                         float i_ac = 0.0F, float bus = v_bus, bool grid_present = true) {
+    Measurements m;
+    m.v_dc_bus = bus;
+    m.v_ac = grid_present ? grid.v() : 0.0F;
+    m.v_ac_updated = true;
+    m.i_ac = i_ac;
+    m.relay_closed = relay.closed;
+    const ControlOutputs out = controlStep(state, m, cmd);
+    state.bridge_pwm_applied = out.bridge_enable;
+    relay.apply(out);
     grid.advance();
     return out;
 }
@@ -299,7 +335,7 @@ int main() {
         Grid grid;
         float held = 0.0F;
         OperatorCommands cmd;
-        cmd.sync_requested = true;
+        cmd.inverter_stage = INV_SETTLE;
         c.check("controlInit", controlInit(state) == 0);
         gridStep(state, grid, cmd, false, held);  // boot: no VAC sample yet
         bool qualified = false, synced = false;
@@ -322,7 +358,7 @@ int main() {
             Grid grid;
             float held = 0.0F;
             OperatorCommands cmd;
-            cmd.sync_requested = sync;
+            cmd.inverter_stage = sync ? INV_SETTLE : INV_OFF;
             c.check("controlInit", controlInit(state) == 0);
             bool bridge = false, inverter_pwm = false, relay = false, synced = false;
             for (boost_mode mode : {IDLE, STARTUP, BUSREG, MPPT, IDLE}) {
@@ -343,7 +379,7 @@ int main() {
             c.check("ends in PWM_SETTLE or OFF", state.inverter.getMode() == (sync ? VSI_PWM_SETTLE : VSI_OFF));
             c.check(sync ? "with sync request: synchronization reached" : "without sync request: never synchronized",
                     synced == sync);
-            cmd.sync_requested = false;
+            cmd.inverter_stage = INV_OFF;
             const ControlOutputs stopped = gridStep(state, grid, cmd, true, held);
             c.check("cancel stops PWM immediately", !stopped.bridge_enable);
             c.check("cancel leaves relay open", !state.inverter.isGridConnectionRequested());
@@ -355,7 +391,7 @@ int main() {
         Grid grid;
         float held = 0.0F;
         OperatorCommands cmd;
-        cmd.sync_requested = true;
+        cmd.inverter_stage = INV_SETTLE;
         c.check("controlInit", controlInit(state) == 0);
         for (int n = 0; n < 3 * ticks_per_s; ++n) {
             state.bridge_pwm_applied = false;
@@ -371,7 +407,7 @@ int main() {
         Grid grid;
         float held = 0.0F;
         OperatorCommands cmd;
-        cmd.sync_requested = true;
+        cmd.inverter_stage = INV_SETTLE;
         c.check("controlInit", controlInit(state) == 0);
         for (int n = 0; n < 3 * ticks_per_s; ++n) gridStep(state, grid, cmd, true, held);
         c.check("reached PWM_SETTLE", state.inverter.getMode() == VSI_PWM_SETTLE);
@@ -391,7 +427,7 @@ int main() {
         Grid grid;
         float held = 0.0F;
         OperatorCommands cmd;
-        cmd.sync_requested = true;
+        cmd.inverter_stage = INV_SETTLE;
         controlInit(state);
         int qualified_tick = -1, sync_tick = -1;
         bool sync_without_quality = false;
@@ -428,6 +464,158 @@ int main() {
             c.check("reason UnderVoltage", state.grid_observer.getTripReason() == GridTripReason::UnderVoltage);
             c.check("no synchronization from the trip tick on", !sync_after_trip);
             c.range("trip delay (s)", trip_tick / double(ticks_per_s), 0.1, 0.1 + 0.02);
+        }
+    }
+
+    // ---------------------------------------------------------------- L0-APP-06 to 08
+    // Inverter bench session (docs/testing/bench/inverter-session.md).
+    {
+        /** @test L0-APP-06.a: Step 0: open loop ramps the modulation index to 230 V RMS at 50 Hz, relay open, no grid needed */
+        tc::Criterion c("L0-APP-06.a", "Step 0: open loop ramps to 230 V RMS at 50 Hz with the relay open, no grid needed");
+        ControlState state;
+        Grid grid;
+        Relay relay;
+        c.check("controlInit", controlInit(state) == 0);
+        OperatorCommands cmd;
+        cmd.inverter_stage = INV_OPEN_LOOP;
+        const float target = app::open_loop_voltage_peak / v_bus;
+        bool always_on = true, relay_ever = false;
+        int ramp_ticks = -1, crossings = 0;
+        float previous = 0.5F, peak = 0.0F;
+        for (int n = 0; n < 2 * ticks_per_s; ++n) {
+            const ControlOutputs out = benchStep(state, grid, cmd, relay, 0.0F, v_bus, false);
+            always_on &= out.bridge_enable;
+            relay_ever |= out.relay_close;
+            if (ramp_ticks < 0 && std::fabs(state.open_loop_m - target) < 1e-6F) ramp_ticks = n + 1;
+            if (n >= ticks_per_s) {  // after the ramp: one second of steady modulation
+                crossings += (previous - 0.5F) * (out.bridge_duty - 0.5F) < 0.0F;
+                peak = std::fmax(peak, std::fabs(out.bridge_duty - 0.5F));
+            }
+            previous = out.bridge_duty;
+        }
+        c.check("bridge enabled from the first period", always_on);
+        c.check("relay never commanded", !relay_ever);
+        c.near("ramp time to the 230 V RMS index (s)", ramp_ticks / static_cast<double>(ticks_per_s), target / app::open_loop_m_rate, 2e-4);
+        c.near("duty peak deviation = m/2 (m = 325.3 V / 400 V)", peak, 0.5F * target, 1e-3);
+        c.near("zero crossings in 1 s (50 Hz)", crossings, 100, 1);
+    }
+    {
+        /** @test L0-APP-06.b: Step 0: a low bus saturates the index at 0.95, an invalid bus stops the bridge, leaving restarts the ramp */
+        tc::Criterion c("L0-APP-06.b", "Step 0: low bus saturates the index at 0.95, invalid bus stops the bridge, leaving restarts the ramp");
+        ControlState state;
+        Grid grid;
+        Relay relay;
+        c.check("controlInit", controlInit(state) == 0);
+        OperatorCommands cmd;
+        cmd.inverter_stage = INV_OPEN_LOOP;
+        for (int n = 0; n < 2 * ticks_per_s; ++n) benchStep(state, grid, cmd, relay, 0.0F, 300.0F, false);
+        c.near("300 V bus: index saturates", state.open_loop_m, app::open_loop_m_max, 1e-6);
+        c.check("0 V bus: bridge off", !benchStep(state, grid, cmd, relay, 0.0F, 0.0F, false).bridge_enable);
+        cmd.inverter_stage = INV_OFF;
+        c.check("OFF: bridge off at once", !benchStep(state, grid, cmd, relay, 0.0F, v_bus, false).bridge_enable);
+        c.near("index reset", state.open_loop_m, 0.0, 1e-9);
+        cmd.inverter_stage = INV_OPEN_LOOP;
+        const ControlOutputs out = benchStep(state, grid, cmd, relay, 0.0F, v_bus, false);
+        c.check("re-entry: bridge on, ramp from zero", out.bridge_enable && state.open_loop_m <= app::open_loop_m_rate * app::hot_loop_period + 1e-7F);
+    }
+    {
+        /** @test L0-APP-07.a: Steps 1-2: CONNECT settles 10 grid periods with PWM and the relay open, then closes the relay and reaches GRID_CONNECTED */
+        tc::Criterion c("L0-APP-07.a", "Steps 1-2: CONNECT settles 10 periods with PWM and the relay open, then closes the relay and reaches GRID_CONNECTED");
+        ControlState state;
+        Grid grid;
+        Relay relay;
+        c.check("controlInit", controlInit(state) == 0);
+        OperatorCommands cmd;
+        cmd.inverter_stage = INV_CONNECT;
+        int settle_start = -1, relay_at = -1, connected_at = -1;
+        bool relay_before_settle = false, pwm_off_while_settling = false;
+        for (int n = 0; n < 4 * ticks_per_s && connected_at < 0; ++n) {
+            const ControlOutputs out = benchStep(state, grid, cmd, relay);
+            const vsi_mode_t mode = state.inverter.getMode();
+            if (settle_start < 0 && mode == VSI_PWM_SETTLE) settle_start = n;
+            if (mode == VSI_PWM_SETTLE && !out.bridge_enable) pwm_off_while_settling = true;
+            if (out.relay_close && relay_at < 0) { relay_at = n; relay_before_settle = settle_start < 0; }
+            if (mode == VSI_GRID_CONNECTED) connected_at = n;
+        }
+        c.check("PWM_SETTLE reached", settle_start >= 0);
+        c.check("bridge PWM on while settling", !pwm_off_while_settling);
+        c.check("relay not commanded before settling", relay_at >= 0 && !relay_before_settle);
+        c.near("settling time before the relay command (s)", (relay_at - settle_start) / static_cast<double>(ticks_per_s), 0.2, 5e-4);
+        c.near("relay feedback after the contact time (s)", (connected_at - relay_at) / static_cast<double>(ticks_per_s),
+               app::relay_contact_ticks / static_cast<double>(ticks_per_s), 3e-4);
+        c.check("GRID_CONNECTED with the relay closed", state.inverter.getMode() == VSI_GRID_CONNECTED && relay.closed);
+    }
+    {
+        /** @test L0-APP-07.b: Step 3: INJECT runs the current loop with the reference capped at inject_current_max; back to CONNECT stops it */
+        tc::Criterion c("L0-APP-07.b", "Step 3: INJECT runs with the reference capped at inject_current_max; back to CONNECT stops it");
+        dqo_t out_capped{}, out_large{};
+        for (int run = 0; run < 2; ++run) {
+            ControlState state;
+            Grid grid;
+            Relay relay;
+            c.check("controlInit", controlInit(state) == 0);
+            OperatorCommands cmd;
+            cmd.inverter_stage = INV_CONNECT;
+            for (int n = 0; n < 4 * ticks_per_s && state.inverter.getMode() != VSI_GRID_CONNECTED; ++n) benchStep(state, grid, cmd, relay);
+            cmd.inverter_stage = INV_INJECT;
+            cmd.inject_current = run == 0 ? app::inject_current_max : 5.0F;
+            benchStep(state, grid, cmd, relay);
+            c.check("RUN", state.inverter.getMode() == VSI_RUN);
+            (run == 0 ? out_capped : out_large) = state.inverter.getVdqOut();
+            if (run == 1) {
+                cmd.inverter_stage = INV_CONNECT;
+                benchStep(state, grid, cmd, relay);
+                c.check("back to CONNECT: GRID_CONNECTED, relay kept", state.inverter.getMode() == VSI_GRID_CONNECTED && relay.closed);
+            }
+        }
+        c.near("5 A request gives the same output as the 0.1 A cap (d, V)", out_large.d, out_capped.d, 1e-6);
+    }
+    {
+        /** @test L0-APP-07.c: OFF from the grid runs the disconnect sequence: relay opened, bridge off, inverter OFF; SETTLE from the grid reconnects through OFF */
+        tc::Criterion c("L0-APP-07.c", "OFF from the grid opens the relay and stops the bridge; SETTLE from the grid goes through OFF with the relay open");
+        for (InverterStage next : {INV_OFF, INV_SETTLE}) {
+            ControlState state;
+            Grid grid;
+            Relay relay;
+            c.check("controlInit", controlInit(state) == 0);
+            OperatorCommands cmd;
+            cmd.inverter_stage = INV_CONNECT;
+            for (int n = 0; n < 4 * ticks_per_s && state.inverter.getMode() != VSI_GRID_CONNECTED; ++n) benchStep(state, grid, cmd, relay);
+            cmd.inverter_stage = next;
+            bool reached_off = false;
+            for (int n = 0; n < ticks_per_s; ++n) {
+                benchStep(state, grid, cmd, relay);
+                reached_off |= state.inverter.getMode() == VSI_OFF;
+            }
+            c.check("relay opened", !relay.command && !relay.closed);
+            c.check("passed through OFF", reached_off);
+            if (next == INV_OFF) c.check("bridge off, inverter OFF", state.inverter.getMode() == VSI_OFF && !state.bridge_pwm_applied);
+            else c.check("SETTLE again with the relay open", state.inverter.getMode() == VSI_PWM_SETTLE);
+        }
+    }
+    {
+        /** @test L0-APP-08.a: Bench current above 1.5 A trips the bridge in open loop and on the grid; OFF clears it */
+        tc::Criterion c("L0-APP-08.a", "Bench current above 1.5 A trips the bridge (open loop and grid stages); OFF clears it");
+        for (InverterStage stage : {INV_OPEN_LOOP, INV_SETTLE}) {
+            ControlState state;
+            Grid grid;
+            Relay relay;
+            c.check("controlInit", controlInit(state) == 0);
+            OperatorCommands cmd;
+            cmd.inverter_stage = stage;
+            const bool grid_present = stage != INV_OPEN_LOOP;
+            for (int n = 0; n < 3 * ticks_per_s && !state.bridge_pwm_applied; ++n) benchStep(state, grid, cmd, relay, 0.0F, v_bus, grid_present);
+            c.check("bridge running", state.bridge_pwm_applied);
+            benchStep(state, grid, cmd, relay, 1.4F, v_bus, grid_present);
+            c.check("1.4 A: no trip", !state.bench_tripped);
+            const ControlOutputs out = benchStep(state, grid, cmd, relay, 1.6F, v_bus, grid_present);
+            c.check("1.6 A: tripped, bridge off, relay off", out.bench_trip && !out.bridge_enable && !out.relay_close);
+            for (int n = 0; n < 100; ++n) benchStep(state, grid, cmd, relay, 0.0F, v_bus, grid_present);
+            c.check("latched while the stage is kept", state.bench_tripped && !state.bridge_pwm_applied);
+            cmd.inverter_stage = INV_OFF;
+            benchStep(state, grid, cmd, relay, 0.0F, v_bus, grid_present);
+            c.check("OFF clears the latch", !state.bench_tripped);
+            if (grid_present) c.check("inverter fault cleared", state.inverter.getMode() != VSI_FAULT);
         }
     }
 

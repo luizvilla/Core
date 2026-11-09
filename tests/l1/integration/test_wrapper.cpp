@@ -33,7 +33,7 @@ int main() {
         else held_verified=true;
         m.v_low=float(in[VLOW]);m.i_low_1=float(in[ILOW1]);m.i_low_2=float(in[ILOW2]);
         m.v_dc_bus=float(in[VBUS]);m.v_ac=held;m.i_ac=float(in[IAC]);m.v_ac_updated=in[VAC_UPDATED]!=0;
-        OperatorCommands cmd;cmd.mode=static_cast<boost_mode>(int(in[MODE]));cmd.sync_requested=true;cmd.v_bus_ref=400;
+        OperatorCommands cmd;cmd.mode=static_cast<boost_mode>(int(in[MODE]));cmd.inverter_stage=INV_SETTLE;cmd.v_bus_ref=400;
         const auto expected=controlStep(direct,m,cmd);
         const double values[8]={expected.boost_duty.leg1,expected.boost_duty.leg2,double(expected.leg1_enable),double(expected.leg2_enable),double(expected.boost_mode_changed),double(expected.boost_pwm_update),expected.bridge_duty,double(expected.bridge_enable)};
         for (int j=0;j<8;++j)max_error=std::max(max_error,std::abs(values[j]-out[j]));

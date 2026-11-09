@@ -92,7 +92,8 @@ static float32_t v_ac_rms_square_sum;
 static uint32_t v_ac_rms_sample_count;
 
 /* ScopeMimicry */
-/* 10 KiB capture: 256 samples at 2 kHz, half before and half after Sync rises.
+/* 10 KiB capture: 256 samples, half before and half after the trigger: Sync rising at 2 kHz,
+ * or, in the CONNECT/INJECT stages, the relay command rising at 10 kHz.
  * Keep the byte count within ScopeMimicry's uint16_t buffer-size/dump limits. */
 static constexpr uint16_t scope_buffer_sample_count = 256U;
 static constexpr uint16_t scope_channel_count = 10U;
@@ -109,14 +110,23 @@ static float32_t scope_v_d;
 static float32_t scope_v_q;
 static float32_t scope_omega;
 static float32_t scope_sync;
-static float32_t scope_grid_quality;
+static float32_t scope_relay_closed;
 static float32_t scope_inverter_mode;
 
 /*--------------------------------------------------------------- */
 
 /* Mode requests are applied to the controllers by the critical task. */
 static boost_mode mode = IDLE;
-static bool inverter_sync_requested;
+/* Inverter bench stage (docs/testing/bench/inverter-session.md) and INJECT current. */
+static InverterStage inverter_stage = INV_OFF;
+static float32_t inject_current = 0.0F;
+static constexpr float32_t inject_current_step = 0.01F;  /* A peak per key press */
+/* Grid relay on GPIO 22: command, and feedback once held for the contact time.
+ * Polarity: set = closed (check on the dead-bus relay test, session step R). */
+static constexpr uint8_t relay_pin = 22U;
+static bool relay_command = false;
+static bool relay_closed = false;
+static uint16_t relay_hold_ticks = 0U;
 /* The burst generator is running on leg 1. */
 static bool burst_running = false;
 /* Stage neutral bridge duty for one control tick before enabling PWM. */
@@ -124,6 +134,8 @@ static bool inverter_pwm_staged = false;
 
 bool scope_trigger()
 {
+    /* Grid stages: capture the relay closing; otherwise the synchronization. */
+    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) return scope_relay_closed > 0.5F;
     return scope_sync > 0.5F;
 }
 
@@ -178,7 +190,8 @@ void setup_routine()
     // shield.sensors.enableSensor(ILow2, ADC_2);
     shield.sensors.enableSensor(IAC, ADC_2);
 
-    spin.gpio.configurePin(22, OUTPUT);
+    spin.gpio.configurePin(relay_pin, OUTPUT);
+    spin.gpio.resetPin(relay_pin);  /* relay open at start-up */
     const int8_t init_result = controlInit(control);
     if (init_result == -1)
     {
@@ -195,10 +208,10 @@ void setup_routine()
     scope.connectChannel(scope_v_beta, "V_beta_V");
     scope.connectChannel(scope_v_d, "V_d_V");
     scope.connectChannel(scope_v_q, "V_q_V");
-    scope.connectChannel(grid_angle, "theta_rad");
+    scope.connectChannel(i_ac_value, "IAC_A");
     scope.connectChannel(scope_omega, "omega_rad_s");
     scope.connectChannel(scope_sync, "Sync");
-    scope.connectChannel(scope_grid_quality, "grid_quality");
+    scope.connectChannel(scope_relay_closed, "relay_cmd");
     scope.connectChannel(scope_inverter_mode, "inverter_mode");
     scope.set_trigger(&scope_trigger);
     scope.set_delay(0.5F);
@@ -234,7 +247,13 @@ void loop_communication_task()
                "|     press p : startup (0.25 A clamp)   |\n"
                "|     press b : bus regulation mode      |\n"
                "|     press m : MPPT mode                |\n"
-               "|     press c : inverter PWM_SETTLE hold |\n"
+               "|  inverter bench session (DC source):  |\n"
+               "|     press o : step 0 open loop 230 V   |\n"
+               "|     press c : step 1 PWM_SETTLE hold   |\n"
+               "|     press g : step 2 connect (relay)   |\n"
+               "|     press n : step 3 inject current    |\n"
+               "|     press j / k : inject current +/-   |\n"
+               "|     press x : inverter OFF (relay open)|\n"
                "|     press u : voltage reference UP     |\n"
                "|     press d : voltage reference DOWN   |\n"
                // "|     press w : deadtime UP              |\n"
@@ -247,26 +266,53 @@ void loop_communication_task()
     case 'i':
         printk("idle mode\n");
         mode = IDLE;
-        inverter_sync_requested = false;
+        inverter_stage = INV_OFF;
         break;
     case 'p':
         printk("startup: converter 1, current clamped\n");
         mode = STARTUP;
-        inverter_sync_requested = false;
+        inverter_stage = INV_OFF;
         break;
     case 'b':
         printk("VDCBus regulation mode\n");
         mode = BUSREG;
-        inverter_sync_requested = false;
+        inverter_stage = INV_OFF;
         break;
     case 'm':
         printk("MPPT current mode\n");
         mode = MPPT;
-        inverter_sync_requested = false;
+        inverter_stage = INV_OFF;
+        break;
+    case 'o':
+        printk("inverter step 0: open loop to 230 V RMS (relay open)\n");
+        inverter_stage = INV_OPEN_LOOP;
         break;
     case 'c':
-        printk("inverter PWM_SETTLE hold requested (relay open)\n");
-        inverter_sync_requested = true;
+        printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
+        inverter_stage = INV_SETTLE;
+        break;
+    case 'g':
+        printk("inverter step 2: settle %u periods, close the relay, zero current\n",
+               static_cast<unsigned int>(app::inverter_settle_cycles));
+        inverter_stage = INV_CONNECT;
+        break;
+    case 'n':
+        printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
+        inverter_stage = INV_INJECT;
+        break;
+    case 'j':
+        inject_current += inject_current_step;
+        if (inject_current > app::inject_current_max) inject_current = app::inject_current_max;
+        printk("inject current: %.3f A peak\n", (double)inject_current);
+        break;
+    case 'k':
+        inject_current -= inject_current_step;
+        if (inject_current < -app::inject_current_max) inject_current = -app::inject_current_max;
+        printk("inject current: %.3f A peak\n", (double)inject_current);
+        break;
+    case 'x':
+        printk("inverter OFF: disconnect, relay open\n");
+        inverter_stage = INV_OFF;
         break;
     case 'u':
         // Keep the bus target inside the gain schedule's range, well below the full-burst level.
@@ -301,7 +347,8 @@ void loop_communication_task()
         printk("scope acquisition restarted\n");
         break;
     case 't':
-        spin.gpio.resetPin(22);
+        /* Former manual relay release: now the inverter OFF stage, which opens the relay safely. */
+        inverter_stage = INV_OFF;
         break;
     default:
         break;
@@ -322,10 +369,11 @@ void loop_application_task()
         return;
     }
 
-    if (mode == IDLE && !inverter_sync_requested) spin.led.turnOff();
+    if (mode == IDLE && inverter_stage == INV_OFF) spin.led.turnOff();
     else spin.led.turnOn();
 
     if (control.boost.isTripped()) printk("boost tripped: press i (idle) to clear\n");
+    if (control.bench_tripped) printk("inverter bench current trip: press x (inverter OFF) to clear\n");
     /* ILow1, VLow, duty1, VAC, VACrms, angle, IAC, VDCBus, mode, burst skip. */
     printk("%7.3f:", (double)i_low_1_value);
     // printk("%7.3f:", (double)i_low_2_value);
@@ -337,8 +385,15 @@ void loop_application_task()
     printk("%7.3f:", (double)grid_angle);
     printk("%7.3f:", (double)i_ac_value);
     printk("%7.3f:", (double)v_dc_bus_value);
-    printk("%u:%u\n", static_cast<unsigned int>(mode),
+    printk("%u:%u:", static_cast<unsigned int>(mode),
            static_cast<unsigned int>(control.boost.getBurstSkip()));
+    /* Inverter: stage, library mode, relay command/feedback, Id, Iq (A), P (W), Q (var), Id ref. */
+    const dqo_t idq = control.inverter.getIdq();
+    const dqo_t pq = control.inverter.getPower();
+    printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f\n", static_cast<unsigned int>(inverter_stage),
+           static_cast<unsigned int>(control.inverter.getMode()), static_cast<unsigned int>(relay_command),
+           static_cast<unsigned int>(relay_closed), (double)idq.d, (double)idq.q, (double)pq.d, (double)pq.q,
+           (double)inject_current);
     task.suspendBackgroundMs(100);
 }
 
@@ -389,10 +444,12 @@ void loop_critical_task()
     meas.v_ac = v_ac_value;
     meas.i_ac = i_ac_value;
     meas.v_ac_updated = v_ac_updated;
+    meas.relay_closed = relay_closed;
 
     OperatorCommands cmd;
     cmd.mode = mode;
-    cmd.sync_requested = inverter_sync_requested;
+    cmd.inverter_stage = inverter_stage;
+    cmd.inject_current = inject_current;
     cmd.v_bus_ref = voltage_reference;
 
     const ControlOutputs out = controlStep(control, meas, cmd);
@@ -459,7 +516,24 @@ void loop_critical_task()
         control.bridge_pwm_applied = false;
         inverter_pwm_staged = false;
     }
-    control.inverter.setPwmEnabled(control.bridge_pwm_applied);
+    control.inverter.setPwmEnabled(control.bridge_pwm_applied && !control.open_loop_active);
+
+    /* Grid relay (GPIO 22): follow the command; report it closed/open once held for the contact time. */
+    if (out.relay_close != relay_command)
+    {
+        relay_command = out.relay_close;
+        relay_hold_ticks = 0U;
+        if (relay_command) spin.gpio.setPin(relay_pin);
+        else spin.gpio.resetPin(relay_pin);
+    }
+    else if (relay_hold_ticks < app::relay_contact_ticks)
+    {
+        ++relay_hold_ticks;
+    }
+    else
+    {
+        relay_closed = relay_command;
+    }
 
     /* Snapshot after this tick's control, grid verdict and PWM application. */
     const clarke_t grid_voltage_ab = control.inverter.getVab();
@@ -471,9 +545,11 @@ void loop_critical_task()
     scope_omega = control.inverter.getw();
     v_ac_rms_value = control.grid_observer.getVoltageRms();
     scope_sync = control.inverter.getSync() ? 1.0F : 0.0F;
-    scope_grid_quality = control.grid_observer.canOperate() ? 1.0F : 0.0F;
+    scope_relay_closed = relay_command ? 1.0F : 0.0F;
     scope_inverter_mode = static_cast<float32_t>(control.inverter.getMode());
-    if (++scope_sample_tick >= scope_sample_divider)
+    /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
+    const uint16_t divider = (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) ? 1U : scope_sample_divider;
+    if (++scope_sample_tick >= divider)
     {
         scope_sample_tick = 0U;
         if (!is_scope_downloading) scope.acquire();

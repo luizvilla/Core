@@ -21,7 +21,7 @@ CATALOGUE=REPO/'tests/catalogue.json'
 PROCEDURE=REPO/'docs/testing/test-procedure.md'
 STATUSES=('implemented','partial','planned','blocked')
 STATUS_TEXT={'implemented':'Implemented','partial':'Partly implemented','planned':'Planned','blocked':'Blocked'}
-ID=re.compile(r'^L[01]-[A-Z]{3}-\d\d$')
+ID=re.compile(r'^L[012]-[A-Z]{3}-\d\d$')  # L2: on the board (bench)
 
 
 def load():

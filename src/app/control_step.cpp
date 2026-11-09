@@ -71,7 +71,6 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     state.boost.setVBusRef(cmd.v_bus_ref);
 
     const boost_mode requested_mode = cmd.mode;
-    const bool pwm_settle_requested = cmd.sync_requested;
     if (requested_mode != state.previous_mode)
     {
         out.boost_mode_changed = true;
@@ -88,16 +87,47 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     }
     out.boost_duty = state.boost.hotLoop();
 
-    /* Keep the PLL running in idle, using a positive bus value for duty scaling. */
-    if (pwm_settle_requested || (isfinite(meas.v_dc_bus) && meas.v_dc_bus > 0.0F))
+    /* ---- Inverter bench stage (docs/testing/bench/inverter-session.md) ---- */
+    const InverterStage stage = cmd.inverter_stage;
+    const bool bus_valid = isfinite(meas.v_dc_bus) && meas.v_dc_bus > 0.0F;
+    const bool grid_stage = stage == INV_SETTLE || stage == INV_CONNECT || stage == INV_INJECT;
+    /* Keep the PLL running in idle, using a positive bus value for duty scaling; a grid
+     * stage passes any bus value so the inverter faults on an invalid one. The open-loop
+     * stage does not use the grid-following inverter, so it never faults it. */
+    if (grid_stage || bus_valid) state.inverter.setVBus(meas.v_dc_bus);
+    state.inverter.setGridConnected(meas.relay_closed);
+    const vsi_mode_t vsi = state.inverter.getMode();
+    const bool on_grid = vsi == VSI_GRID_CONNECT || vsi == VSI_GRID_CONNECTED || vsi == VSI_RUN ||
+                         vsi == VSI_STOPPING || vsi == VSI_DISCONNECT;
+    /* Relay closure only in CONNECT and INJECT; SETTLE holds PWM_SETTLE (zero dwell). */
+    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT) ?
+                                      app::inverter_settle_cycles : 0U);
+    /* Back to SETTLE from the grid: disconnect first (relay opens), then synchronize again. */
+    if (grid_stage && !(stage == INV_SETTLE && on_grid) && !state.bench_tripped)
+        state.inverter.requestConnect();
+    else
+        state.inverter.requestDisconnect();
+    if (stage == INV_INJECT && !state.bench_tripped)
     {
-        state.inverter.setVBus(meas.v_dc_bus);
+        float32_t i_d = isfinite(cmd.inject_current) ? cmd.inject_current : 0.0F;
+        i_d = fminf(fmaxf(i_d, -app::inject_current_max), app::inject_current_max);
+        state.inverter.setIdqRef({i_d, 0.0F, 0.0F});
+        state.inverter.requestRun();
     }
-    if (pwm_settle_requested) state.inverter.requestConnect();
-    else state.inverter.requestDisconnect();
+    else
+    {
+        state.inverter.requestStop();
+        state.inverter.setIdqRef({0.0F, 0.0F, 0.0F});
+    }
+    if (stage == INV_OFF)
+    {
+        /* OFF clears the bench latch, and an inverter fault once the relay is open. */
+        state.bench_tripped = false;
+        if (vsi == VSI_FAULT && !meas.relay_closed) state.inverter.clearFault();
+    }
     /* PWM start-up acknowledgement (single_phase_inverter PWM_WAIT/PWM_SETTLE): report
-     * whether the hardware loop actually applied bridge PWM last period. */
-    state.inverter.setPwmEnabled(state.bridge_pwm_applied);
+     * whether the hardware loop actually applied the inverter's own bridge PWM last period. */
+    state.inverter.setPwmEnabled(state.bridge_pwm_applied && !state.open_loop_active);
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
     const clarke_t grid_voltage_ab = state.inverter.getVab();
     state.grid_observer.update(grid_voltage_ab.alpha, grid_voltage_ab.beta, state.inverter.getw(),
@@ -112,7 +142,42 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     out.burst_skip = state.boost.getBurstSkip();
     out.burst_period = state.boost.getBurstPeriod();
     out.boost_trip = state.boost.isTripped();
-    /* PWM_SETTLE has zero dwell: PWM runs, but relay closure stays inhibited. */
+    /* Bridge and relay: the inverter's requests, or the open-loop stage. */
     out.bridge_enable = state.inverter.isPwmRequested();
+    /* Open loop only with the relay open and the inverter off the grid (OFF, or FAULT: no PWM, no relay). */
+    const vsi_mode_t vsi_now = state.inverter.getMode();
+    const bool open_loop = stage == INV_OPEN_LOOP && !state.bench_tripped && bus_valid &&
+                           (vsi_now == VSI_OFF || vsi_now == VSI_FAULT) && !meas.relay_closed;
+    if (open_loop)
+    {
+        /* Step 0: fixed 50 Hz modulation, ramped to the 230 V RMS index, no feedback. */
+        const float32_t target = fminf(app::open_loop_voltage_peak / meas.v_dc_bus, app::open_loop_m_max);
+        const float32_t step = app::open_loop_m_rate * app::hot_loop_period;
+        state.open_loop_m += fminf(fmaxf(target - state.open_loop_m, -step), step);
+        state.open_loop_theta += app::grid_angular_frequency * app::hot_loop_period;
+        if (state.open_loop_theta >= 2.0F * PI) state.open_loop_theta -= 2.0F * PI;
+        out.bridge_duty = 0.5F + 0.5F * state.open_loop_m * sinf(state.open_loop_theta);
+        out.bridge_enable = true;
+    }
+    else
+    {
+        state.open_loop_m = 0.0F;
+        state.open_loop_theta = 0.0F;
+    }
+    /* Bench protection: an AC current above the trip level stops the bridge (latched until OFF). */
+    if ((out.bridge_enable || state.bridge_pwm_applied) && isfinite(meas.i_ac) &&
+        fabsf(meas.i_ac) > app::bench_inverter_current_trip)
+    {
+        state.bench_tripped = true;
+        state.inverter.tripFault(VSI_FAULT_EXTERNAL);
+    }
+    if (state.bench_tripped)
+    {
+        out.bridge_enable = false;
+        state.open_loop_m = 0.0F;
+    }
+    state.open_loop_active = open_loop && out.bridge_enable;
+    out.relay_close = state.inverter.isGridConnectionRequested();
+    out.bench_trip = state.bench_tripped;
     return out;
 }

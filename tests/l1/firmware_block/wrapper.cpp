@@ -69,7 +69,8 @@ void pulsim_cblock_step(const double* in,int n_in,double* out,int n_out,
         !std::isfinite(in[MODE]) || in[MODE]<IDLE || in[MODE]>MPPT ||
         std::floor(in[MODE])!=in[MODE] ||
         (in[VAC_UPDATED]!=0 && in[VAC_UPDATED]!=1) ||
-        (in[SYNC_REQUEST]!=0 && in[SYNC_REQUEST]!=1)) {
+        !std::isfinite(in[SYNC_REQUEST]) || in[SYNC_REQUEST]<INV_OFF || in[SYNC_REQUEST]>INV_INJECT ||
+        std::floor(in[SYNC_REQUEST])!=in[SYNC_REQUEST]) {
         c->failed=true;error(out,n_out);return;
     }
     Measurements m;
@@ -78,7 +79,7 @@ void pulsim_cblock_step(const double* in,int n_in,double* out,int n_out,
     if (m.v_ac_updated) c->held_vac=float(in[VAC]);
     m.v_ac=c->held_vac;
     OperatorCommands cmd;
-    cmd.mode=static_cast<boost_mode>(int(in[MODE]));cmd.sync_requested=in[SYNC_REQUEST]!=0;cmd.v_bus_ref=float(in[VBUS_REF]);
+    cmd.mode=static_cast<boost_mode>(int(in[MODE]));cmd.inverter_stage=static_cast<InverterStage>(int(in[SYNC_REQUEST]));cmd.v_bus_ref=float(in[VBUS_REF]);
     const ControlOutputs result=controlStep(c->control,m,cmd);
     ++c->calls;c->previous_time=t;
     auto& ctrl=c->control;const auto ab=ctrl.inverter.getVab();const auto dq=ctrl.inverter.getVdq();

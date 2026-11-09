@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Procedure version | 1.13 (draft) |
+| Procedure version | 1.14 (draft) |
 | Firmware under test | Core2 branch `test/microinverter-validation`, application in `src/` |
 | Hardware target | Spin 1.2.0 + uSolarVerter 0.9.0 |
 | Owner | Luiz Villa |
@@ -33,6 +33,7 @@ This procedure verifies features that **already exist** in the firmware. It does
 |---|---|---|---|---|
 | **L0** | One object at a time, or `controlStep` | Fixed values or synthetic signals chosen by the test | None, open loop | `g++` on the host, hardware stand-in headers |
 | **L1** | The **firmware block** (`controlStep` + all controllers) | Operator commands from a scenario timeline | **Plant model** in Pulsim, closed loop | Pulsim C-Block, Python |
+| **L2** | The flashed firmware on the board | Serial menu commands, bench sources | The real converter on the bench | Bench sessions with a written sheet and record ([inverter session](bench/inverter-session.md)) |
 
 ```mermaid
 flowchart LR
@@ -47,7 +48,7 @@ flowchart LR
   end
 ```
 
-L0 answers *"does each object do what its code claims for chosen inputs?"*. L1 answers *"does it still behave when its outputs change its own inputs?"*: dynamics, stability and interactions between the boost, the DC bus, the PLL and the observer.
+L0 answers *"does each object do what its code claims for chosen inputs?"*. L1 answers *"does it still behave when its outputs change its own inputs?"*: dynamics, stability and interactions between the boost, the DC bus, the PLL and the observer. L2 answers *"does the board do it?"*: each bench step has a firmware stage tested at L0 first, a sheet with the measurements and limits, and a record kept under `docs/testing/bench/`.
 
 ### 2.1 Plant model
 
@@ -250,6 +251,11 @@ The L1 cases exercise library features the application does not use. They run th
 | L1-GFL-06 | RUN: reactive current | Grid current follows I_q references; power factor INFO *Conditions:* As L1-GFL-05 with I_q steps *Harness:* inverter library alone in its own C-Block (not controlStep), with a relay model |  | Planned: Defined 2026-11-06, not implemented |
 | L1-GFL-07 | RUN: bus voltage variation | Current tracking holds while the DC bus moves within its operating range (e.g. 380–420 V) *Conditions:* As L1-GFL-05 with a bus ramp *Harness:* inverter library alone in its own C-Block (not controlStep), with a relay model |  | Planned: Defined 2026-11-06, not implemented |
 | L1-GFL-08 | RUN: phase jump | Stays synchronized or faults cleanly on a grid phase jump; current peak INFO *Conditions:* As L1-GFL-05 with 10–60° jumps *Harness:* inverter library alone in its own C-Block (not controlStep), with a relay model |  | Planned: Defined 2026-11-06, not implemented |
+| L2-INV-00 | Step 0: open-loop 230 V RMS, no grid | .a output RMS 218–242 V at 400 V; .b 49.9–50.1 Hz; .c no trip, relay open; INFO .d THD, no-load DC current, .e RMS at 340 and 300 V *Conditions:* Stage INV_OPEN_LOOP (menu o), mains unplugged, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay | docs/testing/bench/inverter-session.md | Planned: Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet |
+| L2-INV-01 | Step 1: synchronized PWM with the relay open (PWM_SETTLE) | .a inverter-side vs grid-side RMS within ±3 %, .b phase within ±3°, .c same frequency, .d bulb dark, relay open, PWM_SETTLE held; INFO .e Vq, omega, time to PWM_SETTLE *Conditions:* Stage INV_SETTLE (menu c), mains through the bulb, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay | docs/testing/bench/inverter-session.md | Planned: Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet |
+| L2-INV-02 | Step 2: relay closing disturbance, then zero current (GRID_CONNECT → GRID_CONNECTED) | .a closing current peak < 1.5 A, no trip; .b settled within 100 ms; .c residual current < 0.05 A RMS in GRID_CONNECTED; .d opening only at zero current; INFO .e voltage disturbance *Conditions:* Stage INV_CONNECT (menu g) from PWM_SETTLE: 10 periods, relay, 20 ms contact feedback. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay | docs/testing/bench/inverter-session.md | Planned: Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet |
+| L2-INV-03 | Step 3: inject a fixed current (RUN) | .a measured Id within ±10 % of the reference, .b in phase within ±10°, .c grid side within 207–253 V, .d DC source current rises with the reference; INFO .e current THD, P *Conditions:* Stage INV_INJECT (menu j/k, n), reference capped at 0.1 A peak by the bulb (weak grid). Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay | docs/testing/bench/inverter-session.md | Planned: Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet |
+| L2-INV-10 | Bench pre-checks | .a relay contacts open at start-up (GPIO 22 polarity); .b menu and telemetry; .c DC source 400 V, 0.5 A limit; .d bulb in series, breaker reachable *Conditions:* Before any power. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay | docs/testing/bench/inverter-session.md | Planned: Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet |
 
 ### 6.6 Application
 
@@ -264,6 +270,9 @@ The [switched DCDC results](switched-dcdc-results.md) preserve the current regul
 | L0-APP-03 | VAC stale for exactly 200 periods (20 ms) trips the observer with `InvalidMeasurement`; a fresh sample restarts the count; one sample missing at boot does not latch a trip |  | `grid_voltage_stale_ticks` = 200; `gridObserver.cpp` (no trip latched at startup) | Implemented: Implemented; .c FAIL, [#2](https://github.com/luizvilla/Core/issues/2) |
 | L0-APP-04 | Bridge PWM never enabled and the inverter never requests PWM or relay, in any mode, with or without a sync request |  | critical task, "Synchronization only" | Implemented |
 | L0-APP-05 | Synchronization only after observer qualification; an observer trip removes it on the trip tick; times to qualification and sync `INFO` |  | `setGridQuality(grid_observer.canOperate())` | Implemented |
+| L0-APP-06 | Bench step 0: open-loop 230 V RMS | .a ramp to 325.3 V / VDCBus in index/rate seconds, 50 Hz, bridge on, relay never commanded, no grid needed; .b low bus saturates the index at 0.95, invalid bus stops the bridge, OFF stops it and re-entry ramps from zero | `controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks` | Implemented: Implemented 2026-11-09 |
+| L0-APP-07 | Bench steps 1–3: settle, connect through the relay, inject | .a CONNECT settles 10 periods with PWM and the relay open, then commands the relay and reaches GRID_CONNECTED after the 20 ms contact time; .b INJECT runs the current loop with the reference capped at 0.1 A, back to CONNECT stops it; .c OFF from the grid opens the relay and stops the bridge, SETTLE from the grid goes through OFF | `controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks` | Implemented: Implemented 2026-11-09 |
+| L0-APP-08 | Bench current protection | .a \|IAC\| above 1.5 A stops the bridge and opens the relay in the open-loop and grid stages, latched until OFF, which clears it | `controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks` | Implemented: Implemented 2026-11-09 |
 | L1-APP-01 | IDLE on a healthy grid | legs off; observer qualifies after 1 s ± 1 tick of continuously eligible estimates; PLL lock time `INFO` |  | Implemented: Implemented (.a–.b; .c INFO) |
 | L1-APP-02 | STARTUP from 0 V | .a total current reference within the 0.25 A STARTUP clamp, .b physical leg-1 current below the 8 A trip at every electrical step, .c leg 2 never enabled (first 50 ms); .d full start-up (about 1 s) BLOCKED until run |  | Partly implemented: Rewritten 2026-11-06 for ADR 0003 (was: 200 V/s ramp, 1 A) |
 | L1-APP-03 | BUSREG at 400 V | VDCBus within 395–405 V during 80–100 ms after load step at 50 ms; overshoot/current extrema `INFO` |  | Implemented: Implemented; preserve FAIL if outside band |
@@ -527,6 +536,7 @@ flowchart LR
 | 1.11 | 2026-11-06 | Boost control from Andres Vazquez Sieber's bench controller ([ADR 0003](../adr/0003-boost-adopts-current-driven-burst.md), worklog): L0-BST-05…08 rewritten (STARTUP clamp, current-driven burst, protection, gain schedule). Contract app-v2 (§3): burst command and trip, HRTIM burst and ADC-instant carrier in the PWM adapter. L1-APP-02 checks the 0.25 A STARTUP clamp and the 8 A trip level instead of the ramp and 1 A; L1-APP-04 checks the current-driven burst at light load instead of the 395/405 V pause. `control_library` from luizvilla `PID_update`. |
 | 1.12 | 2026-11-06 | single_phase_inverter `1b4fd06` (Jean Alinei: PWM start-up at neutral, PWM_WAIT and PWM_SETTLE before relay closure; worklog). L0-GFL-04 follows the new lifecycle, the test acknowledging PWM as the application would; L0-GFL-16 added. The application acknowledges the bridge PWM it applied (always off while synchronization-only). Finding #4 registered (boost trip when BUSREG is entered from IDLE with a charged bus). |
 | 1.13 | 2026-11-06 | L0-BST-09 (leg 2 starts only above a demand threshold, requirement (c); fails, finding #5). L0-PWR-01 planned (PWM duty limits across 200/50 kHz timing units, finding #6). Application minimum duty 0.005 (Luiz, as Andres's code) and the leg-1 dead-time fix in `main.cpp` (worklog); the L1 contract's `duty_min` follows (0.005). |
+| 1.14 | 2026-11-09 | Level L2 (on the board, §2). Inverter bench session ([sheet](bench/inverter-session.md)): L2-INV-10 pre-checks and L2-INV-00…03 (open-loop 230 V RMS, PWM_SETTLE with the relay open, relay closing then zero current, fixed current injection). The application takes an inverter stage instead of the sync request (OFF, SETTLE, OPEN_LOOP, CONNECT, INJECT), drives the relay on GPIO 22 with contact-time feedback, and protects the bench at 1.5 A (L0-APP-06…08). Builds on Jean Alinei's PWM_SETTLE hold, PWM application and scope capture (2026-11-08). |
 
 ## 11. Findings register
 

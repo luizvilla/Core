@@ -1,6 +1,6 @@
 {
  "_doc": "The validation catalogue: every test, defined once. tests/common/control_center.py builds tests/out/control-center.html from it and from the campaign results; tests/common/catalogue.py --procedure writes procedure §6 from it. status: implemented | partial | planned | blocked (implementation state, not a verdict; verdicts come from campaign results). Amend here, then regenerate §6.",
- "version": "1.5",
+ "version": "1.6",
  "tabs": [
   {
    "id": "bench",
@@ -851,6 +851,66 @@
    "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
   },
   {
+   "id": "L2-INV-00",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 0: open-loop 230 V RMS, no grid",
+   "criterion": ".a output RMS 218–242 V at 400 V; .b 49.9–50.1 Hz; .c no trip, relay open; INFO .d THD, no-load DC current, .e RMS at 340 and 300 V",
+   "conditions": "Stage INV_OPEN_LOOP (menu o), mains unplugged, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-01",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 1: synchronized PWM with the relay open (PWM_SETTLE)",
+   "criterion": ".a inverter-side vs grid-side RMS within ±3 %, .b phase within ±3°, .c same frequency, .d bulb dark, relay open, PWM_SETTLE held; INFO .e Vq, omega, time to PWM_SETTLE",
+   "conditions": "Stage INV_SETTLE (menu c), mains through the bulb, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-02",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 2: relay closing disturbance, then zero current (GRID_CONNECT → GRID_CONNECTED)",
+   "criterion": ".a closing current peak < 1.5 A, no trip; .b settled within 100 ms; .c residual current < 0.05 A RMS in GRID_CONNECTED; .d opening only at zero current; INFO .e voltage disturbance",
+   "conditions": "Stage INV_CONNECT (menu g) from PWM_SETTLE: 10 periods, relay, 20 ms contact feedback. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-03",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 3: inject a fixed current (RUN)",
+   "criterion": ".a measured Id within ±10 % of the reference, .b in phase within ±10°, .c grid side within 207–253 V, .d DC source current rises with the reference; INFO .e current THD, P",
+   "conditions": "Stage INV_INJECT (menu j/k, n), reference capped at 0.1 A peak by the bulb (weak grid). Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-10",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Bench pre-checks",
+   "criterion": ".a relay contacts open at start-up (GPIO 22 polarity); .b menu and telemetry; .c DC source 400 V, 0.5 A limit; .d bulb in series, breaker reachable",
+   "conditions": "Before any power. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
    "id": "L0-APP-01",
    "tab": "app",
    "level": "L0",
@@ -899,6 +959,36 @@
    "source": "`setGridQuality(grid_observer.canOperate())`",
    "status": "implemented",
    "status_note": "Implemented"
+  },
+  {
+   "id": "L0-APP-06",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench step 0: open-loop 230 V RMS",
+   "criterion": ".a ramp to 325.3 V / VDCBus in index/rate seconds, 50 Hz, bridge on, relay never commanded, no grid needed; .b low bus saturates the index at 0.95, invalid bus stops the bridge, OFF stops it and re-entry ramps from zero",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09"
+  },
+  {
+   "id": "L0-APP-07",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench steps 1–3: settle, connect through the relay, inject",
+   "criterion": ".a CONNECT settles 10 periods with PWM and the relay open, then commands the relay and reaches GRID_CONNECTED after the 20 ms contact time; .b INJECT runs the current loop with the reference capped at 0.1 A, back to CONNECT stops it; .c OFF from the grid opens the relay and stops the bridge, SETTLE from the grid goes through OFF",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09"
+  },
+  {
+   "id": "L0-APP-08",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench current protection",
+   "criterion": ".a |IAC| above 1.5 A stops the bridge and opens the relay in the open-loop and grid stages, latched until OFF, which clears it",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09"
   },
   {
    "id": "L1-APP-01",

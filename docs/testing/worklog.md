@@ -136,3 +136,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | L0: 91 pass, 1 known fail (#2) and the 6 checks of L0-BST-09 (#5); no other test changed verdict. The L1 contract's `duty_min` set to 0.005 so the PWM adapter applies the same minimum. L1 not rerun in this commit |
 | Hardware check | Not done. 0.005 at 200 kHz is 25 ns of on-time, below the 100 ns dead time: check on the board that leg 1's minimum-duty pulses in burst behave (with the HRTIM low-duty fix `fefe392`) |
 
+## 2026-11-09 — Inverter bench stages and the grid relay (bench session)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): inverter bench stages …` commit that adds this entry (on top of Jean Alinei's 2026-11-08 commits `9810a10`, `0be4f72`, `3743816`, `20c6073`, `6739371`) |
+| Files | `src/app/control_step.h`, `src/app/control_step.cpp`, `src/main.cpp`, `tests/l1/firmware_block/wrapper.cpp` |
+| Reason | Luiz's first inverter bench session ([sheet](bench/inverter-session.md)): generate 230 V RMS with no grid, hold PWM_SETTLE with the relay open, close the relay, inject a fixed current |
+| Behaviour change | **Yes, intended.** `OperatorCommands::sync_requested` becomes `inverter_stage` (0 OFF, 1 SETTLE = Jean's PWM_SETTLE hold, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT) with `inject_current`. OPEN_LOOP drives the bridge with a fixed 50 Hz modulation ramped (1 /s) to 325.3 V / VDCBus (max 0.95), relay open, the grid-following inverter unused. CONNECT sets 10 settling periods, so the inverter requests the relay after PWM_SETTLE; INJECT requests RUN with the d-axis reference capped at 0.1 A peak. The application commands the relay (`ControlOutputs::relay_close`) and takes the feedback from the hardware loop (`Measurements::relay_closed`). `main.cpp` drives GPIO 22 (set = closed, open at start-up) and reports the contact after 20 ms; menu keys `o`, `c`, `g`, `n`, `j`/`k`, `x`; `t` now selects the OFF stage instead of resetting GPIO 22 directly. An AC current above 1.5 A stops the bridge and opens the relay, latched until OFF. Telemetry adds stage, inverter state, relay, Id, Iq, P, Q, Id_ref; in CONNECT/INJECT the firmware scope triggers on the relay at 10 kHz, with IAC and the relay command replacing theta and grid quality |
+| Evidence | L0: the new L0-APP-06…08 pass, Jean's L0-APP-04 passes with the stage encoding; full L0 99 pass, 7 known fails (#2, #5). Firmware builds (`pio run -e USB`). L1: the PWM adapter does not drive the bridge yet, so L1 runs that reach PWM_SETTLE stop (since Jean's `20c6073`); a bridge and relay adapter is the next L1 step |
+| Hardware check | The bench session itself (L2-INV-10 pre-checks first: relay polarity) |
+
