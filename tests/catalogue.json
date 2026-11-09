@@ -1,1270 +1,1270 @@
 {
-  "_doc": "The validation catalogue: every test, defined once. tests/common/control_center.py builds tests/out/control-center.html from it and from the campaign results; tests/common/catalogue.py --procedure writes procedure §6 from it. status: implemented | partial | planned | blocked (implementation state, not a verdict; verdicts come from campaign results). Amend here, then regenerate §6.",
-  "version": "1.6",
-  "tabs": [
-    {
-      "id": "bench",
-      "title": "Test bench",
-      "question": "Is the simulator setup trustworthy? The firmware block runs the real code at the right rate, measurements reach it, the PV panel equations agree.",
-      "notes": [
-        "These establish the execution and measurement boundary using the same Core source. They do not validate the model or the firmware, and do not override a finding. [Implementation and prerequisites](../../tests/l1/README.md).",
-        "Contract **app-v1**, in `tests/l1/contract.json`, binds six physical probes plus VAC freshness and the three existing operator commands. Outputs include the stop/update action flags as well as duties/enables; relay and bridge request telemetry stays off. Unrun criteria are reported BLOCKED; measured failures stay FAIL."
-      ]
-    },
-    {
-      "id": "model",
-      "title": "Model",
-      "question": "Does the model behave like the converter? Boost and inverter in open loop, firmware out of the loop; later compared with the same sequence on the board.",
-      "notes": [
-        "Model tests run the power stages with the firmware out of the loop (duty or modulation imposed by the test). Their simulated verdicts check the model against hand calculations; the hardware comparison (same sequence on the board) is defined later."
-      ]
-    },
-    {
-      "id": "boost",
-      "title": "Boost",
-      "question": "Does the boost object do what it should, alone? L0 logic, then the object alone on the model."
-    },
-    {
-      "id": "observer",
-      "title": "Grid observer",
-      "question": "Does the grid observer judge the grid correctly, alone? L0 logic, then the object alone through the model's grid sensing."
-    },
-    {
-      "id": "inverter",
-      "title": "Inverter",
-      "question": "Does the grid-following inverter library work, alone? L0 logic, then the library alone with a relay model.",
-      "notes": [
-        "The L1 cases exercise library features the application does not use. They run the library through a small test-only harness, **not** through `controlStep`, so nobody reads them as application behaviour."
-      ]
-    },
-    {
-      "id": "app",
-      "title": "Application",
-      "question": "Do the objects work together in the real firmware sequence? L0 control step, then the application on the full model.",
-      "notes": [
-        "The [switched DCDC results](switched-dcdc-results.md) preserve the current regulation failure, numerical refinement and remaining coverage. Grid-injection cases are defined now and stay blocked while the application is synchronization-only."
-      ]
-    }
-  ],
-  "tests": [
-    {
-      "id": "L1-INT-00",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Build/runner failure before a reported criterion must fail the campaign",
-      "criterion": "Reported only when a build or runner fails before its criteria; its absence from a campaign of its level means that campaign ran.",
-      "source": "campaign runner",
-      "status": "implemented",
-      "status_note": "Infrastructure fallback",
-      "reports_only_failures": true
-    },
-    {
-      "id": "L1-INT-01",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Wrapper matches direct controlStep; independent state; invalid ABI/timing rejected",
-      "criterion": "",
-      "source": "`controlStep`, app-v1 contract",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.c)"
-    },
-    {
-      "id": "L1-INT-02",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Pulsim actually loads native C-Block, executes once per 100 us, closes an RC loop and resets independently",
-      "criterion": "",
-      "source": "`pulsim.add_c_block`, application period",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.c)"
-    },
-    {
-      "id": "L1-INT-03",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Refined switched model, nominal 50 Hz sync with inverter off, exact current-probe binding and tick-aligned STARTUP with the current clamp",
-      "criterion": "",
-      "source": "accepted plant, `controlStep`, `app::startup_ramp_rate`",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.d)"
-    },
-    {
-      "id": "L1-INT-04",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Missing VAC delivery holds last sample and invalidates at age 200; physical grid stays present",
-      "criterion": "",
-      "source": "sensor hold contract, `grid_voltage_stale_ticks`",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.b)"
-    },
-    {
-      "id": "L1-INT-05",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Native PV passive MPP load; actual Core MPPT coupling; initial 2 ms step refinement; short-run power ratio INFO",
-      "criterion": "",
-      "source": "synthetic single-diode variant",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.c PASS checks, .d INFO)"
-    },
-    {
-      "id": "L1-INT-07",
-      "tab": "bench",
-      "level": "L1",
-      "title": "Lambert W panel equals the diode panel: explicit current vs implicit solution; same switched circuit loaded through the MPP at a fixed duty (10 mV / 10 mA); speed ratio INFO",
-      "criterion": "",
-      "source": "`plant/pv.py` `current_lambertw`, [PV guide](pv-model-run.md#lambert-w-panel-for-long-runs)",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.b; .c INFO)"
-    },
-    {
-      "id": "L1-MOD-01",
-      "tab": "model",
-      "level": "L1",
-      "title": "Boost open loop, leg 1 alone: gain, currents, efficiency, start-up",
-      "criterion": ".a steady bus voltage within ±5 % of the analytic gain ≈ 6·VLow/(1−d) at every duty and load, d being the low switch's effective on-time (commanded duty minus the 100 ns dead time, on the step grid), the bus value extrapolated from three windows at the end of a 150 ms run and settled (PASS/FAIL). INFO: .b input current mean and ripple, .c transformer primary/secondary peaks, .d efficiency (bus power / input power), .e start-up transient from 0 V (inrush peak, time constant)",
-      "source": "tests/l1/plant/full_model.pulsim; transformer ratio from params.yaml",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Ideal 40 V source; bus precharged to the analytic value of each duty (the sweep) or discharged (the start-up, .e, at duty 0.40); DC1 switched at a fixed duty, firmware out of the loop; resistive bus loads 20 / 100 / 200 W at 400 V (10 / 50 / 100 % of a leg's 200 W); duty 0.05–0.45 every 0.05, plus 0.30–0.46 every 0.02; duties whose steady bus would exceed 450 V are skipped; each run held until the bus is steady",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-02",
-      "tab": "model",
-      "level": "L1",
-      "title": "Boost open loop, leg 2 alone: gain, currents, efficiency, start-up",
-      "criterion": ".a steady bus voltage within ±5 % of the analytic gain ≈ 6·VLow/(1−d) at every duty and load, d being the low switch's effective on-time (commanded duty minus the 100 ns dead time, on the step grid), the bus value extrapolated from three windows at the end of a 150 ms run and settled (PASS/FAIL). INFO: .b input current mean and ripple, .c transformer primary/secondary peaks, .d efficiency (bus power / input power), .e start-up transient from 0 V (inrush peak, time constant)",
-      "source": "tests/l1/plant/full_model.pulsim; transformer ratio from params.yaml",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Ideal 40 V source; bus precharged to the analytic value of each duty (the sweep) or discharged (the start-up, .e, at duty 0.40); DC2 switched at a fixed duty, firmware out of the loop; resistive bus loads 20 / 100 / 200 W at 400 V; duty 0.05–0.45 every 0.05, plus 0.30–0.46 every 0.02; duties whose steady bus would exceed 450 V are skipped; each run held until the bus is steady",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-03",
-      "tab": "model",
-      "level": "L1",
-      "title": "Boost open loop, both legs, same duty: gain, currents, efficiency, start-up",
-      "criterion": ".a steady bus voltage within ±5 % of the analytic gain ≈ 6·VLow/(1−d) at every duty and load, d being the low switch's effective on-time (commanded duty minus the 100 ns dead time, on the step grid), the bus value extrapolated from three windows at the end of a 150 ms run and settled (PASS/FAIL). INFO: .b input current mean and ripple, .c transformer primary/secondary peaks, current sharing between legs, .d efficiency (bus power / input power), .e start-up transient from 0 V (inrush peak, time constant)",
-      "source": "tests/l1/plant/full_model.pulsim; transformer ratio from params.yaml",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Ideal 40 V source; bus precharged to the analytic value of each duty (the sweep) or discharged (the start-up, .e, at duty 0.40); DC1+DC2 switched at a fixed duty, firmware out of the loop; resistive bus loads 40 / 200 / 400 W at 400 V (10 / 50 / 100 % of 400 W); duty 0.05–0.45 every 0.05, plus 0.30–0.46 every 0.02; duties whose steady bus would exceed 450 V are skipped; each run held until the bus is steady",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-04",
-      "tab": "model",
-      "level": "L1",
-      "title": "Inverter open loop, no load: filter behaviour",
-      "criterion": "INFO: .a output voltage vs modulation index, .b output spectrum peak 1–50 kHz (10 kHz lines of the 100 µs duty update excluded) vs the analytic resonance 1/(2π√(LC)) (L = AC inductors + choke differential inductance, C = C113 + damping capacitor)",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Ideal 400 V bus (boost disconnected); fixed 50 Hz sinusoidal modulation imposed on the bridge; relay open (filter unloaded)",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-05",
-      "tab": "model",
-      "level": "L1",
-      "title": "Inverter open loop into a resistor: modulation index sweep",
-      "criterion": ".a output fundamental within ±5 % of m·Vbus/√2 minus the first-order dead-time loss, a square wave of 2·td·f·Vbus in phase with the current (PASS/FAIL). INFO: .b output THD, .c output current, .d losses (bus power − load power, and the bridge share)",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Ideal 400 V bus; fixed 50 Hz modulation, index 0.2–1.0 every 0.2; relay closed on a resistor sized for 400 W at 230 V",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-06",
-      "tab": "model",
-      "level": "L1",
-      "title": "Inverter open loop into the grid: amplitude and phase steps",
-      "criterion": ".a P and Q within ±10 % of |S| of the 50 Hz phasor solution of the filter network, driven by the bridge voltage the simulation produced (fundamental of V(INV_A)−V(INV_B) over a full-resolution cycle) (PASS/FAIL, dead time 0). INFO: .b grid current THD, .c the same command with 100 ns dead time, .d the P and Q predicted from the ideal gate pattern instead, which shows how stiff the connection is: the bridge loses about 0.15 % of its voltage to second-order effects (C120 hard-switched at zero dead time), worth about 3 A at 0.17 Ω",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Ideal 400 V bus; modulation synchronized to the 230 V / 50 Hz grid by the test, duty updated every 100 µs as on the board; relay closed; commands aimed at P = ±200, +400 W and Q = ±200 var; 10 ns step (the filter impedance is about 0.17 Ω at 50 Hz, so 400 W needs only about 0.3 V between bridge and grid)",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-07",
-      "tab": "model",
-      "level": "L1",
-      "title": "Inverter dead-time effect",
-      "criterion": "INFO: output voltage loss and distortion with dead time 0 / 100 / 200 ns, against the analytic dead-time voltage error",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "As L1-MOD-05 at index 0.8, 10 ns step",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-08",
-      "tab": "model",
-      "level": "L1",
-      "title": "Measurement chain: what the firmware reads vs the physical quantity",
-      "criterion": ".a each boost measurement (ILow1, VDCBus, VLow) equals the physical quantity in scale and sign within 1 % (PASS/FAIL); .b ILow1 sampled at the simulation's instant (control tick, middle of the low switch's off-time) within 2 % of ILow1 at the board's ADC instant (0.06·PER on the up-count, just after the middle of the on-time) (PASS/FAIL; the mismatch found in #3 H2, drives contract app-v2); .c inverter VAC and IAC at m = 0.8 into the resistor (INFO)",
-      "source": "tests/l1/contract.json; board ADC trigger (HRTIM, 0.06·PER up-count)",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
-      "conditions": "Runs of L1-MOD-03 (both legs, duty 0.40, 200 W) and L1-MOD-05 (m = 0.8); full-resolution traces over the last 2 ms",
-      "hardware": "not defined yet"
-    },
-    {
-      "id": "L1-MOD-09",
-      "tab": "model",
-      "level": "L1",
-      "title": "Boost plant identification for PID tuning",
-      "criterion": "INFO: linear models identified from small steps on the switched model: duty → input inductor current (current loop plant) and current → bus voltage (voltage loop plant), at 10 / 50 / 100 % of 400 W and 400 V, each leg and both; fitted first-order plus delay (for SIMC) and second-order transfer functions, with the fit error",
-      "conditions": "Open loop (firmware out of the loop), bus at 400 V with the load of each operating point, duty steps of ±0.01 around the operating duty",
-      "source": "tests/l1/plant/open_loop.py",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
-    },
-    {
-      "id": "L0-BST-01",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Invalid init or measurements never enable a leg",
-      "criterion": "",
-      "source": "`BoostConverter::init`, `isLeg1Enabled`, `isLeg2Enabled`",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-BST-02",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Leg 1 takes priority up to its current limit, leg 2 takes the excess, leg 2 is cleared when its demand stops",
-      "criterion": "",
-      "source": "`splitCurrentReference`",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-BST-03",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Cold-loop saturation sets the total current reference",
-      "criterion": "",
-      "source": "voltage PID bounds",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-BST-04",
-      "tab": "boost",
-      "level": "L0",
-      "title": "MPPT perturb and observe: direction, turnaround at bounds, voltage ignored",
-      "criterion": "",
-      "source": "`Mppt`, `MPPT_CURRENT_STEP` = 0.1 A",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-BST-05",
-      "tab": "boost",
-      "level": "L0",
-      "title": "STARTUP current clamp; STARTUP to BUSREG resets nothing; IDLE resets all",
-      "criterion": ".a STARTUP regulates toward VBusRef with the total current clamped to startupCurrentMax, leg 1 only; .b STARTUP → BUSREG keeps PID states, references and burst (leg 1 duty = an uninterrupted mirror PID); .c IDLE, and an active mode entered from IDLE, reset everything and start burst fully skipped",
-      "source": "`setStartupCurrentMax`, `setMode`; `startup_current_max` = 0.25 A",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06 (ADR 0003)"
-    },
-    {
-      "id": "L0-BST-06",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Current-driven burst on leg 1",
-      "criterion": ".a from full skipping the skip count falls by one per hot loop while ILow1 < reference, then the PID runs; .b at minimum duty with ILow1 > reference skipping starts and follows the current error within [0, period]; .c the PID keeps its state across burst (duty held while skipping; continuous duty = an uninterrupted mirror PID); .d no burst while leg 2 has demand; .e a zero period is rejected and without burst leg 1 never skips",
-      "source": "`setBurst`, `hotLoop`; `boost_burst_period` = 200",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06 (ADR 0003)"
-    },
-    {
-      "id": "L0-BST-07",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Over-voltage full burst; over-voltage and over-current trip",
-      "criterion": ".a above 440 V every period is skipped and the PID held, below it the current error drives burst again; .b above 460 V the boost trips (legs off, outputs cleared), latched until IDLE; .c a leg current above 8 A trips, exactly 8 A does not; .d inconsistent settings are rejected, unconfigured protection never trips",
-      "source": "`setProtection`; 440 V, 460 V, 8 A",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06 (ADR 0003)"
-    },
-    {
-      "id": "L0-BST-08",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Voltage PID gain scheduled with VBusRef / VLow",
-      "criterion": ".a Kp = gain · clamp(VBusRef, 390, 410) / clamp(VLow, 24, 48) at each STARTUP/BUSREG cold loop, not in MPPT; .b scheduling does not reset the PID (total reference = an uninterrupted mirror PID with the scheduled Kp); .c inconsistent schedules are rejected",
-      "source": "`setVoltageGainSchedule`; gain 2.6/6 (Andres)",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06 (ADR 0003)"
-    },
-    {
-      "id": "L0-BST-09",
-      "tab": "boost",
-      "level": "L0",
-      "title": "Leg 2 starts only above a demand threshold; below it, off and leg 1's burst kept",
-      "criterion": ".a a leg-2 demand of one float step (4.8e-7 A) or 1 mA keeps leg 2 off, its duty 0, in BUSREG and MPPT; .b such a demand does not cancel leg 1's burst; .c a clear demand (1 A) still starts leg 2 with that reference; .d INFO leg-2 starts over a noisy 5.4–5.6 A ramp. Threshold value to choose (#5)",
-      "source": "`splitCurrentReference`",
-      "status": "implemented",
-      "status_note": "Test implemented 2026-11-06; fails until the threshold is implemented (#5)"
-    },
-    {
-      "id": "L0-PWR-01",
-      "tab": "boost",
-      "level": "L0",
-      "title": "PWM duty limits across HRTIM timing units with different frequencies",
-      "criterion": "Host harness around the real Power.cpp (devicetree arrays from the uSolarVerter overlay, recording HRTIM stand-in, SPIN stubs): per-unit min/max counts from each unit's own period (200 kHz boost, 50 kHz inverter); clamps sent to the driver per leg; limits after a frequency change; a limit set before init; the ALL raw variants clamp each leg to its own limits; the inverter duty clamp; the exact setup sequence of main.cpp",
-      "source": "zephyr/modules/owntech_shield_api/zephyr/src/Power.cpp `setDutyCycleMin`, `setDutyCycleRaw`",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, follow-up (#6)"
-    },
-    {
-      "id": "L1-BST-01",
-      "tab": "boost",
-      "level": "L1",
-      "title": "STARTUP from 0 V to 400 V",
-      "criterion": "Bus rises from 0 to 400 V with the total current reference within the 0.25 A STARTUP clamp; leg 2 never enabled; physical current below the 8 A trip",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Ideal 40 V source; bus discharged; light bus load",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-02",
-      "tab": "boost",
-      "level": "L1",
-      "title": "BUSREG load steps",
-      "criterion": ".a VDCBus stays within 380–420 V (±5 %) during every step and is back within 395–405 V within 100 ms (PASS/FAIL); INFO: overshoot, undershoot, settling time, current-reference saturation",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented",
-      "conditions": "BUSREG at 400 V, real firmware on the switched model; steps up and down between 10, 50 and 100 % of 400 W (10→50→100→50→10 %); through the application until the boost-object harness exists",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-03",
-      "tab": "boost",
-      "level": "L1",
-      "title": "STARTUP → BUSREG hand-over",
-      "criterion": "No bus sag below 395 V when BUSREG takes over at 400 V under load; nothing reset at the switch (the #3 transition, ADR 0003)",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Real sequence from 0 V, BUSREG commanded once the ramp reaches 400 V; 50 % load",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-04",
-      "tab": "boost",
-      "level": "L1",
-      "title": "Light load: current-driven burst over a long run",
-      "criterion": "Burst keeps the bus within 395–405 V at 1–10 % load over 1 s; skip count and bus ripple INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Bus at 400 V; load 1–2 % of rated; 1 s or more",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-05",
-      "tab": "boost",
-      "level": "L1",
-      "title": "Current split between legs",
-      "criterion": "Leg 1 takes the demand up to its limit, leg 2 the excess; leg 2 off when its demand stops",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "BUSREG at 400 V; load ramp 0 → 400 W → 0",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-06",
-      "tab": "boost",
-      "level": "L1",
-      "title": "MPPT on the PV panel",
-      "criterion": "Settles within 2 % of the panel's maximum power; tracking efficiency and settling time INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Lambert W panel at 100 % light; bus load sized for the MPP",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-07",
-      "tab": "boost",
-      "level": "L1",
-      "title": "MPPT under light changes",
-      "criterion": "Recovers the MPP within 2 % after a cloud step (100 → 30 %) and a recovery ramp; INFO: energy lost during the transient",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Lambert W panel; light step and ramp",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-08",
-      "tab": "boost",
-      "level": "L1",
-      "title": "Every boost mode → every other mode",
-      "criterion": "Legs stopped on the switching tick; no current above the limits; peak currents INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "All pairs of IDLE / STARTUP / BUSREG / MPPT at representative operating points",
-      "harness": "boost object alone in its own C-Block, on the boost part of the model"
-    },
-    {
-      "id": "L1-BST-09",
-      "tab": "boost",
-      "level": "L1",
-      "title": "PID tuning comparison",
-      "criterion": "INFO: for each tuning, gain and phase margins and crossover on the identified plants (L1-MOD-09), then L1-BST-02 load steps, L1-BST-03 STARTUP → BUSREG hand-over (the #3 transition) and L1-BST-01 start-up on the switched model with the real firmware: overshoot, undershoot, settling, duty and reference saturation",
-      "conditions": "Tunings: today's firmware (voltage Kp 0.05, Ti 0.1 s; current Kp 0.000215, Ti 75.2 µs); Jean's AI fit (voltage Kp 0.18, Ti 60 ms; current Kp 0.0005, Ti 33.3 µs); Andres Vazquez Sieber's bench-tested values (core-micro-verter-boost 43e249e: current Kp 0.002712, Ti 341.3 µs, plus a 100 Hz PR, Kr 0.91; voltage Kp 0.433·Vbus/Vin ≈ 4.8 A/V at 36 V, Ti 4.57 ms), run with today's output bounds and, separately, with his (duty 0.05–0.60, current reference ±0.25 A); Skogestad SIMC on the identified plants; a crossover / phase-margin tuner in two settings (robust, fast), as MATLAB's pidTuner slider. Same PID form and output bounds as the firmware; constants overridden in the test build only (production unchanged until one is chosen)",
-      "source": "src/app/control_step.h boost_voltage_params, boost_current_params",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
-    },
-    {
-      "id": "L0-GOB-01",
-      "tab": "observer",
-      "level": "L0",
-      "title": "Not operable before init; invalid config rejected",
-      "criterion": "",
-      "source": "`GridObserver::init`, `canOperate`",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-GOB-02",
-      "tab": "observer",
-      "level": "L0",
-      "title": "Qualification dwell; restart on dropout; no nuisance trip when the grid is absent at startup",
-      "criterion": "",
-      "source": "`qualification_time_s` = 1 s",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-GOB-03",
-      "tab": "observer",
-      "level": "L0",
-      "title": "RMS and frequency estimates accurate on a clean grid",
-      "criterion": "",
-      "source": "`getVoltageRms`, `getFrequencyHz`",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-GOB-04",
-      "tab": "observer",
-      "level": "L0",
-      "title": "UV, OV, UF, OF trip after their delay; shorter events do not trip",
-      "criterion": "",
-      "source": "207–253 V, 47.5–52.5 Hz, 0.1 s delays in `grid_observer_config`",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-GOB-05",
-      "tab": "observer",
-      "level": "L0",
-      "title": "Trip latches; clearing needs a full healthy interval and open-relay feedback",
-      "criterion": "",
-      "source": "`clearTrip`",
-      "status": "implemented",
-      "status_note": "Migrated"
-    },
-    {
-      "id": "L0-GOB-06",
-      "tab": "observer",
-      "level": "L0",
-      "title": "Invalid measurement trips with reason `InvalidMeasurement`",
-      "criterion": "",
-      "source": "`update(..., measurements_valid)`",
-      "status": "implemented",
-      "status_note": "Migrated (already covered by the original test)"
-    },
-    {
-      "id": "L1-GOB-01",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Clean grid: estimates and qualification",
-      "criterion": "RMS within ±1 %, frequency within ±0.05 Hz of the grid; qualified after 1 s ± 1 tick",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "230 V / 50 Hz, then 210 / 250 V and 49 / 51 Hz steady",
-      "studies": [
-        "grid-steady-*"
-      ],
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L1-GOB-02",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Window limits",
-      "criterion": "Steps just inside each limit (UV 207, OV 253 V, UF 47.5, OF 52.5 Hz) never trip; just outside they trip within 0.1 s + 1 tick with the right reason",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Steps from nominal to ±1 % of each limit, both sides",
-      "studies": [
-        "grid-fault-*"
-      ],
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L1-GOB-03",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Short events do not trip",
-      "criterion": "Out-of-window events shorter than the 0.1 s delay never trip",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Each fault for 50 and 90 ms",
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L1-GOB-04",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Trip latch and recovery",
-      "criterion": "Trip stays latched while the grid recovers; clearTrip succeeds only after a full healthy interval with the relay open",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Fault, recovery, clearTrip at several times",
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L1-GOB-05",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Waveform quality",
-      "criterion": "RMS and frequency stay within the L1-GOB-01 tolerances and no trip with 3rd/5th harmonics at grid-standard levels, a DC offset and measurement noise",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Distorted 230 V / 50 Hz grids",
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L1-GOB-06",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Phase jumps, frequency ramps, sags and swells",
-      "criterion": "No nuisance trip on phase jumps of 10–60°; frequency ramps (ROCOF) and sag/swell profiles trip only when they leave the window; frequency transient INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Profiles applied from nominal",
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L1-GOB-07",
-      "tab": "observer",
-      "level": "L1",
-      "title": "Grid-code interface-protection sequence",
-      "criterion": "Passes the chosen standard's interface-protection test sequence",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06; standard not chosen yet",
-      "conditions": "Standard to be chosen (e.g. EN 50549-1 or VDE-AR-N 4105)",
-      "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
-    },
-    {
-      "id": "L0-GFL-01",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Init validation; invalid config latches `VSI_FAULT_INVALID_CONFIGURATION`",
-      "criterion": "",
-      "source": "library README, `init`",
-      "status": "implemented",
-      "status_note": "Implemented",
-      "verdict_type": "PASS/FAIL"
-    },
-    {
-      "id": "L0-GFL-02",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "PLL locks on a clean 230 V / 50 Hz grid; synchronization only never requests PWM or relay",
-      "criterion": "",
-      "source": "`getSync`, `isPwmRequested`",
-      "status": "implemented",
-      "status_note": "Implemented",
-      "verdict_type": "PASS/FAIL; lock time, phase and frequency error `INFO`"
-    },
-    {
-      "id": "L0-GFL-03",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "PLL tracks a 50 → 51 Hz step (20 ms mean) and synchronizes again inside the library's ±5 % frequency window",
-      "criterion": "",
-      "source": "`getw`, `synchronizationAligned` (±5 % ω, |Vq| < 0.1 V)",
-      "status": "implemented",
-      "status_note": "Implemented; .b FAIL, #1",
-      "verdict_type": "PASS/FAIL; tracking time, ripple `INFO`"
-    },
-    {
-      "id": "L0-GFL-04",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Mode lifecycle OFF → SYNC → PWM_WAIT → PWM_SETTLE → CONNECT → CONNECTED → RUN → STOPPING → DISCONNECT → OFF with feedback; 1 s connection and disconnection timeouts; connection lost; sync lost while awaiting the relay",
-      "criterion": "",
-      "source": "`vsi_mode_t`, `_connection_timeout`",
-      "status": "implemented",
-      "status_note": "Implemented; PWM start-up states added 2026-11-06 (library 1b4fd06)",
-      "verdict_type": "PASS/FAIL"
-    },
-    {
-      "id": "L0-GFL-05",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Bad grid quality blocks SYNC and trips CONNECT/CONNECTED/RUN; `clearFault` needs good quality and an open relay",
-      "criterion": "",
-      "source": "`setGridQuality`, `clearFault`",
-      "status": "implemented",
-      "status_note": "Implemented",
-      "verdict_type": "PASS/FAIL"
-    },
-    {
-      "id": "L0-GFL-06",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Non-finite measurement, non-positive bus, invalid references latch a fault with 0.5 duty and PWM off; first cause kept; requests ignored until cleared",
-      "criterion": "",
-      "source": "library README (faults)",
-      "status": "implemented",
-      "status_note": "Implemented",
-      "verdict_type": "PASS/FAIL"
-    },
-    {
-      "id": "L0-GFL-07",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Duty exactly 0.5 in OFF and SYNC; duty = α / (2 · V_bus) + 0.5 otherwise, unclamped",
-      "criterion": "",
-      "source": "library README (`calculateDuty`)",
-      "status": "implemented",
-      "status_note": "Implemented",
-      "verdict_type": "PASS/FAIL"
-    },
-    {
-      "id": "L0-GFL-08",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Cold-start synchronization at 47.6, 49, 50, 51 and 52.4 Hz from four grid angles (5 s horizon); settled frequency estimate within ±5 %",
-      "criterion": "",
-      "source": "library README (±5 % frequency window), observer window 47.5–52.5 Hz",
-      "status": "implemented",
-      "status_note": "Implemented; .a, .b, .d, .e FAIL, [#1](https://github.com/luizvilla/Core/issues/1)",
-      "verdict_type": "PASS/FAIL; worst lock time and transient `INFO`"
-    },
-    {
-      "id": "L0-GFL-09",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "SOGI orthogonality on a clean grid",
-      "criterion": ".a |β|/|α| fundamental ratio 1 ± 2 % and .b phase α→β 90° ± 1° at every frequency, measured once the PLL has settled (PASS/FAIL); INFO: α amplitude and phase error against the input",
-      "conditions": "Clean 230 V sine at 47.5, 49, 50, 51, 52.5 Hz; 10 kHz sampling; SOGI tuned to the PLL estimate (as in bcb7e71)",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
-    },
-    {
-      "id": "L0-GFL-10",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "SOGI and PLL with grid harmonics",
-      "criterion": ".a bench-measured harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %) at 47.6, 49.5, 50, 50.5 and 52.4 Hz: synchronizes within 8 s, period-averaged |Vq| below 1 % of the peak and averaged ω within 1 % of the grid (PASS/FAIL); .d EN 50160 limit harmonics (5 / 6 / 5 / 1.5 / 3.5 / 3 %) at 50 Hz: synchronizes (PASS/FAIL); INFO .b peak instantaneous |Vq| (the ripple the earlier instantaneous criterion judged), .c peak averaged |Vq|, .e instantaneous |Vq| with EN 50160 harmonics",
-      "conditions": "Library alone on a synthetic grid with harmonics; synchronization judged on one-period averages (library fix 9bfbaee, #7)",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-09 (#7)"
-    },
-    {
-      "id": "L0-GFL-11",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "SOGI and PLL with measurement noise and quantization",
-      "criterion": ".a synchronization holds and Vq stays below 0.1 V (PASS/FAIL); INFO: noise rms of α and β relative to the input noise (β is a scaled first difference of α, so wide-band noise reaches it almost unattenuated), θ jitter",
-      "conditions": "White noise 0.1–3 V rms on VAC, 12-bit quantization of a ±400 V range, PWM-frequency ripple aliased into the 10 kHz samples",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
-    },
-    {
-      "id": "L0-GFL-12",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "SOGI with held or irregular VAC samples",
-      "criterion": "INFO: β spikes and Vq transients when VAC repeats (held sample) every 2nd / 10th tick or is delivered with jitter; the sample rate the SOGI assumes (Ts) differs from the delivery rate",
-      "conditions": "Clean 50 Hz grid; VAC held as the sensor reader does when no fresh sample arrives",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
-    },
-    {
-      "id": "L0-GFL-13",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "SOGI with a DC offset on VAC",
-      "criterion": ".a VAC offset −5.7 V (bench) and ±10 V: synchronizes, averaged |Vq| below 1 % of the peak (PASS/FAIL); .b peak instantaneous |Vq| (INFO); .c the bench grid as measured (harmonics and −5.7 V offset) at 50 Hz synchronizes (PASS/FAIL)",
-      "conditions": "Clean 50 Hz grid plus a constant offset",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-09 (#7)"
-    },
-    {
-      "id": "L0-GFL-14",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "PLL dynamics: phase jumps, frequency steps and ramps",
-      "criterion": "INFO: settling time (2 % band) and overshoot of θ error and ω after phase jumps of 10–60° and frequency steps of ±0.5/±1 Hz; steady phase error during ROCOF ramps of 0.5–2 Hz/s; small-signal bandwidth and damping from the step responses",
-      "conditions": "Clean 230 V grid, from synchronized",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
-    },
-    {
-      "id": "L0-GFL-15",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Replay of board VAC logs",
-      "criterion": "INFO: α, β, Vd, Vq and θ computed by the library from logged board VAC samples, compared with the α and β the board logged at the same time (same code, same samples: any difference is in the logging or the sample delivery)",
-      "conditions": "Board logs of raw VAC and the firmware's α, β (to be provided by Jean)",
-      "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06; needs board logs"
-    },
-    {
-      "id": "L0-GFL-16",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "PWM start-up before relay closure (PWM_WAIT, PWM_SETTLE)",
-      "criterion": ".a PWM at exactly 0.5 with the relay open, held without acknowledgement; .b once acknowledged, the waveform links within ±0.01 of neutral near a zero crossing; .c 10 grid periods of settling with the relay open, then GRID_CONNECT; .d acknowledgement loss restarts the settling, and faults PWM_UPDATE_FAILED in GRID_CONNECT; .e closed-contact feedback, a phase jump and bad quality fault EXTERNAL, SYNC_LOST, BAD_GRID_QUALITY in PWM_WAIT and PWM_SETTLE; .f invalid tolerances rejected, zero periods hold, a new count restarts the dwell",
-      "source": "`setPwmEnabled`, `setPwmStartDutyTolerance`, `setPwmSettleCycles` (library 1b4fd06)",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-06"
-    },
-    {
-      "id": "L0-GFL-17",
-      "tab": "inverter",
-      "level": "L0",
-      "title": "Current-loop settings from the application (PI gains, limit, current SOGI gain, output advance)",
-      "criterion": ".a defaults equal the historical values (Kp 0.001 V/A, Ti 0.3 ms, ±30 V, current SOGI 500 rad/s, no advance); .b invalid values (zero, negative, NaN, infinity, Kr·Ts ≥ 1, advance outside 0–2) rejected, configuration unchanged; .c settings kept across init(), also when made before it; .d in RUN, gains change live (correction Kp·error on the next step) and the advance is accepted, while the limit and the SOGI gain are refused; .e the advance rotates the output by advance·ω·Ts with the magnitude unchanged",
-      "source": "`setCurrentPiGains`, `setCurrentPiLimit`, `setCurrentSogiGain`, `setOutputPhaseAdvance` (library ab35e2f)",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-10"
-    },
-    {
-      "id": "L1-GFL-01",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "Connect (PWM start-up at neutral, 10 periods of settling) → relay → run (I_d step) → stop → disconnect, with relay feedback",
-      "criterion": "",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED: needs the inverter harness and a relay model",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-02",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "Grid fault during RUN: fault latched, PWM dropped immediately",
-      "criterion": "",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED: needs the inverter harness and a relay model",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-03",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "Relay never confirms closing: fault after the 1 s timeout",
-      "criterion": "",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED: needs the inverter harness and a relay model",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-04",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "PLL on the model's sensed grid",
-      "criterion": "Synchronizes at 47.6, 49, 50, 51 and 52.4 Hz within the library's ±5 % window; lock time INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06; gated by #1",
-      "conditions": "Inverter in SYNC on the model grid",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-05",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "RUN: active current steps",
-      "criterion": "Grid current follows I_d steps; current THD and step response INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "400 V bus (ideal); relay closed; I_d 0 → 50 → 100 % of 400 W",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-06",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "RUN: reactive current",
-      "criterion": "Grid current follows I_q references; power factor INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "As L1-GFL-05 with I_q steps",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-07",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "RUN: bus voltage variation",
-      "criterion": "Current tracking holds while the DC bus moves within its operating range (e.g. 380–420 V)",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "As L1-GFL-05 with a bus ramp",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-08",
-      "tab": "inverter",
-      "level": "L1",
-      "title": "RUN: phase jump",
-      "criterion": "Stays synchronized or faults cleanly on a grid phase jump; current peak INFO",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "As L1-GFL-05 with 10–60° jumps",
-      "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
-    },
-    {
-      "id": "L1-GFL-09",
-      "title": "Bench connection on the switched model through the application: step 1 → step 2 → relay at a voltage zero crossing → GRID_CONNECTED",
-      "criterion": ".a sequence PWM_SETTLE → GRID_CONNECT → GRID_CONNECTED with no fault and no bench trip; .b contact instant within ±10° of a grid zero crossing; .c closing current peak < 1.5 A; .d residual current in GRID_CONNECTED < 0.05 A RMS from 100 ms after the contact; INFO .e connection transient",
-      "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); grid behind the cold bulb (40 Ω) and behind the IEC 60725 reference impedance (0.4 Ω + 0.8 mH)",
-      "tab": "inverter",
-      "level": "L1",
-      "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
-      "status": "partial",
-      "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
-    },
-    {
-      "id": "L1-GFL-10",
-      "title": "Current loop: I_d step 0 → 0.1 A on the IEC 60725 reference grid",
-      "criterion": ".a overshoot ≤ 20 %; .b 5 % settling ≤ 50 ms; .c final I_d within ±5 % (fundamental of the line current); .d |I_q| ≤ 0.02 A in steady state; INFO .e rise time, current THD",
-      "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); IEC 60725 reference impedance",
-      "tab": "inverter",
-      "level": "L1",
-      "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
-      "status": "partial",
-      "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
-    },
-    {
-      "id": "L1-GFL-11",
-      "title": "Current loop: I_d step 0 → 0.1 A through the cold bulb (bench replica)",
-      "criterion": ".a no bench trip; .b final I_d within ±10 % after 0.4 s; INFO .c overshoot, settling, residual drift before the step (the PCC voltage feedforward cancels the bulb resistance)",
-      "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); grid behind 40 Ω",
-      "tab": "inverter",
-      "level": "L1",
-      "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
-      "status": "partial",
-      "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
-    },
-    {
-      "id": "L1-GFL-12",
-      "title": "Bridge duty limits at 400 V: driver default 0.1–0.9 against 0.05–0.95",
-      "criterion": "INFO: fraction of periods with the duty clipped, line-current peak and THD with I_d,ref = 0; with 0.1–0.9 the bridge reaches only ±320 V against the 325 V grid peak",
-      "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.1–0.9 and 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s)",
-      "tab": "inverter",
-      "level": "L1",
-      "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
-      "status": "partial",
-      "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
-    },
-    {
-      "id": "L1-GFL-13",
-      "title": "Current-loop candidates compared (library today and tuned variants)",
-      "criterion": "INFO: per candidate (current SOGI gain, Kp, Ti, delay compensation) and per grid: L1-GFL-09…11 metrics side by side; feeds the tuning decision (docs/testing/inverter-current-loop-design.md)",
-      "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); candidates built from patched copies of single_phase_inverter (tests/l1/design/variant.py)",
-      "tab": "inverter",
-      "level": "L1",
-      "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
-      "status": "partial",
-      "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
-    },
-    {
-      "id": "L2-INV-00",
-      "tab": "inverter",
-      "level": "L2",
-      "title": "Step 0: open-loop 230 V RMS, no grid",
-      "criterion": ".a output RMS 218–242 V at 400 V; .b 49.9–50.1 Hz; .c no trip, relay open; INFO .d THD, no-load DC current, .e RMS at 340 and 300 V",
-      "conditions": "Stage INV_OPEN_LOOP (menu o), mains unplugged, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
-      "source": "docs/testing/bench/inverter-session.md",
-      "status": "planned",
-      "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
-      "hardware": "bench"
-    },
-    {
-      "id": "L2-INV-01",
-      "tab": "inverter",
-      "level": "L2",
-      "title": "Step 1: synchronized PWM with the relay open (PWM_SETTLE)",
-      "criterion": ".a inverter-side vs grid-side RMS within ±3 %, .b phase within ±3°, .c same frequency, .d bulb dark, relay open, PWM_SETTLE held; INFO .e Vq, omega, time to PWM_SETTLE",
-      "conditions": "Stage INV_SETTLE (menu c), mains through the bulb, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
-      "source": "docs/testing/bench/inverter-session.md",
-      "status": "planned",
-      "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
-      "hardware": "bench"
-    },
-    {
-      "id": "L2-INV-04",
-      "tab": "inverter",
-      "level": "L2",
-      "title": "Step 1b: dry run of the connection, relay power contacts unwired",
-      "criterion": ".a state 8 → 2 → 3 held, relay command and feedback, no fault; .b relay closing time + bounce ≤ 15 ms (20 ms contact time); .c disconnect with x without fault, release time ≤ 15 ms; .d inverter side within ±3 %/±3° of the grid after 10 s in GRID_CONNECTED on an open circuit; INFO .e timings over 3 operations; .f protection test (menu z, 3 A for one period in GRID_CONNECTED): fault and bridge stop in the same period, relay command dropped, latched until x",
-      "conditions": "Stage INV_CONNECT (menu g) with both relay power terminals disconnected, VAC still on the mains, bus 400 V; relay contact timed with a 5 V / 1 kΩ circuit against GPIO 22. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
-      "source": "docs/testing/bench/inverter-session.md",
-      "status": "planned",
-      "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
-      "hardware": "bench"
-    },
-    {
-      "id": "L2-INV-02",
-      "tab": "inverter",
-      "level": "L2",
-      "title": "Step 2: relay closing disturbance, then zero current (GRID_CONNECT → GRID_CONNECTED)",
-      "criterion": ".a closing current peak < 1.5 A, no trip; .b settled within 100 ms; .c residual current < 0.05 A RMS in GRID_CONNECTED; .d opening only at zero current; INFO .e voltage disturbance",
-      "conditions": "Stage INV_CONNECT (menu g) from PWM_SETTLE: 10 periods, relay, 20 ms contact feedback. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
-      "source": "docs/testing/bench/inverter-session.md",
-      "status": "planned",
-      "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
-      "hardware": "bench"
-    },
-    {
-      "id": "L2-INV-03",
-      "tab": "inverter",
-      "level": "L2",
-      "title": "Step 3: inject a fixed current (RUN)",
-      "criterion": ".a measured Id within ±10 % of the reference, .b in phase within ±10°, .c grid side within 207–253 V, .d DC source current rises with the reference; INFO .e current THD, P",
-      "conditions": "Stage INV_INJECT (menu j/k, n), reference capped at 0.1 A peak by the bulb (weak grid). Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
-      "source": "docs/testing/bench/inverter-session.md",
-      "status": "planned",
-      "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
-      "hardware": "bench"
-    },
-    {
-      "id": "L2-INV-10",
-      "tab": "inverter",
-      "level": "L2",
-      "title": "Bench pre-checks",
-      "criterion": ".a relay on a dead bench: open at start-up (GPIO 22 polarity), closed with the manual test R, open again with R; .b menu and telemetry; .c DC source 400 V, 0.5 A limit; .d bulb in series, breaker reachable",
-      "conditions": "Before any power. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
-      "source": "docs/testing/bench/inverter-session.md",
-      "status": "planned",
-      "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
-      "hardware": "bench"
-    },
-    {
-      "id": "L0-APP-01",
-      "tab": "app",
-      "level": "L0",
-      "title": "`controlInit` applies the app tuning; a mode change is flagged on its tick only and runs the cold loop on that tick; leg enables follow the controller",
-      "criterion": "",
-      "source": "critical task, mode-change block",
-      "status": "implemented",
-      "status_note": "Implemented"
-    },
-    {
-      "id": "L0-APP-02",
-      "tab": "app",
-      "level": "L0",
-      "title": "Cold loop on the change tick, then every 10th tick; a new mode change restarts the phase",
-      "criterion": "",
-      "source": "`cold_loop_divider` = 10",
-      "status": "implemented",
-      "status_note": "Implemented"
-    },
-    {
-      "id": "L0-APP-03",
-      "tab": "app",
-      "level": "L0",
-      "title": "VAC stale for exactly 200 periods (20 ms) trips the observer with `InvalidMeasurement`; a fresh sample restarts the count; one sample missing at boot does not latch a trip",
-      "criterion": "",
-      "source": "`grid_voltage_stale_ticks` = 200; `gridObserver.cpp` (no trip latched at startup)",
-      "status": "implemented",
-      "status_note": "Implemented; .c FAIL, [#2](https://github.com/luizvilla/Core/issues/2)"
-    },
-    {
-      "id": "L0-APP-04",
-      "tab": "app",
-      "level": "L0",
-      "title": "Bridge PWM never enabled and the inverter never requests PWM or relay, in any mode, with or without a sync request",
-      "criterion": "",
-      "source": "critical task, \"Synchronization only\"",
-      "status": "implemented",
-      "status_note": "Implemented"
-    },
-    {
-      "id": "L0-APP-05",
-      "tab": "app",
-      "level": "L0",
-      "title": "Synchronization only after observer qualification; an observer trip removes it on the trip tick; times to qualification and sync `INFO`",
-      "criterion": "",
-      "source": "`setGridQuality(grid_observer.canOperate())`",
-      "status": "implemented",
-      "status_note": "Implemented"
-    },
-    {
-      "id": "L0-APP-06",
-      "tab": "app",
-      "level": "L0",
-      "title": "Bench step 0: open-loop 230 V RMS",
-      "criterion": ".a ramp to 325.3 V / VDCBus in index/rate seconds, 50 Hz, bridge on, relay never commanded, no grid needed; .b low bus saturates the index at 0.95, invalid bus stops the bridge, OFF stops it and re-entry ramps from zero",
-      "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`, `relay_close_delay`",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-09"
-    },
-    {
-      "id": "L0-APP-07",
-      "tab": "app",
-      "level": "L0",
-      "title": "Bench steps 1–3: settle, connect through the relay, inject",
-      "criterion": ".a CONNECT settles 10 periods with PWM and the relay open, then commands the relay (within half a period, at its zero-crossing instant) and reaches GRID_CONNECTED after the 20 ms contact time; .b INJECT runs the current loop with the reference capped at 0.1 A, back to CONNECT stops it; .c OFF from the grid opens the relay and stops the bridge, SETTLE from the grid goes through OFF; .d the relay command leads a grid-voltage zero crossing by the relay closing time (app::relay_close_delay), within 4°, at several start phases and 49.5/50.5 Hz",
-      "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-09"
-    },
-    {
-      "id": "L0-APP-08",
-      "tab": "app",
-      "level": "L0",
-      "title": "Bench current protection",
-      "criterion": ".a |IAC| above 1.5 A stops the bridge and opens the relay in the open-loop and grid stages, latched until OFF, which clears it",
-      "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-09"
-    },
-    {
-      "id": "L0-APP-09",
-      "tab": "app",
-      "level": "L0",
-      "title": "Bench-measured distorted grid: observer qualifies, step 1 reaches PWM_SETTLE",
-      "criterion": ".a on a grid with the bench harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %) and a −5.7 V offset, the grid observer qualifies, never trips, and the SETTLE stage reaches PWM_SETTLE within 5 s (PASS/FAIL); INFO .b time to qualification, .c time to PWM_SETTLE. Fails when the observer is fed the instantaneous SOGI amplitude and PLL frequency",
-      "source": "`controlStep`: observer fed one-period averages (`GridObserver::updateEstimates`)",
-      "status": "implemented",
-      "status_note": "Implemented 2026-11-09 (#7)"
-    },
-    {
-      "id": "L1-APP-01",
-      "tab": "app",
-      "level": "L1",
-      "title": "IDLE on a healthy grid",
-      "criterion": "legs off; observer qualifies after 1 s ± 1 tick of continuously eligible estimates; PLL lock time `INFO`",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented (.a–.b; .c INFO)",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-02",
-      "tab": "app",
-      "level": "L1",
-      "title": "STARTUP from 0 V",
-      "criterion": ".a total current reference within the 0.25 A STARTUP clamp, .b physical leg-1 current below the 8 A trip at every electrical step, .c leg 2 never enabled (first 50 ms); .d full start-up (about 1 s) BLOCKED until run",
-      "source": "",
-      "status": "partial",
-      "status_note": "Rewritten 2026-11-06 for ADR 0003 (was: 200 V/s ramp, 1 A)",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-03",
-      "tab": "app",
-      "level": "L1",
-      "title": "BUSREG at 400 V",
-      "criterion": "VDCBus within 395–405 V during 80–100 ms after load step at 50 ms; overshoot/current extrema `INFO`",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented; preserve FAIL if outside band",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-04",
-      "tab": "app",
-      "level": "L1",
-      "title": "Light load: current-driven burst",
-      "criterion": ".a BUSREG entered from IDLE starts fully skipped, .b leg 2 stays off, .c bus within 380–420 V over the run, .d the skip count leaves full skipping once current is needed; .e skip range, fraction bursting and bus range INFO",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Rewritten 2026-11-06 for ADR 0003 (was: 395/405 V pause and release)",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-05",
-      "tab": "app",
-      "level": "L1",
-      "title": "MPPT on the PV curve",
-      "criterion": "settles near the maximum power point; tracking efficiency `INFO`",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED (sustained MPPT fixture)",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-06",
-      "tab": "app",
-      "level": "L1",
-      "title": "Synchronization only",
-      "criterion": "inverter synchronized; bridge PWM never enabled",
-      "source": "",
-      "status": "partial",
-      "status_note": "Nominal integration runs; formal verdict gated by finding #1",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-07",
-      "tab": "app",
-      "level": "L1",
-      "title": "Grid steps out of window (UV, OV, UF, OF)",
-      "criterion": "trip within 0.1 s + 1 tick; synchronization revoked",
-      "source": "",
-      "status": "partial",
-      "status_note": "Fault scenarios pending; finding #1 verdict gate",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-08",
-      "tab": "app",
-      "level": "L1",
-      "title": "VAC samples lost for more than 20 ms",
-      "criterion": "trip with reason `InvalidMeasurement` after age 200",
-      "source": "",
-      "status": "implemented",
-      "status_note": "Implemented (.a)",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-09",
-      "tab": "app",
-      "level": "L1",
-      "title": "Every mode → every other mode",
-      "criterion": "legs stopped on the switching tick; peak current `INFO`",
-      "source": "",
-      "status": "partial",
-      "status_note": "Switched transition scenarios pending",
-      "model": "switched"
-    },
-    {
-      "id": "L1-APP-10",
-      "tab": "app",
-      "level": "L1",
-      "title": "Turn-on to MPPT",
-      "criterion": "IDLE → STARTUP → BUSREG → MPPT from a discharged bus on the PV panel: each mode reached in order, bus within its band, MPP reached; operator stop returns to IDLE with legs off",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Lambert W panel; grid present; operator command sequence",
-      "studies": [
-        "pv-day"
-      ]
-    },
-    {
-      "id": "L1-APP-11",
-      "tab": "app",
-      "level": "L1",
-      "title": "Light changes in MPPT",
-      "criterion": "Cloud step and recovery ramp: MPP recovered, bus stays within limits",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "As L1-APP-10, then light 100 → 30 → 100 %",
-      "studies": [
-        "pv-day"
-      ]
-    },
-    {
-      "id": "L1-APP-12",
-      "tab": "app",
-      "level": "L1",
-      "title": "Sundown and turn-off",
-      "criterion": "Light ramps to dark: no fault, legs stop, return to IDLE on command",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "As L1-APP-10, then light ramp to 0",
-      "studies": [
-        "pv-day"
-      ]
-    },
-    {
-      "id": "L1-APP-13",
-      "tab": "app",
-      "level": "L1",
-      "title": "Grid events while running",
-      "criterion": "Grid fault in each operating mode: trip, synchronization revoked, return to service after recovery",
-      "source": "",
-      "status": "planned",
-      "status_note": "Defined 2026-11-06, not implemented",
-      "conditions": "Faults of L1-GOB-02 during STARTUP, BUSREG and MPPT"
-    },
-    {
-      "id": "L1-APP-14",
-      "tab": "app",
-      "level": "L1",
-      "title": "Fixed-power injection",
-      "criterion": "Inject a commanded power into the grid; power, current THD and bus stability",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
-      "conditions": "Grid-connected operation"
-    },
-    {
-      "id": "L1-APP-15",
-      "tab": "app",
-      "level": "L1",
-      "title": "MPPT into the grid",
-      "criterion": "PV power tracked and injected; overall efficiency INFO",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
-      "conditions": "Grid-connected operation on the PV panel"
-    },
-    {
-      "id": "L1-APP-16",
-      "tab": "app",
-      "level": "L1",
-      "title": "Anti-islanding",
-      "criterion": "Stops injecting within the standard's time when the grid disappears",
-      "source": "",
-      "status": "blocked",
-      "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
-      "conditions": "Grid loss during injection"
-    }
-  ],
-  "retired": {
-    "L1-FWB-01": "superseded by L1-INT-01/-02 (procedure 1.3)",
-    "L0-BST-05 (ramp)": "STARTUP ramp removed by ADR 0003; L0-BST-05 now tests the STARTUP clamp"
+ "_doc": "The validation catalogue: every test, defined once. tests/common/control_center.py builds tests/out/control-center.html from it and from the campaign results; tests/common/catalogue.py --procedure writes procedure §6 from it. status: implemented | partial | planned | blocked (implementation state, not a verdict; verdicts come from campaign results). Amend here, then regenerate §6.",
+ "version": "1.6",
+ "tabs": [
+  {
+   "id": "bench",
+   "title": "Test bench",
+   "question": "Is the simulator setup trustworthy? The firmware block runs the real code at the right rate, measurements reach it, the PV panel equations agree.",
+   "notes": [
+    "These establish the execution and measurement boundary using the same Core source. They do not validate the model or the firmware, and do not override a finding. [Implementation and prerequisites](../../tests/l1/README.md).",
+    "Contract **app-v1**, in `tests/l1/contract.json`, binds six physical probes plus VAC freshness and the three existing operator commands. Outputs include the stop/update action flags as well as duties/enables; relay and bridge request telemetry stays off. Unrun criteria are reported BLOCKED; measured failures stay FAIL."
+   ]
+  },
+  {
+   "id": "model",
+   "title": "Model",
+   "question": "Does the model behave like the converter? Boost and inverter in open loop, firmware out of the loop; later compared with the same sequence on the board.",
+   "notes": [
+    "Model tests run the power stages with the firmware out of the loop (duty or modulation imposed by the test). Their simulated verdicts check the model against hand calculations; the hardware comparison (same sequence on the board) is defined later."
+   ]
+  },
+  {
+   "id": "boost",
+   "title": "Boost",
+   "question": "Does the boost object do what it should, alone? L0 logic, then the object alone on the model."
+  },
+  {
+   "id": "observer",
+   "title": "Grid observer",
+   "question": "Does the grid observer judge the grid correctly, alone? L0 logic, then the object alone through the model's grid sensing."
+  },
+  {
+   "id": "inverter",
+   "title": "Inverter",
+   "question": "Does the grid-following inverter library work, alone? L0 logic, then the library alone with a relay model.",
+   "notes": [
+    "The L1 cases exercise library features the application does not use. They run the library through a small test-only harness, **not** through `controlStep`, so nobody reads them as application behaviour."
+   ]
+  },
+  {
+   "id": "app",
+   "title": "Application",
+   "question": "Do the objects work together in the real firmware sequence? L0 control step, then the application on the full model.",
+   "notes": [
+    "The [switched DCDC results](switched-dcdc-results.md) preserve the current regulation failure, numerical refinement and remaining coverage. Grid-injection cases are defined now and stay blocked while the application is synchronization-only."
+   ]
   }
+ ],
+ "tests": [
+  {
+   "id": "L1-INT-00",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Build/runner failure before a reported criterion must fail the campaign",
+   "criterion": "Reported only when a build or runner fails before its criteria; its absence from a campaign of its level means that campaign ran.",
+   "source": "campaign runner",
+   "status": "implemented",
+   "status_note": "Infrastructure fallback",
+   "reports_only_failures": true
+  },
+  {
+   "id": "L1-INT-01",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Wrapper matches direct controlStep; independent state; invalid ABI/timing rejected",
+   "criterion": "",
+   "source": "`controlStep`, app-v1 contract",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.c)"
+  },
+  {
+   "id": "L1-INT-02",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Pulsim actually loads native C-Block, executes once per 100 us, closes an RC loop and resets independently",
+   "criterion": "",
+   "source": "`pulsim.add_c_block`, application period",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.c)"
+  },
+  {
+   "id": "L1-INT-03",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Refined switched model, nominal 50 Hz sync with inverter off, exact current-probe binding and tick-aligned STARTUP with the current clamp",
+   "criterion": "",
+   "source": "accepted plant, `controlStep`, `app::startup_ramp_rate`",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.d)"
+  },
+  {
+   "id": "L1-INT-04",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Missing VAC delivery holds last sample and invalidates at age 200; physical grid stays present",
+   "criterion": "",
+   "source": "sensor hold contract, `grid_voltage_stale_ticks`",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.b)"
+  },
+  {
+   "id": "L1-INT-05",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Native PV passive MPP load; actual Core MPPT coupling; initial 2 ms step refinement; short-run power ratio INFO",
+   "criterion": "",
+   "source": "synthetic single-diode variant",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.c PASS checks, .d INFO)"
+  },
+  {
+   "id": "L1-INT-07",
+   "tab": "bench",
+   "level": "L1",
+   "title": "Lambert W panel equals the diode panel: explicit current vs implicit solution; same switched circuit loaded through the MPP at a fixed duty (10 mV / 10 mA); speed ratio INFO",
+   "criterion": "",
+   "source": "`plant/pv.py` `current_lambertw`, [PV guide](pv-model-run.md#lambert-w-panel-for-long-runs)",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.b; .c INFO)"
+  },
+  {
+   "id": "L1-MOD-01",
+   "tab": "model",
+   "level": "L1",
+   "title": "Boost open loop, leg 1 alone: gain, currents, efficiency, start-up",
+   "criterion": ".a steady bus voltage within ±5 % of the analytic gain ≈ 6·VLow/(1−d) at every duty and load, d being the low switch's effective on-time (commanded duty minus the 100 ns dead time, on the step grid), the bus value extrapolated from three windows at the end of a 150 ms run and settled (PASS/FAIL). INFO: .b input current mean and ripple, .c transformer primary/secondary peaks, .d efficiency (bus power / input power), .e start-up transient from 0 V (inrush peak, time constant)",
+   "source": "tests/l1/plant/full_model.pulsim; transformer ratio from params.yaml",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Ideal 40 V source; bus precharged to the analytic value of each duty (the sweep) or discharged (the start-up, .e, at duty 0.40); DC1 switched at a fixed duty, firmware out of the loop; resistive bus loads 20 / 100 / 200 W at 400 V (10 / 50 / 100 % of a leg's 200 W); duty 0.05–0.45 every 0.05, plus 0.30–0.46 every 0.02; duties whose steady bus would exceed 450 V are skipped; each run held until the bus is steady",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-02",
+   "tab": "model",
+   "level": "L1",
+   "title": "Boost open loop, leg 2 alone: gain, currents, efficiency, start-up",
+   "criterion": ".a steady bus voltage within ±5 % of the analytic gain ≈ 6·VLow/(1−d) at every duty and load, d being the low switch's effective on-time (commanded duty minus the 100 ns dead time, on the step grid), the bus value extrapolated from three windows at the end of a 150 ms run and settled (PASS/FAIL). INFO: .b input current mean and ripple, .c transformer primary/secondary peaks, .d efficiency (bus power / input power), .e start-up transient from 0 V (inrush peak, time constant)",
+   "source": "tests/l1/plant/full_model.pulsim; transformer ratio from params.yaml",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Ideal 40 V source; bus precharged to the analytic value of each duty (the sweep) or discharged (the start-up, .e, at duty 0.40); DC2 switched at a fixed duty, firmware out of the loop; resistive bus loads 20 / 100 / 200 W at 400 V; duty 0.05–0.45 every 0.05, plus 0.30–0.46 every 0.02; duties whose steady bus would exceed 450 V are skipped; each run held until the bus is steady",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-03",
+   "tab": "model",
+   "level": "L1",
+   "title": "Boost open loop, both legs, same duty: gain, currents, efficiency, start-up",
+   "criterion": ".a steady bus voltage within ±5 % of the analytic gain ≈ 6·VLow/(1−d) at every duty and load, d being the low switch's effective on-time (commanded duty minus the 100 ns dead time, on the step grid), the bus value extrapolated from three windows at the end of a 150 ms run and settled (PASS/FAIL). INFO: .b input current mean and ripple, .c transformer primary/secondary peaks, current sharing between legs, .d efficiency (bus power / input power), .e start-up transient from 0 V (inrush peak, time constant)",
+   "source": "tests/l1/plant/full_model.pulsim; transformer ratio from params.yaml",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Ideal 40 V source; bus precharged to the analytic value of each duty (the sweep) or discharged (the start-up, .e, at duty 0.40); DC1+DC2 switched at a fixed duty, firmware out of the loop; resistive bus loads 40 / 200 / 400 W at 400 V (10 / 50 / 100 % of 400 W); duty 0.05–0.45 every 0.05, plus 0.30–0.46 every 0.02; duties whose steady bus would exceed 450 V are skipped; each run held until the bus is steady",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-04",
+   "tab": "model",
+   "level": "L1",
+   "title": "Inverter open loop, no load: filter behaviour",
+   "criterion": "INFO: .a output voltage vs modulation index, .b output spectrum peak 1–50 kHz (10 kHz lines of the 100 µs duty update excluded) vs the analytic resonance 1/(2π√(LC)) (L = AC inductors + choke differential inductance, C = C113 + damping capacitor)",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Ideal 400 V bus (boost disconnected); fixed 50 Hz sinusoidal modulation imposed on the bridge; relay open (filter unloaded)",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-05",
+   "tab": "model",
+   "level": "L1",
+   "title": "Inverter open loop into a resistor: modulation index sweep",
+   "criterion": ".a output fundamental within ±5 % of m·Vbus/√2 minus the first-order dead-time loss, a square wave of 2·td·f·Vbus in phase with the current (PASS/FAIL). INFO: .b output THD, .c output current, .d losses (bus power − load power, and the bridge share)",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Ideal 400 V bus; fixed 50 Hz modulation, index 0.2–1.0 every 0.2; relay closed on a resistor sized for 400 W at 230 V",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-06",
+   "tab": "model",
+   "level": "L1",
+   "title": "Inverter open loop into the grid: amplitude and phase steps",
+   "criterion": ".a P and Q within ±10 % of |S| of the 50 Hz phasor solution of the filter network, driven by the bridge voltage the simulation produced (fundamental of V(INV_A)−V(INV_B) over a full-resolution cycle) (PASS/FAIL, dead time 0). INFO: .b grid current THD, .c the same command with 100 ns dead time, .d the P and Q predicted from the ideal gate pattern instead, which shows how stiff the connection is: the bridge loses about 0.15 % of its voltage to second-order effects (C120 hard-switched at zero dead time), worth about 3 A at 0.17 Ω",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Ideal 400 V bus; modulation synchronized to the 230 V / 50 Hz grid by the test, duty updated every 100 µs as on the board; relay closed; commands aimed at P = ±200, +400 W and Q = ±200 var; 10 ns step (the filter impedance is about 0.17 Ω at 50 Hz, so 400 W needs only about 0.3 V between bridge and grid)",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-07",
+   "tab": "model",
+   "level": "L1",
+   "title": "Inverter dead-time effect",
+   "criterion": "INFO: output voltage loss and distortion with dead time 0 / 100 / 200 ns, against the analytic dead-time voltage error",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "As L1-MOD-05 at index 0.8, 10 ns step",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-08",
+   "tab": "model",
+   "level": "L1",
+   "title": "Measurement chain: what the firmware reads vs the physical quantity",
+   "criterion": ".a each boost measurement (ILow1, VDCBus, VLow) equals the physical quantity in scale and sign within 1 % (PASS/FAIL); .b ILow1 sampled at the simulation's instant (control tick, middle of the low switch's off-time) within 2 % of ILow1 at the board's ADC instant (0.06·PER on the up-count, just after the middle of the on-time) (PASS/FAIL; the mismatch found in #3 H2, drives contract app-v2); .c inverter VAC and IAC at m = 0.8 into the resistor (INFO)",
+   "source": "tests/l1/contract.json; board ADC trigger (HRTIM, 0.06·PER up-count)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06: tests/l1/model_validation/test_model_open_loop.py (runs on demand, about 20 min on 8 cores)",
+   "conditions": "Runs of L1-MOD-03 (both legs, duty 0.40, 200 W) and L1-MOD-05 (m = 0.8); full-resolution traces over the last 2 ms",
+   "hardware": "not defined yet"
+  },
+  {
+   "id": "L1-MOD-09",
+   "tab": "model",
+   "level": "L1",
+   "title": "Boost plant identification for PID tuning",
+   "criterion": "INFO: linear models identified from small steps on the switched model: duty → input inductor current (current loop plant) and current → bus voltage (voltage loop plant), at 10 / 50 / 100 % of 400 W and 400 V, each leg and both; fitted first-order plus delay (for SIMC) and second-order transfer functions, with the fit error",
+   "conditions": "Open loop (firmware out of the loop), bus at 400 V with the load of each operating point, duty steps of ±0.01 around the operating duty",
+   "source": "tests/l1/plant/open_loop.py",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+  },
+  {
+   "id": "L0-BST-01",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Invalid init or measurements never enable a leg",
+   "criterion": "",
+   "source": "`BoostConverter::init`, `isLeg1Enabled`, `isLeg2Enabled`",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-BST-02",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Leg 1 takes priority up to its current limit, leg 2 takes the excess, leg 2 is cleared when its demand stops",
+   "criterion": "",
+   "source": "`splitCurrentReference`",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-BST-03",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Cold-loop saturation sets the total current reference",
+   "criterion": "",
+   "source": "voltage PID bounds",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-BST-04",
+   "tab": "boost",
+   "level": "L0",
+   "title": "MPPT perturb and observe: direction, turnaround at bounds, voltage ignored",
+   "criterion": "",
+   "source": "`Mppt`, `MPPT_CURRENT_STEP` = 0.1 A",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-BST-05",
+   "tab": "boost",
+   "level": "L0",
+   "title": "STARTUP current clamp; STARTUP to BUSREG resets nothing; IDLE resets all",
+   "criterion": ".a STARTUP regulates toward VBusRef with the total current clamped to startupCurrentMax, leg 1 only; .b STARTUP → BUSREG keeps PID states, references and burst (leg 1 duty = an uninterrupted mirror PID); .c IDLE, and an active mode entered from IDLE, reset everything and start burst fully skipped",
+   "source": "`setStartupCurrentMax`, `setMode`; `startup_current_max` = 0.25 A",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06 (ADR 0003)"
+  },
+  {
+   "id": "L0-BST-06",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Current-driven burst on leg 1",
+   "criterion": ".a from full skipping the skip count falls by one per hot loop while ILow1 < reference, then the PID runs; .b at minimum duty with ILow1 > reference skipping starts and follows the current error within [0, period]; .c the PID keeps its state across burst (duty held while skipping; continuous duty = an uninterrupted mirror PID); .d no burst while leg 2 has demand; .e a zero period is rejected and without burst leg 1 never skips",
+   "source": "`setBurst`, `hotLoop`; `boost_burst_period` = 200",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06 (ADR 0003)"
+  },
+  {
+   "id": "L0-BST-07",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Over-voltage full burst; over-voltage and over-current trip",
+   "criterion": ".a above 440 V every period is skipped and the PID held, below it the current error drives burst again; .b above 460 V the boost trips (legs off, outputs cleared), latched until IDLE; .c a leg current above 8 A trips, exactly 8 A does not; .d inconsistent settings are rejected, unconfigured protection never trips",
+   "source": "`setProtection`; 440 V, 460 V, 8 A",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06 (ADR 0003)"
+  },
+  {
+   "id": "L0-BST-08",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Voltage PID gain scheduled with VBusRef / VLow",
+   "criterion": ".a Kp = gain · clamp(VBusRef, 390, 410) / clamp(VLow, 24, 48) at each STARTUP/BUSREG cold loop, not in MPPT; .b scheduling does not reset the PID (total reference = an uninterrupted mirror PID with the scheduled Kp); .c inconsistent schedules are rejected",
+   "source": "`setVoltageGainSchedule`; gain 2.6/6 (Andres)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06 (ADR 0003)"
+  },
+  {
+   "id": "L0-BST-09",
+   "tab": "boost",
+   "level": "L0",
+   "title": "Leg 2 starts only above a demand threshold; below it, off and leg 1's burst kept",
+   "criterion": ".a a leg-2 demand of one float step (4.8e-7 A) or 1 mA keeps leg 2 off, its duty 0, in BUSREG and MPPT; .b such a demand does not cancel leg 1's burst; .c a clear demand (1 A) still starts leg 2 with that reference; .d INFO leg-2 starts over a noisy 5.4–5.6 A ramp. Threshold value to choose (#5)",
+   "source": "`splitCurrentReference`",
+   "status": "implemented",
+   "status_note": "Test implemented 2026-11-06; fails until the threshold is implemented (#5)"
+  },
+  {
+   "id": "L0-PWR-01",
+   "tab": "boost",
+   "level": "L0",
+   "title": "PWM duty limits across HRTIM timing units with different frequencies",
+   "criterion": "Host harness around the real Power.cpp (devicetree arrays from the uSolarVerter overlay, recording HRTIM stand-in, SPIN stubs): per-unit min/max counts from each unit's own period (200 kHz boost, 50 kHz inverter); clamps sent to the driver per leg; limits after a frequency change; a limit set before init; the ALL raw variants clamp each leg to its own limits; the inverter duty clamp; the exact setup sequence of main.cpp",
+   "source": "zephyr/modules/owntech_shield_api/zephyr/src/Power.cpp `setDutyCycleMin`, `setDutyCycleRaw`",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, follow-up (#6)"
+  },
+  {
+   "id": "L1-BST-01",
+   "tab": "boost",
+   "level": "L1",
+   "title": "STARTUP from 0 V to 400 V",
+   "criterion": "Bus rises from 0 to 400 V with the total current reference within the 0.25 A STARTUP clamp; leg 2 never enabled; physical current below the 8 A trip",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Ideal 40 V source; bus discharged; light bus load",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-02",
+   "tab": "boost",
+   "level": "L1",
+   "title": "BUSREG load steps",
+   "criterion": ".a VDCBus stays within 380–420 V (±5 %) during every step and is back within 395–405 V within 100 ms (PASS/FAIL); INFO: overshoot, undershoot, settling time, current-reference saturation",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented",
+   "conditions": "BUSREG at 400 V, real firmware on the switched model; steps up and down between 10, 50 and 100 % of 400 W (10→50→100→50→10 %); through the application until the boost-object harness exists",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-03",
+   "tab": "boost",
+   "level": "L1",
+   "title": "STARTUP → BUSREG hand-over",
+   "criterion": "No bus sag below 395 V when BUSREG takes over at 400 V under load; nothing reset at the switch (the #3 transition, ADR 0003)",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Real sequence from 0 V, BUSREG commanded once the ramp reaches 400 V; 50 % load",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-04",
+   "tab": "boost",
+   "level": "L1",
+   "title": "Light load: current-driven burst over a long run",
+   "criterion": "Burst keeps the bus within 395–405 V at 1–10 % load over 1 s; skip count and bus ripple INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Bus at 400 V; load 1–2 % of rated; 1 s or more",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-05",
+   "tab": "boost",
+   "level": "L1",
+   "title": "Current split between legs",
+   "criterion": "Leg 1 takes the demand up to its limit, leg 2 the excess; leg 2 off when its demand stops",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "BUSREG at 400 V; load ramp 0 → 400 W → 0",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-06",
+   "tab": "boost",
+   "level": "L1",
+   "title": "MPPT on the PV panel",
+   "criterion": "Settles within 2 % of the panel's maximum power; tracking efficiency and settling time INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Lambert W panel at 100 % light; bus load sized for the MPP",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-07",
+   "tab": "boost",
+   "level": "L1",
+   "title": "MPPT under light changes",
+   "criterion": "Recovers the MPP within 2 % after a cloud step (100 → 30 %) and a recovery ramp; INFO: energy lost during the transient",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Lambert W panel; light step and ramp",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-08",
+   "tab": "boost",
+   "level": "L1",
+   "title": "Every boost mode → every other mode",
+   "criterion": "Legs stopped on the switching tick; no current above the limits; peak currents INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "All pairs of IDLE / STARTUP / BUSREG / MPPT at representative operating points",
+   "harness": "boost object alone in its own C-Block, on the boost part of the model"
+  },
+  {
+   "id": "L1-BST-09",
+   "tab": "boost",
+   "level": "L1",
+   "title": "PID tuning comparison",
+   "criterion": "INFO: for each tuning, gain and phase margins and crossover on the identified plants (L1-MOD-09), then L1-BST-02 load steps, L1-BST-03 STARTUP → BUSREG hand-over (the #3 transition) and L1-BST-01 start-up on the switched model with the real firmware: overshoot, undershoot, settling, duty and reference saturation",
+   "conditions": "Tunings: today's firmware (voltage Kp 0.05, Ti 0.1 s; current Kp 0.000215, Ti 75.2 µs); Jean's AI fit (voltage Kp 0.18, Ti 60 ms; current Kp 0.0005, Ti 33.3 µs); Andres Vazquez Sieber's bench-tested values (core-micro-verter-boost 43e249e: current Kp 0.002712, Ti 341.3 µs, plus a 100 Hz PR, Kr 0.91; voltage Kp 0.433·Vbus/Vin ≈ 4.8 A/V at 36 V, Ti 4.57 ms), run with today's output bounds and, separately, with his (duty 0.05–0.60, current reference ±0.25 A); Skogestad SIMC on the identified plants; a crossover / phase-margin tuner in two settings (robust, fast), as MATLAB's pidTuner slider. Same PID form and output bounds as the firmware; constants overridden in the test build only (production unchanged until one is chosen)",
+   "source": "src/app/control_step.h boost_voltage_params, boost_current_params",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+  },
+  {
+   "id": "L0-GOB-01",
+   "tab": "observer",
+   "level": "L0",
+   "title": "Not operable before init; invalid config rejected",
+   "criterion": "",
+   "source": "`GridObserver::init`, `canOperate`",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-GOB-02",
+   "tab": "observer",
+   "level": "L0",
+   "title": "Qualification dwell; restart on dropout; no nuisance trip when the grid is absent at startup",
+   "criterion": "",
+   "source": "`qualification_time_s` = 1 s",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-GOB-03",
+   "tab": "observer",
+   "level": "L0",
+   "title": "RMS and frequency estimates accurate on a clean grid",
+   "criterion": "",
+   "source": "`getVoltageRms`, `getFrequencyHz`",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-GOB-04",
+   "tab": "observer",
+   "level": "L0",
+   "title": "UV, OV, UF, OF trip after their delay; shorter events do not trip",
+   "criterion": "",
+   "source": "207–253 V, 47.5–52.5 Hz, 0.1 s delays in `grid_observer_config`",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-GOB-05",
+   "tab": "observer",
+   "level": "L0",
+   "title": "Trip latches; clearing needs a full healthy interval and open-relay feedback",
+   "criterion": "",
+   "source": "`clearTrip`",
+   "status": "implemented",
+   "status_note": "Migrated"
+  },
+  {
+   "id": "L0-GOB-06",
+   "tab": "observer",
+   "level": "L0",
+   "title": "Invalid measurement trips with reason `InvalidMeasurement`",
+   "criterion": "",
+   "source": "`update(..., measurements_valid)`",
+   "status": "implemented",
+   "status_note": "Migrated (already covered by the original test)"
+  },
+  {
+   "id": "L1-GOB-01",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Clean grid: estimates and qualification",
+   "criterion": "RMS within ±1 %, frequency within ±0.05 Hz of the grid; qualified after 1 s ± 1 tick",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "230 V / 50 Hz, then 210 / 250 V and 49 / 51 Hz steady",
+   "studies": [
+    "grid-steady-*"
+   ],
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L1-GOB-02",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Window limits",
+   "criterion": "Steps just inside each limit (UV 207, OV 253 V, UF 47.5, OF 52.5 Hz) never trip; just outside they trip within 0.1 s + 1 tick with the right reason",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Steps from nominal to ±1 % of each limit, both sides",
+   "studies": [
+    "grid-fault-*"
+   ],
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L1-GOB-03",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Short events do not trip",
+   "criterion": "Out-of-window events shorter than the 0.1 s delay never trip",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Each fault for 50 and 90 ms",
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L1-GOB-04",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Trip latch and recovery",
+   "criterion": "Trip stays latched while the grid recovers; clearTrip succeeds only after a full healthy interval with the relay open",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Fault, recovery, clearTrip at several times",
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L1-GOB-05",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Waveform quality",
+   "criterion": "RMS and frequency stay within the L1-GOB-01 tolerances and no trip with 3rd/5th harmonics at grid-standard levels, a DC offset and measurement noise",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Distorted 230 V / 50 Hz grids",
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L1-GOB-06",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Phase jumps, frequency ramps, sags and swells",
+   "criterion": "No nuisance trip on phase jumps of 10–60°; frequency ramps (ROCOF) and sag/swell profiles trip only when they leave the window; frequency transient INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Profiles applied from nominal",
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L1-GOB-07",
+   "tab": "observer",
+   "level": "L1",
+   "title": "Grid-code interface-protection sequence",
+   "criterion": "Passes the chosen standard's interface-protection test sequence",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06; standard not chosen yet",
+   "conditions": "Standard to be chosen (e.g. EN 50549-1 or VDE-AR-N 4105)",
+   "harness": "grid observer alone in its own C-Block, fed through the model's VAC sensing"
+  },
+  {
+   "id": "L0-GFL-01",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Init validation; invalid config latches `VSI_FAULT_INVALID_CONFIGURATION`",
+   "criterion": "",
+   "source": "library README, `init`",
+   "status": "implemented",
+   "status_note": "Implemented",
+   "verdict_type": "PASS/FAIL"
+  },
+  {
+   "id": "L0-GFL-02",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "PLL locks on a clean 230 V / 50 Hz grid; synchronization only never requests PWM or relay",
+   "criterion": "",
+   "source": "`getSync`, `isPwmRequested`",
+   "status": "implemented",
+   "status_note": "Implemented",
+   "verdict_type": "PASS/FAIL; lock time, phase and frequency error `INFO`"
+  },
+  {
+   "id": "L0-GFL-03",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "PLL tracks a 50 → 51 Hz step (20 ms mean) and synchronizes again inside the library's ±5 % frequency window",
+   "criterion": "",
+   "source": "`getw`, `synchronizationAligned` (±5 % ω, |Vq| < 0.1 V)",
+   "status": "implemented",
+   "status_note": "Implemented; .b FAIL, #1",
+   "verdict_type": "PASS/FAIL; tracking time, ripple `INFO`"
+  },
+  {
+   "id": "L0-GFL-04",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Mode lifecycle OFF → SYNC → PWM_WAIT → PWM_SETTLE → CONNECT → CONNECTED → RUN → STOPPING → DISCONNECT → OFF with feedback; 1 s connection and disconnection timeouts; connection lost; sync lost while awaiting the relay",
+   "criterion": "",
+   "source": "`vsi_mode_t`, `_connection_timeout`",
+   "status": "implemented",
+   "status_note": "Implemented; PWM start-up states added 2026-11-06 (library 1b4fd06)",
+   "verdict_type": "PASS/FAIL"
+  },
+  {
+   "id": "L0-GFL-05",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Bad grid quality blocks SYNC and trips CONNECT/CONNECTED/RUN; `clearFault` needs good quality and an open relay",
+   "criterion": "",
+   "source": "`setGridQuality`, `clearFault`",
+   "status": "implemented",
+   "status_note": "Implemented",
+   "verdict_type": "PASS/FAIL"
+  },
+  {
+   "id": "L0-GFL-06",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Non-finite measurement, non-positive bus, invalid references latch a fault with 0.5 duty and PWM off; first cause kept; requests ignored until cleared",
+   "criterion": "",
+   "source": "library README (faults)",
+   "status": "implemented",
+   "status_note": "Implemented",
+   "verdict_type": "PASS/FAIL"
+  },
+  {
+   "id": "L0-GFL-07",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Duty exactly 0.5 in OFF and SYNC; duty = α / (2 · V_bus) + 0.5 otherwise, unclamped",
+   "criterion": "",
+   "source": "library README (`calculateDuty`)",
+   "status": "implemented",
+   "status_note": "Implemented",
+   "verdict_type": "PASS/FAIL"
+  },
+  {
+   "id": "L0-GFL-08",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Cold-start synchronization at 47.6, 49, 50, 51 and 52.4 Hz from four grid angles (5 s horizon); settled frequency estimate within ±5 %",
+   "criterion": "",
+   "source": "library README (±5 % frequency window), observer window 47.5–52.5 Hz",
+   "status": "implemented",
+   "status_note": "Implemented; .a, .b, .d, .e FAIL, [#1](https://github.com/luizvilla/Core/issues/1)",
+   "verdict_type": "PASS/FAIL; worst lock time and transient `INFO`"
+  },
+  {
+   "id": "L0-GFL-09",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "SOGI orthogonality on a clean grid",
+   "criterion": ".a |β|/|α| fundamental ratio 1 ± 2 % and .b phase α→β 90° ± 1° at every frequency, measured once the PLL has settled (PASS/FAIL); INFO: α amplitude and phase error against the input",
+   "conditions": "Clean 230 V sine at 47.5, 49, 50, 51, 52.5 Hz; 10 kHz sampling; SOGI tuned to the PLL estimate (as in bcb7e71)",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+  },
+  {
+   "id": "L0-GFL-10",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "SOGI and PLL with grid harmonics",
+   "criterion": ".a bench-measured harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %) at 47.6, 49.5, 50, 50.5 and 52.4 Hz: synchronizes within 8 s, period-averaged |Vq| below 1 % of the peak and averaged ω within 1 % of the grid (PASS/FAIL); .d EN 50160 limit harmonics (5 / 6 / 5 / 1.5 / 3.5 / 3 %) at 50 Hz: synchronizes (PASS/FAIL); INFO .b peak instantaneous |Vq| (the ripple the earlier instantaneous criterion judged), .c peak averaged |Vq|, .e instantaneous |Vq| with EN 50160 harmonics",
+   "conditions": "Library alone on a synthetic grid with harmonics; synchronization judged on one-period averages (library fix 9bfbaee, #7)",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (#7)"
+  },
+  {
+   "id": "L0-GFL-11",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "SOGI and PLL with measurement noise and quantization",
+   "criterion": ".a synchronization holds and Vq stays below 0.1 V (PASS/FAIL); INFO: noise rms of α and β relative to the input noise (β is a scaled first difference of α, so wide-band noise reaches it almost unattenuated), θ jitter",
+   "conditions": "White noise 0.1–3 V rms on VAC, 12-bit quantization of a ±400 V range, PWM-frequency ripple aliased into the 10 kHz samples",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+  },
+  {
+   "id": "L0-GFL-12",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "SOGI with held or irregular VAC samples",
+   "criterion": "INFO: β spikes and Vq transients when VAC repeats (held sample) every 2nd / 10th tick or is delivered with jitter; the sample rate the SOGI assumes (Ts) differs from the delivery rate",
+   "conditions": "Clean 50 Hz grid; VAC held as the sensor reader does when no fresh sample arrives",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+  },
+  {
+   "id": "L0-GFL-13",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "SOGI with a DC offset on VAC",
+   "criterion": ".a VAC offset −5.7 V (bench) and ±10 V: synchronizes, averaged |Vq| below 1 % of the peak (PASS/FAIL); .b peak instantaneous |Vq| (INFO); .c the bench grid as measured (harmonics and −5.7 V offset) at 50 Hz synchronizes (PASS/FAIL)",
+   "conditions": "Clean 50 Hz grid plus a constant offset",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (#7)"
+  },
+  {
+   "id": "L0-GFL-14",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "PLL dynamics: phase jumps, frequency steps and ramps",
+   "criterion": "INFO: settling time (2 % band) and overshoot of θ error and ω after phase jumps of 10–60° and frequency steps of ±0.5/±1 Hz; steady phase error during ROCOF ramps of 0.5–2 Hz/s; small-signal bandwidth and damping from the step responses",
+   "conditions": "Clean 230 V grid, from synchronized",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06 with Luiz (after discussion with Jean), not implemented"
+  },
+  {
+   "id": "L0-GFL-15",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Replay of board VAC logs",
+   "criterion": "INFO: α, β, Vd, Vq and θ computed by the library from logged board VAC samples, compared with the α and β the board logged at the same time (same code, same samples: any difference is in the logging or the sample delivery)",
+   "conditions": "Board logs of raw VAC and the firmware's α, β (to be provided by Jean)",
+   "source": "single_phase_inverter Sogi::calc and singlePhaseInverterFollowing (PLL), library alone",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06; needs board logs"
+  },
+  {
+   "id": "L0-GFL-16",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "PWM start-up before relay closure (PWM_WAIT, PWM_SETTLE)",
+   "criterion": ".a PWM at exactly 0.5 with the relay open, held without acknowledgement; .b once acknowledged, the waveform links within ±0.01 of neutral near a zero crossing; .c 10 grid periods of settling with the relay open, then GRID_CONNECT; .d acknowledgement loss restarts the settling, and faults PWM_UPDATE_FAILED in GRID_CONNECT; .e closed-contact feedback, a phase jump and bad quality fault EXTERNAL, SYNC_LOST, BAD_GRID_QUALITY in PWM_WAIT and PWM_SETTLE; .f invalid tolerances rejected, zero periods hold, a new count restarts the dwell",
+   "source": "`setPwmEnabled`, `setPwmStartDutyTolerance`, `setPwmSettleCycles` (library 1b4fd06)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-06"
+  },
+  {
+   "id": "L0-GFL-17",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Current-loop settings from the application (PI gains, limit, current SOGI gain, output advance)",
+   "criterion": ".a defaults equal the historical values (Kp 0.001 V/A, Ti 0.3 ms, ±30 V, current SOGI 500 rad/s, no advance); .b invalid values (zero, negative, NaN, infinity, Kr·Ts ≥ 1, advance outside 0–2) rejected, configuration unchanged; .c settings kept across init(), also when made before it; .d in RUN, gains change live (correction Kp·error on the next step) and the advance is accepted, while the limit and the SOGI gain are refused; .e the advance rotates the output by advance·ω·Ts with the magnitude unchanged",
+   "source": "`setCurrentPiGains`, `setCurrentPiLimit`, `setCurrentSogiGain`, `setOutputPhaseAdvance` (library ab35e2f)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-10"
+  },
+  {
+   "id": "L1-GFL-01",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "Connect (PWM start-up at neutral, 10 periods of settling) → relay → run (I_d step) → stop → disconnect, with relay feedback",
+   "criterion": "",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED: needs the inverter harness and a relay model",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-02",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "Grid fault during RUN: fault latched, PWM dropped immediately",
+   "criterion": "",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED: needs the inverter harness and a relay model",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-03",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "Relay never confirms closing: fault after the 1 s timeout",
+   "criterion": "",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED: needs the inverter harness and a relay model",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-04",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "PLL on the model's sensed grid",
+   "criterion": "Synchronizes at 47.6, 49, 50, 51 and 52.4 Hz within the library's ±5 % window; lock time INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06; gated by #1",
+   "conditions": "Inverter in SYNC on the model grid",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-05",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "RUN: active current steps",
+   "criterion": "Grid current follows I_d steps; current THD and step response INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "400 V bus (ideal); relay closed; I_d 0 → 50 → 100 % of 400 W",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-06",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "RUN: reactive current",
+   "criterion": "Grid current follows I_q references; power factor INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "As L1-GFL-05 with I_q steps",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-07",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "RUN: bus voltage variation",
+   "criterion": "Current tracking holds while the DC bus moves within its operating range (e.g. 380–420 V)",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "As L1-GFL-05 with a bus ramp",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-08",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "RUN: phase jump",
+   "criterion": "Stays synchronized or faults cleanly on a grid phase jump; current peak INFO",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "As L1-GFL-05 with 10–60° jumps",
+   "harness": "inverter library alone in its own C-Block (not controlStep), with a relay model"
+  },
+  {
+   "id": "L1-GFL-09",
+   "title": "Bench connection on the switched model through the application: step 1 → step 2 → relay at a voltage zero crossing → GRID_CONNECTED",
+   "criterion": ".a sequence PWM_SETTLE → GRID_CONNECT → GRID_CONNECTED with no fault and no bench trip; .b contact instant within ±10° of a grid zero crossing; .c closing current peak < 1.5 A; .d residual current in GRID_CONNECTED < 0.05 A RMS from 100 ms after the contact; INFO .e connection transient",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); grid behind the cold bulb (40 Ω) and behind the IEC 60725 reference impedance (0.4 Ω + 0.8 mH)",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-10",
+   "title": "Current loop: I_d step 0 → 0.1 A on the IEC 60725 reference grid",
+   "criterion": ".a overshoot ≤ 20 %; .b 5 % settling ≤ 50 ms; .c final I_d within ±5 % (fundamental of the line current); .d |I_q| ≤ 0.02 A in steady state; INFO .e rise time, current THD",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); IEC 60725 reference impedance",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-11",
+   "title": "Current loop: I_d step 0 → 0.1 A through the cold bulb (bench replica)",
+   "criterion": ".a no bench trip; .b final I_d within ±10 % after 0.4 s; INFO .c overshoot, settling, residual drift before the step (the PCC voltage feedforward cancels the bulb resistance)",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); grid behind 40 Ω",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-12",
+   "title": "Bridge duty limits at 400 V: driver default 0.1–0.9 against 0.05–0.95",
+   "criterion": "INFO: fraction of periods with the duty clipped, line-current peak and THD with I_d,ref = 0; with 0.1–0.9 the bridge reaches only ±320 V against the 325 V grid peak",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.1–0.9 and 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s)",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L1-GFL-13",
+   "title": "Current-loop candidates compared (library today and tuned variants)",
+   "criterion": "INFO: per candidate (current SOGI gain, Kp, Ti, delay compensation) and per grid: L1-GFL-09…11 metrics side by side; feeds the tuning decision (docs/testing/inverter-current-loop-design.md)",
+   "conditions": "Switched model, real application (C-Block, contract app-v3: bridge and relay driven by controlStep), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command; bench stages OFF → step 1 → step 2 (1.3 s) → INJECT 0.1 A (1.6 s); candidates built from patched copies of single_phase_inverter (tests/l1/design/variant.py)",
+   "tab": "inverter",
+   "level": "L1",
+   "source": "`single_phase_inverter` current PI and SOGI (`init()`), `controlStep` bench stages; tests/l1/scenarios/inverter/",
+   "status": "partial",
+   "status_note": "Defined 2026-11-10: harness (app-v3) implemented, first runs in progress; verdict script pending"
+  },
+  {
+   "id": "L2-INV-00",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 0: open-loop 230 V RMS, no grid",
+   "criterion": ".a output RMS 218–242 V at 400 V; .b 49.9–50.1 Hz; .c no trip, relay open; INFO .d THD, no-load DC current, .e RMS at 340 and 300 V",
+   "conditions": "Stage INV_OPEN_LOOP (menu o), mains unplugged, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-01",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 1: synchronized PWM with the relay open (PWM_SETTLE)",
+   "criterion": ".a inverter-side vs grid-side RMS within ±3 %, .b phase within ±3°, .c same frequency, .d bulb dark, relay open, PWM_SETTLE held; INFO .e Vq, omega, time to PWM_SETTLE",
+   "conditions": "Stage INV_SETTLE (menu c), mains through the bulb, bus 400 V. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-04",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 1b: dry run of the connection, relay power contacts unwired",
+   "criterion": ".a state 8 → 2 → 3 held, relay command and feedback, no fault; .b relay closing time + bounce ≤ 15 ms (20 ms contact time); .c disconnect with x without fault, release time ≤ 15 ms; .d inverter side within ±3 %/±3° of the grid after 10 s in GRID_CONNECTED on an open circuit; INFO .e timings over 3 operations; .f protection test (menu z, 3 A for one period in GRID_CONNECTED): fault and bridge stop in the same period, relay command dropped, latched until x",
+   "conditions": "Stage INV_CONNECT (menu g) with both relay power terminals disconnected, VAC still on the mains, bus 400 V; relay contact timed with a 5 V / 1 kΩ circuit against GPIO 22. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-02",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 2: relay closing disturbance, then zero current (GRID_CONNECT → GRID_CONNECTED)",
+   "criterion": ".a closing current peak < 1.5 A, no trip; .b settled within 100 ms; .c residual current < 0.05 A RMS in GRID_CONNECTED; .d opening only at zero current; INFO .e voltage disturbance",
+   "conditions": "Stage INV_CONNECT (menu g) from PWM_SETTLE: 10 periods, relay, 20 ms contact feedback. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-03",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 3: inject a fixed current (RUN)",
+   "criterion": ".a measured Id within ±10 % of the reference, .b in phase within ±10°, .c grid side within 207–253 V, .d DC source current rises with the reference; INFO .e current THD, P",
+   "conditions": "Stage INV_INJECT (menu j/k, n), reference capped at 0.1 A peak by the bulb (weak grid). Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L2-INV-10",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Bench pre-checks",
+   "criterion": ".a relay on a dead bench: open at start-up (GPIO 22 polarity), closed with the manual test R, open again with R; .b menu and telemetry; .c DC source 400 V, 0.5 A limit; .d bulb in series, breaker reachable",
+   "conditions": "Before any power. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
+   "source": "docs/testing/bench/inverter-session.md",
+   "status": "planned",
+   "status_note": "Defined 2026-11-09: docs/testing/bench/inverter-session.md; firmware stages ready, not run on the board yet",
+   "hardware": "bench"
+  },
+  {
+   "id": "L0-APP-01",
+   "tab": "app",
+   "level": "L0",
+   "title": "`controlInit` applies the app tuning; a mode change is flagged on its tick only and runs the cold loop on that tick; leg enables follow the controller",
+   "criterion": "",
+   "source": "critical task, mode-change block",
+   "status": "implemented",
+   "status_note": "Implemented"
+  },
+  {
+   "id": "L0-APP-02",
+   "tab": "app",
+   "level": "L0",
+   "title": "Cold loop on the change tick, then every 10th tick; a new mode change restarts the phase",
+   "criterion": "",
+   "source": "`cold_loop_divider` = 10",
+   "status": "implemented",
+   "status_note": "Implemented"
+  },
+  {
+   "id": "L0-APP-03",
+   "tab": "app",
+   "level": "L0",
+   "title": "VAC stale for exactly 200 periods (20 ms) trips the observer with `InvalidMeasurement`; a fresh sample restarts the count; one sample missing at boot does not latch a trip",
+   "criterion": "",
+   "source": "`grid_voltage_stale_ticks` = 200; `gridObserver.cpp` (no trip latched at startup)",
+   "status": "implemented",
+   "status_note": "Implemented; .c FAIL, [#2](https://github.com/luizvilla/Core/issues/2)"
+  },
+  {
+   "id": "L0-APP-04",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bridge PWM never enabled and the inverter never requests PWM or relay, in any mode, with or without a sync request",
+   "criterion": "",
+   "source": "critical task, \"Synchronization only\"",
+   "status": "implemented",
+   "status_note": "Implemented"
+  },
+  {
+   "id": "L0-APP-05",
+   "tab": "app",
+   "level": "L0",
+   "title": "Synchronization only after observer qualification; an observer trip removes it on the trip tick; times to qualification and sync `INFO`",
+   "criterion": "",
+   "source": "`setGridQuality(grid_observer.canOperate())`",
+   "status": "implemented",
+   "status_note": "Implemented"
+  },
+  {
+   "id": "L0-APP-06",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench step 0: open-loop 230 V RMS",
+   "criterion": ".a ramp to 325.3 V / VDCBus in index/rate seconds, 50 Hz, bridge on, relay never commanded, no grid needed; .b low bus saturates the index at 0.95, invalid bus stops the bridge, OFF stops it and re-entry ramps from zero",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`, `relay_close_delay`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09"
+  },
+  {
+   "id": "L0-APP-07",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench steps 1–3: settle, connect through the relay, inject",
+   "criterion": ".a CONNECT settles 10 periods with PWM and the relay open, then commands the relay (within half a period, at its zero-crossing instant) and reaches GRID_CONNECTED after the 20 ms contact time; .b INJECT runs the current loop with the reference capped at 0.1 A, back to CONNECT stops it; .c OFF from the grid opens the relay and stops the bridge, SETTLE from the grid goes through OFF; .d the relay command leads a grid-voltage zero crossing by the relay closing time (app::relay_close_delay), within 4°, at several start phases and 49.5/50.5 Hz",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09"
+  },
+  {
+   "id": "L0-APP-08",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench current protection",
+   "criterion": ".a |IAC| above 1.5 A stops the bridge and opens the relay in the open-loop and grid stages, latched until OFF, which clears it",
+   "source": "`controlStep` inverter bench stages; `app::inverter_settle_cycles`, `open_loop_*`, `inject_current_max`, `bench_inverter_current_trip`, `relay_contact_ticks`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09"
+  },
+  {
+   "id": "L0-APP-09",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench-measured distorted grid: observer qualifies, step 1 reaches PWM_SETTLE",
+   "criterion": ".a on a grid with the bench harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %) and a −5.7 V offset, the grid observer qualifies, never trips, and the SETTLE stage reaches PWM_SETTLE within 5 s (PASS/FAIL); INFO .b time to qualification, .c time to PWM_SETTLE. Fails when the observer is fed the instantaneous SOGI amplitude and PLL frequency",
+   "source": "`controlStep`: observer fed one-period averages (`GridObserver::updateEstimates`)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (#7)"
+  },
+  {
+   "id": "L1-APP-01",
+   "tab": "app",
+   "level": "L1",
+   "title": "IDLE on a healthy grid",
+   "criterion": "legs off; observer qualifies after 1 s ± 1 tick of continuously eligible estimates; PLL lock time `INFO`",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented (.a–.b; .c INFO)",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-02",
+   "tab": "app",
+   "level": "L1",
+   "title": "STARTUP from 0 V",
+   "criterion": ".a total current reference within the 0.25 A STARTUP clamp, .b physical leg-1 current below the 8 A trip at every electrical step, .c leg 2 never enabled (first 50 ms); .d full start-up (about 1 s) BLOCKED until run",
+   "source": "",
+   "status": "partial",
+   "status_note": "Rewritten 2026-11-06 for ADR 0003 (was: 200 V/s ramp, 1 A)",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-03",
+   "tab": "app",
+   "level": "L1",
+   "title": "BUSREG at 400 V",
+   "criterion": "VDCBus within 395–405 V during 80–100 ms after load step at 50 ms; overshoot/current extrema `INFO`",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented; preserve FAIL if outside band",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-04",
+   "tab": "app",
+   "level": "L1",
+   "title": "Light load: current-driven burst",
+   "criterion": ".a BUSREG entered from IDLE starts fully skipped, .b leg 2 stays off, .c bus within 380–420 V over the run, .d the skip count leaves full skipping once current is needed; .e skip range, fraction bursting and bus range INFO",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Rewritten 2026-11-06 for ADR 0003 (was: 395/405 V pause and release)",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-05",
+   "tab": "app",
+   "level": "L1",
+   "title": "MPPT on the PV curve",
+   "criterion": "settles near the maximum power point; tracking efficiency `INFO`",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED (sustained MPPT fixture)",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-06",
+   "tab": "app",
+   "level": "L1",
+   "title": "Synchronization only",
+   "criterion": "inverter synchronized; bridge PWM never enabled",
+   "source": "",
+   "status": "partial",
+   "status_note": "Nominal integration runs; formal verdict gated by finding #1",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-07",
+   "tab": "app",
+   "level": "L1",
+   "title": "Grid steps out of window (UV, OV, UF, OF)",
+   "criterion": "trip within 0.1 s + 1 tick; synchronization revoked",
+   "source": "",
+   "status": "partial",
+   "status_note": "Fault scenarios pending; finding #1 verdict gate",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-08",
+   "tab": "app",
+   "level": "L1",
+   "title": "VAC samples lost for more than 20 ms",
+   "criterion": "trip with reason `InvalidMeasurement` after age 200",
+   "source": "",
+   "status": "implemented",
+   "status_note": "Implemented (.a)",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-09",
+   "tab": "app",
+   "level": "L1",
+   "title": "Every mode → every other mode",
+   "criterion": "legs stopped on the switching tick; peak current `INFO`",
+   "source": "",
+   "status": "partial",
+   "status_note": "Switched transition scenarios pending",
+   "model": "switched"
+  },
+  {
+   "id": "L1-APP-10",
+   "tab": "app",
+   "level": "L1",
+   "title": "Turn-on to MPPT",
+   "criterion": "IDLE → STARTUP → BUSREG → MPPT from a discharged bus on the PV panel: each mode reached in order, bus within its band, MPP reached; operator stop returns to IDLE with legs off",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Lambert W panel; grid present; operator command sequence",
+   "studies": [
+    "pv-day"
+   ]
+  },
+  {
+   "id": "L1-APP-11",
+   "tab": "app",
+   "level": "L1",
+   "title": "Light changes in MPPT",
+   "criterion": "Cloud step and recovery ramp: MPP recovered, bus stays within limits",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "As L1-APP-10, then light 100 → 30 → 100 %",
+   "studies": [
+    "pv-day"
+   ]
+  },
+  {
+   "id": "L1-APP-12",
+   "tab": "app",
+   "level": "L1",
+   "title": "Sundown and turn-off",
+   "criterion": "Light ramps to dark: no fault, legs stop, return to IDLE on command",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "As L1-APP-10, then light ramp to 0",
+   "studies": [
+    "pv-day"
+   ]
+  },
+  {
+   "id": "L1-APP-13",
+   "tab": "app",
+   "level": "L1",
+   "title": "Grid events while running",
+   "criterion": "Grid fault in each operating mode: trip, synchronization revoked, return to service after recovery",
+   "source": "",
+   "status": "planned",
+   "status_note": "Defined 2026-11-06, not implemented",
+   "conditions": "Faults of L1-GOB-02 during STARTUP, BUSREG and MPPT"
+  },
+  {
+   "id": "L1-APP-14",
+   "tab": "app",
+   "level": "L1",
+   "title": "Fixed-power injection",
+   "criterion": "Inject a commanded power into the grid; power, current THD and bus stability",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
+   "conditions": "Grid-connected operation"
+  },
+  {
+   "id": "L1-APP-15",
+   "tab": "app",
+   "level": "L1",
+   "title": "MPPT into the grid",
+   "criterion": "PV power tracked and injected; overall efficiency INFO",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
+   "conditions": "Grid-connected operation on the PV panel"
+  },
+  {
+   "id": "L1-APP-16",
+   "tab": "app",
+   "level": "L1",
+   "title": "Anti-islanding",
+   "criterion": "Stops injecting within the standard's time when the grid disappears",
+   "source": "",
+   "status": "blocked",
+   "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
+   "conditions": "Grid loss during injection"
+  }
+ ],
+ "retired": {
+  "L1-FWB-01": "superseded by L1-INT-01/-02 (procedure 1.3)",
+  "L0-BST-05 (ramp)": "STARTUP ramp removed by ADR 0003; L0-BST-05 now tests the STARTUP clamp"
+ }
 }
