@@ -153,11 +153,12 @@ static bool inverter_pwm_staged = false;
 static bool bridge_outputs_on = false;
 
 /* Bench calibration of this board (2026-11-09), applied on top of the default conversion:
- * - VDCBus: meter 99.54 V read 96.4 V, meter 399.4 V read 357.4 V, so
- *   V = 1.14898 · reading − 11.221 V (both a gain and an offset error);
+ * - VDCBus: meter 99.54 V read 96.4 V, meter 399.4 V read 388.5 V (default conversion), so
+ *   V = 1.02643 · reading + 0.592 V. (A first fit used 357.4 V at 399.4 V, taken from a capture at
+ *   another bus voltage, and read 435 V at 399.4 V.)
  * - IAC: 0.30 A read with no current (firmware capture, relay open). */
-static constexpr float32_t vdc_bus_cal_gain = 1.14898F;
-static constexpr float32_t vdc_bus_cal_offset = -11.221F;
+static constexpr float32_t vdc_bus_cal_gain = 1.02643F;
+static constexpr float32_t vdc_bus_cal_offset = 0.592F;
 static constexpr float32_t i_ac_cal_offset = -0.30F;
 
 /** @brief Compose the bench calibration with the sensors' default linear conversion. */
@@ -217,8 +218,11 @@ void setup_routine()
     // shield.power.initBoost(LEG2_LOW);
     shield.power.setDeadTime(LEG1_LOW, leg1_low_deadtime_ns, leg1_low_deadtime_ns);
     // shield.power.setDeadTime(LEG2_LOW, leg2_low_deadtime_ns, leg2_low_deadtime_ns);
-    /* Unipolar DC/AC bridge: channels D and E, initially at neutral duty. */
-    if (shield.power.initInverterUnipolar(LEG1_HIGH, LEG2_HIGH) != 0)
+    /* Unipolar DC/AC bridge, initially at neutral duty. Leg A (follows D) must be the leg
+     * driving L: on the uSolarVerter, LEG2_HIGH drives L (FB1/L1) and LEG1_HIGH drives N
+     * (FB2/L3). With LEG1_HIGH as leg A the output was inverted, 180° from the grid (bench
+     * 2026-11-09). Duty updates go to leg A (setInverterDutyCycle below). */
+    if (shield.power.initInverterUnipolar(LEG2_HIGH, LEG1_HIGH) != 0)
     {
         printk("inverter initialization failed\n");
         return;
@@ -594,7 +598,7 @@ void loop_critical_task()
 
     /* Apply paired bridge duty; acknowledge only after PWM is enabled. */
     if (out.bridge_enable &&
-        shield.power.setInverterDutyCycle(LEG1_HIGH, out.bridge_duty) == 0)
+        shield.power.setInverterDutyCycle(LEG2_HIGH, out.bridge_duty) == 0)
     {
         if (inverter_pwm_staged)
         {

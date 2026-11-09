@@ -259,3 +259,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | New L0-APP-09: on the bench-measured grid the observer qualifies in 1.03 s and step 1 reaches PWM_SETTLE in 1.13 s; with the instantaneous feed it never qualifies (checked). L0-APP-05.d window widened from 0.10–0.12 s to 0.10–0.14 s for the averaging latency; L0-GOB (observer alone) unchanged. Full L0: no new failure. Firmware builds |
 | Hardware check | Bench step 1: `sync:` line `grid_ok 1`, inverter state 1 → 9 → 8 |
 
+
+## 2026-11-09 — Bridge leg order (output 180° from the grid) and VDCBus calibration redone
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(bench): bridge leg order …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench step 1: the inverter synchronized but its output was 180° from the grid (isolated probes on both ends). The schematic shows LEG2 drives L and LEG1 drives N, so with LEG1_HIGH as leg A, v_LN = −Vbus·(2D−1). Swapping only the init made the duty update fail (the driver accepts updates on leg A only: -EINVAL, PWM_UPDATE_FAILED), so it no longer synchronized. Separately, the meter read 399.4 V on the bus while the telemetry read about 435 V: the first calibration took its high point (357.4 V) from a capture at another bus voltage |
+| Behaviour change | `initInverterUnipolar(LEG2_HIGH, LEG1_HIGH)` and `setInverterDutyCycle(LEG2_HIGH, …)`. VDCBus calibration from the meter: (99.54 V, 96.4 raw) and (399.4 V, 388.5 raw, back-computed from the 435.3 V reading with the old fit), so V = 1.02643 · raw + 0.592 V instead of 1.14898 · raw − 11.221 V |
+| Evidence | Firmware builds (flash 80 %) |
+| Hardware check | Bench step 1: output in phase with the grid, amplitude within ±3 %; telemetry VDCBus ≈ meter (≈ 399 V) |
