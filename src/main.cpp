@@ -359,11 +359,13 @@ void loop_communication_task()
                static_cast<unsigned int>(app::inverter_settle_cycles));
         inverter_stage = INV_CONNECT;
         relay_test = false;
+        scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'n':
         printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
         inverter_stage = INV_INJECT;
         relay_test = false;
+        scope.start();  /* re-arm: capture this stage's start (or a fault) */
         break;
     case 'j':
         inject_current += inject_current_step;

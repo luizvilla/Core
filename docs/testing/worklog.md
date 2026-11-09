@@ -278,6 +278,6 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Commit | the `feat(telemetry): inverter fault reason …` commit that adds this entry |
 | Files | `src/main.cpp` |
 | Reason | Bench L2-INV-04 (dry run): from PWM_SETTLE (state 8), `g` put the inverter in FAULT (state 7) before the relay was commanded; the telemetry did not say which fault, and the CONNECT capture only triggers on the relay closing |
-| Behaviour change | The `sync:` line ends with `fault <vsi_fault_reason_t>`. In CONNECT and INJECT the scope also triggers when the inverter enters FAULT. No control change |
+| Behaviour change | The `sync:` line ends with `fault <vsi_fault_reason_t>`. In CONNECT and INJECT the scope also triggers when the inverter enters FAULT, and `g` / `n` re-arm it (armed during `c`, it fills on the synchronization before `g`). No control change |
 | Evidence | Firmware builds |
 | Hardware check | Bench: `c`, `g`; read `fault`, download the capture |
