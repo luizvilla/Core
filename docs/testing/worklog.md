@@ -344,6 +344,6 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Commit | the `feat(bench): protection test key …` commit that adds this entry |
 | Files | `src/main.cpp`, `tests/catalogue.json` |
 | Reason | Luiz Villa asked for a last dry-run check before connecting to the mains: the bench current trip exercised end to end on the board |
-| Behaviour change | Menu `z`: the next control period reads IAC as 3 A (above `app::bench_inverter_current_trip`, 1.5 A); the scope's IAC channel shows it. The trip logic itself is unchanged (covered by L0-APP-08). L2-INV-04 gets criterion .f |
+| Behaviour change | Menu `z` (amended the same day: it re-arms the scope with the bench trip as trigger, and the 3 A sample comes 100 ms later so the pre-trigger half is filled; the CONNECT trigger otherwise fires on the relay closing): one control period reads IAC as 3 A (above `app::bench_inverter_current_trip`, 1.5 A); the scope's IAC channel shows it. The trip logic itself is unchanged (covered by L0-APP-08). L2-INV-04 gets criterion .f |
 | Evidence | Firmware builds |
 | Hardware check | Bench L2-INV-04.f: `z` in GRID_CONNECTED → fault, bridge stopped and relay command dropped in the same period, latched until `x` |

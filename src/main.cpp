@@ -152,7 +152,9 @@ static bool scope_fast_connect = true;
 static bool settle_count_test = false;
 /* Menu 'z': protection test, one control period sees an artificial AC current above the bench trip
  * (app::bench_inverter_current_trip); the scope's IAC channel shows it. */
-static volatile bool trip_test_request = false;
+static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the artificial sample (0: none) */
+static constexpr uint16_t trip_test_delay_ticks = 1000U;  /* 100 ms: fills the scope's pre-trigger half at 2 or 10 kHz */
+static bool scope_trigger_on_trip = false;  /* the capture waits for the bench trip (armed by 'z') */
 static constexpr float32_t trip_test_current = 3.0F;  /* A */
 /* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
 static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
@@ -202,6 +204,7 @@ bool scope_trigger()
     }
     /* Grid stages: capture the relay closing, or an inverter fault before it; open loop: the bridge
      * start; otherwise the synchronization. */
+    if (scope_trigger_on_trip) return control.bench_tripped;
     if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT)
         return scope_relay_closed > 0.5F || scope_inverter_mode == static_cast<float32_t>(VSI_FAULT);
     if (inverter_stage == INV_OPEN_LOOP) return scope_bridge_on > 0.5F;
@@ -372,18 +375,21 @@ void loop_communication_task()
     case 'c':
         printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
         inverter_stage = INV_SETTLE;
+        scope_trigger_on_trip = false;
         relay_test = false;
         break;
     case 'g':
         printk("inverter step 2: settle %u periods, close the relay, zero current\n",
                static_cast<unsigned int>(app::inverter_settle_cycles));
         inverter_stage = INV_CONNECT;
+        scope_trigger_on_trip = false;
         relay_test = false;
         scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'n':
         printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
         inverter_stage = INV_INJECT;
+        scope_trigger_on_trip = false;
         relay_test = false;
         scope.start();  /* re-arm: capture this stage's start (or a fault) */
         break;
@@ -456,9 +462,11 @@ void loop_communication_task()
         printk("scope acquisition restarted\n");
         break;
     case 'z':
-        trip_test_request = true;
-        printk("protection test: one period at %.1f A (trip above %.1f A)\n", (double)trip_test_current,
-               (double)app::bench_inverter_current_trip);
+        scope_trigger_on_trip = true;
+        scope.start();  /* re-arm: the capture triggers on the trip */
+        trip_test_countdown = trip_test_delay_ticks;
+        printk("protection test: in 100 ms, one period at %.1f A (trip above %.1f A); scope armed on the trip\n",
+               (double)trip_test_current, (double)app::bench_inverter_current_trip);
         break;
     case 'e':
         settle_count_test = !settle_count_test;
@@ -593,9 +601,8 @@ void loop_critical_task()
 
     meas_data = shield.sensors.getLatestValue(IAC);
     if (meas_data != NO_VALUE) i_ac_value = meas_data;
-    if (trip_test_request)
+    if (trip_test_countdown != 0U && --trip_test_countdown == 0U)
     {
-        trip_test_request = false;
         i_ac_value = trip_test_current;
     }
 
