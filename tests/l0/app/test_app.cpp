@@ -52,6 +52,7 @@
 
 #include <cmath>
 #include <initializer_list>
+#include <string>
 
 namespace {
 
@@ -649,6 +650,36 @@ int main() {
         /** @test L0-APP-09.b: Bench grid: time to observer qualification and to PWM_SETTLE (INFO) */
         tc::info("L0-APP-09.b", "Bench grid: time to observer qualification", qualified / double(ticks_per_s), "s");
         tc::info("L0-APP-09.c", "Bench grid: time to PWM_SETTLE", settle / double(ticks_per_s), "s");
+    }
+    {
+        /** @test L0-APP-09.d: Bench grid, the bench sequence: step 1 (c) held 2 s in PWM_SETTLE, then step 2 (g): no fault, relay closed, GRID_CONNECTED */
+        tc::Criterion c("L0-APP-09.d", "Bench grid: step 1 held 2 s, then step 2: no fault, relay closed, GRID_CONNECTED");
+        ControlState state;
+        Grid grid;
+        grid.h3 = 0.034; grid.h5 = 0.046; grid.h7 = 0.02; grid.offset = -5.7;
+        Relay relay;
+        c.check("controlInit", controlInit(state) == 0);
+        OperatorCommands cmd;
+        cmd.inverter_stage = INV_SETTLE;
+        int settle = -1;
+        for (int n = 1; n <= 5 * ticks_per_s && settle < 0; ++n) {
+            benchStep(state, grid, cmd, relay);
+            if (state.inverter.getMode() == VSI_PWM_SETTLE) settle = n;
+        }
+        for (int n = 0; n < 2 * ticks_per_s; ++n) benchStep(state, grid, cmd, relay);
+        c.check("PWM_SETTLE held in step 1", state.inverter.getMode() == VSI_PWM_SETTLE);
+        cmd.inverter_stage = INV_CONNECT;
+        int fault_tick = -1, connected = -1;
+        for (int n = 1; n <= ticks_per_s && fault_tick < 0; ++n) {
+            benchStep(state, grid, cmd, relay);
+            if (state.inverter.getMode() == VSI_FAULT) fault_tick = n;
+            if (connected < 0 && state.inverter.getMode() == VSI_GRID_CONNECTED) connected = n;
+        }
+        c.check("no fault after g", fault_tick < 0);
+        if (fault_tick >= 0)
+            tc::info("L0-APP-09.d", "fault after g, ticks / reason", fault_tick,
+                     std::to_string(static_cast<int>(state.inverter.getFaultReason())).c_str());
+        c.check("GRID_CONNECTED within 1 s", connected > 0);
     }
 
     return tc::finish();
