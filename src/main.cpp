@@ -139,6 +139,26 @@ static bool burst_running = false;
 /* Stage neutral bridge duty for one control tick before enabling PWM. */
 static bool inverter_pwm_staged = false;
 
+/* Bench calibration of this board (2026-11-09), applied on top of the default conversion:
+ * - VDCBus: meter 99.54 V read 96.4 V, meter 399.4 V read 357.4 V, so
+ *   V = 1.14898 · reading − 11.221 V (both a gain and an offset error);
+ * - IAC: 0.30 A read with no current (firmware capture, relay open). */
+static constexpr float32_t vdc_bus_cal_gain = 1.14898F;
+static constexpr float32_t vdc_bus_cal_offset = -11.221F;
+static constexpr float32_t i_ac_cal_offset = -0.30F;
+
+/** @brief Compose the bench calibration with the sensors' default linear conversion. */
+static void applyBenchCalibration()
+{
+    const float32_t g_bus = shield.sensors.retrieveStoredParameterValue(VDCBus, gain);
+    const float32_t o_bus = shield.sensors.retrieveStoredParameterValue(VDCBus, offset);
+    shield.sensors.setConversionParametersLinear(VDCBus, g_bus * vdc_bus_cal_gain,
+                                                 o_bus * vdc_bus_cal_gain + vdc_bus_cal_offset);
+    const float32_t g_iac = shield.sensors.retrieveStoredParameterValue(IAC, gain);
+    const float32_t o_iac = shield.sensors.retrieveStoredParameterValue(IAC, offset);
+    shield.sensors.setConversionParametersLinear(IAC, g_iac, o_iac + i_ac_cal_offset);
+}
+
 /* Menu 'f': trigger the capture now, whatever the stage (e.g. a synchronization that never comes). */
 static volatile bool scope_force_trigger = false;
 
@@ -205,6 +225,7 @@ void setup_routine()
     shield.sensors.enableSensor(ILow1, ADC_2);
     // shield.sensors.enableSensor(ILow2, ADC_2);
     shield.sensors.enableSensor(IAC, ADC_2);
+    applyBenchCalibration();  /* before the data acquisition starts (critical task) */
 
     spin.gpio.configurePin(relay_pin, OUTPUT);
     spin.gpio.resetPin(relay_pin);  /* relay open at start-up */

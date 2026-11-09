@@ -180,3 +180,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds |
 | Hardware check | Bench: `q`, `c`, wait 2 s, `f`, `r` |
 
+## 2026-11-09 — Bench calibration of VDCBus and IAC (this board)
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(sensors): bench calibration …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench: VDCBus read 96.4 V at 99.54 V (meter) and 357.4 V at 399.4 V; IAC read 0.30 A with no current. Both feed the open-loop index, the inverter duty scaling and the bench current trip |
+| Behaviour change | Yes: after the sensors are enabled, the default linear conversion is composed with V = 1.14898·reading − 11.221 V for VDCBus, and −0.30 A on IAC. Board-specific (values measured on this board) |
+| Evidence | Firmware builds. Two-point fit: 1.14898·96.4 − 11.221 = 99.54 V; 1.14898·357.4 − 11.221 = 399.4 V |
+| Hardware check | Bench: VDCBus telemetry against the meter at 100 V and 400 V; IAC near 0 with no current |
+
