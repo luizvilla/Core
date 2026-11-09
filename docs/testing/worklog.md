@@ -169,3 +169,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds; ScopeMimicry buffer 256 × 12 × 4 B = 12 288 B, within its 65 535 B limit (static_assert) |
 | Hardware check | Bench step 0 |
 
+## 2026-11-09 — Firmware scope: forced trigger (menu f)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(scope): forced trigger …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench step 1 never synchronized, so the capture (triggered by Sync rising) never fired and `r` returned the previous capture (finding #7) |
+| Behaviour change | Menu `f` triggers the capture at once in any stage; otherwise unchanged |
+| Evidence | Firmware builds |
+| Hardware check | Bench: `q`, `c`, wait 2 s, `f`, `r` |
+

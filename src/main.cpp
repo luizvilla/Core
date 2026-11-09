@@ -139,8 +139,16 @@ static bool burst_running = false;
 /* Stage neutral bridge duty for one control tick before enabling PWM. */
 static bool inverter_pwm_staged = false;
 
+/* Menu 'f': trigger the capture now, whatever the stage (e.g. a synchronization that never comes). */
+static volatile bool scope_force_trigger = false;
+
 bool scope_trigger()
 {
+    if (scope_force_trigger)
+    {
+        scope_force_trigger = false;
+        return true;
+    }
     /* Grid stages: capture the relay closing; open loop: the bridge start; otherwise the synchronization. */
     if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) return scope_relay_closed > 0.5F;
     if (inverter_stage == INV_OPEN_LOOP) return scope_bridge_on > 0.5F;
@@ -271,6 +279,7 @@ void loop_communication_task()
                // "|     press s : deadtime DOWN            |\n"
                "|     press r : retrieve scope data      |\n"
                "|     press q : restart scope acquisition|\n"
+               "|     press f : force scope trigger now  |\n"
                "|________________________________________|\n\n");
         /*------------------------------------------------------ */
         break;
@@ -383,6 +392,10 @@ void loop_communication_task()
     case 'q':
         scope.start();
         printk("scope acquisition restarted\n");
+        break;
+    case 'f':
+        scope_force_trigger = true;
+        printk("scope trigger forced: wait 70 ms, then r\n");
         break;
     case 't':
         /* Former manual relay release: now the inverter OFF stage, which opens the relay safely. */
