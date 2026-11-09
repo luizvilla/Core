@@ -30,12 +30,16 @@ bool GridObserver::update(float voltage_alpha, float voltage_beta,
     if (!_configured) return false;
     constexpr float inverse_sqrt_two = 0.7071067811865475F;
     constexpr float inverse_two_pi = 0.1591549430918953F;
-    _voltage_rms = hypotf(voltage_alpha * inverse_sqrt_two,
-                          voltage_beta * inverse_sqrt_two);
-    _frequency_hz = angular_frequency * inverse_two_pi;
-    if (!measurements_valid || !isfinite(voltage_alpha) ||
-        !isfinite(voltage_beta) || !isfinite(angular_frequency) ||
-        !isfinite(_voltage_rms) || !isfinite(_frequency_hz)) {
+    const bool finite = isfinite(voltage_alpha) && isfinite(voltage_beta) && isfinite(angular_frequency);
+    return updateEstimates(hypotf(voltage_alpha * inverse_sqrt_two, voltage_beta * inverse_sqrt_two),
+                           angular_frequency * inverse_two_pi, measurements_valid && finite);
+}
+
+bool GridObserver::updateEstimates(float voltage_rms, float frequency_hz, bool measurements_valid) {
+    if (!_configured) return false;
+    _voltage_rms = voltage_rms;
+    _frequency_hz = frequency_hz;
+    if (!measurements_valid || !isfinite(_voltage_rms) || !isfinite(_frequency_hz)) {
         _voltage_rms = _frequency_hz = NAN;
         _healthy_elapsed = 0.0;
         _qualified = false;

@@ -58,6 +58,14 @@ public:
     bool update(float voltage_alpha, float voltage_beta, float angular_frequency,
                 bool measurements_valid = true);
 
+    /** @brief Advance one sample from RMS voltage and frequency estimates computed by the
+     * caller (for example one-period averages, which a real grid's harmonics do not ripple).
+     * @param voltage_rms Fundamental RMS voltage, in V.
+     * @param frequency_hz Grid frequency, in Hz.
+     * @return Current permission, as update().
+     */
+    bool updateEstimates(float voltage_rms, float frequency_hz, bool measurements_valid = true);
+
     bool canOperate() const { return _configured && _qualified && !isTripped(); }
     bool isTripped() const { return _trip_reason != GridTripReason::None; }
     GridTripReason getTripReason() const { return _trip_reason; }

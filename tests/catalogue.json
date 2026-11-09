@@ -991,6 +991,16 @@
    "status_note": "Implemented 2026-11-09"
   },
   {
+   "id": "L0-APP-09",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bench-measured distorted grid: observer qualifies, step 1 reaches PWM_SETTLE",
+   "criterion": ".a on a grid with the bench harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %) and a −5.7 V offset, the grid observer qualifies, never trips, and the SETTLE stage reaches PWM_SETTLE within 5 s (PASS/FAIL); INFO .b time to qualification, .c time to PWM_SETTLE. Fails when the observer is fed the instantaneous SOGI amplitude and PLL frequency",
+   "source": "`controlStep`: observer fed one-period averages (`GridObserver::updateEstimates`)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (#7)"
+  },
+  {
    "id": "L1-APP-01",
    "tab": "app",
    "level": "L1",

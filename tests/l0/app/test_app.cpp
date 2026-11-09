@@ -34,6 +34,7 @@
  * | L0-APP-06 | Bench step 0: open-loop 230 V RMS |
  * | L0-APP-07 | Bench steps 1-3: settle, connect through the relay, inject |
  * | L0-APP-08 | Bench current protection |
+ * | L0-APP-09 | Bench-measured distorted grid: observer qualifies, step 1 reaches PWM_SETTLE |
  * | L0-APP-05 | Inverter synchronization is gated by the grid observer only |
  *
  * Each case builds its own ControlState with controlInit(), i.e. with the
@@ -63,9 +64,14 @@ struct Grid {
     double phase = 0.0;                                  ///< Grid angle (rad).
     double rms = 230.0;                                  ///< RMS voltage (V).
     double hz = 50.0;                                    ///< Frequency (Hz).
+    double h3 = 0.0, h5 = 0.0, h7 = 0.0;                 ///< Harmonics, fraction of the fundamental.
+    double offset = 0.0;                                 ///< Measurement offset (V).
 
     /** @brief Instantaneous voltage (V). */
-    float v() const { return static_cast<float>(rms * std::sqrt(2.0) * std::cos(phase)); }
+    float v() const {
+        return static_cast<float>(rms * std::sqrt(2.0) * (std::cos(phase) + h3 * std::cos(3 * phase) +
+                                  h5 * std::cos(5 * phase) + h7 * std::cos(7 * phase)) + offset);
+    }
     /** @brief Advances the grid by one control period. */
     void advance() { phase = std::fmod(phase + two_pi * hz * app::hot_loop_period, two_pi); }
 };
@@ -463,7 +469,9 @@ int main() {
             c.check("observer trips", trip_tick > 0);
             c.check("reason UnderVoltage", state.grid_observer.getTripReason() == GridTripReason::UnderVoltage);
             c.check("no synchronization from the trip tick on", !sync_after_trip);
-            c.range("trip delay (s)", trip_tick / double(ticks_per_s), 0.1, 0.1 + 0.02);
+            // 0.1 s observer delay, + up to 0.02 s for the SOGI, + up to one period (0.02 s) because
+            // the app feeds the observer one-period averages (#7).
+            c.range("trip delay (s)", trip_tick / double(ticks_per_s), 0.1, 0.1 + 0.04);
         }
     }
 
@@ -617,6 +625,30 @@ int main() {
             c.check("OFF clears the latch", !state.bench_tripped);
             if (grid_present) c.check("inverter fault cleared", state.inverter.getMode() != VSI_FAULT);
         }
+    }
+
+    {
+        /** @test L0-APP-09.a: On the bench-measured grid (3rd 3.4 %, 5th 4.6 %, 7th 2 %, offset -5.7 V) the observer qualifies and step 1 reaches PWM_SETTLE */
+        tc::Criterion c("L0-APP-09.a", "Bench grid (3rd 3.4 %, 5th 4.6 %, 7th 2 %, -5.7 V offset): observer qualifies, step 1 reaches PWM_SETTLE");
+        ControlState state;
+        Grid grid;
+        grid.h3 = 0.034; grid.h5 = 0.046; grid.h7 = 0.02; grid.offset = -5.7;
+        Relay relay;
+        c.check("controlInit", controlInit(state) == 0);
+        OperatorCommands cmd;
+        cmd.inverter_stage = INV_SETTLE;
+        int qualified = -1, settle = -1;
+        for (int n = 1; n <= 5 * ticks_per_s && settle < 0; ++n) {
+            benchStep(state, grid, cmd, relay);
+            if (qualified < 0 && state.grid_observer.canOperate()) qualified = n;
+            if (state.inverter.getMode() == VSI_PWM_SETTLE) settle = n;
+        }
+        c.check("observer qualifies", qualified > 0);
+        c.check("PWM_SETTLE reached within 5 s", settle > 0);
+        c.check("never tripped", !state.grid_observer.isTripped());
+        /** @test L0-APP-09.b: Bench grid: time to observer qualification and to PWM_SETTLE (INFO) */
+        tc::info("L0-APP-09.b", "Bench grid: time to observer qualification", qualified / double(ticks_per_s), "s");
+        tc::info("L0-APP-09.c", "Bench grid: time to PWM_SETTLE", settle / double(ticks_per_s), "s");
     }
 
     return tc::finish();

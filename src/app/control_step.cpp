@@ -130,7 +130,15 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     state.inverter.setPwmEnabled(state.bridge_pwm_applied && !state.open_loop_active);
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
     const clarke_t grid_voltage_ab = state.inverter.getVab();
-    state.grid_observer.update(grid_voltage_ab.alpha, grid_voltage_ab.beta, state.inverter.getw(),
+    /* The observer judges one-period averages once the inverter's window is full (as its
+     * synchronization does, #7): a real grid's harmonics ripple the instantaneous SOGI
+     * amplitude and PLL frequency across the 207-253 V / 47.5-52.5 Hz limits. */
+    if (state.inverter.isSyncWindowFull())
+        state.grid_observer.updateEstimates(state.inverter.getVdqAverage().d * 0.70710678F,
+                                            state.inverter.getwAverage() * (0.5F / PI),
+                                            state.grid_voltage_age_ticks < app::grid_voltage_stale_ticks);
+    else
+        state.grid_observer.update(grid_voltage_ab.alpha, grid_voltage_ab.beta, state.inverter.getw(),
                                state.grid_voltage_age_ticks < app::grid_voltage_stale_ticks);
     /* Apply this tick's quality verdict before accepting any PWM request. */
     state.inverter.setGridQuality(state.grid_observer.canOperate());

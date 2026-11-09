@@ -248,3 +248,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds |
 | Hardware check | Bench: `sync:` line during `c` |
 
+## 2026-11-09 — Grid observer judges one-period averages (finding #7, second part)
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(app): grid observer on one-period averages …` commit that adds this entry |
+| Files | `src/grid_observer/gridObserver.h`, `src/grid_observer/gridObserver.cpp`, `src/app/control_step.cpp`, `tests/l0/app/test_app.cpp` |
+| Reason | Bench, step 1 with the library fix: the inverter's averaged synchronization criterion held (Vd_avg 326–327 V, \|Vq_avg\| ≤ 0.45 V, ω_avg 313.9–314.4 rad/s), but `grid_ok` stayed 0 with no trip: the observer's RMS (from the instantaneous SOGI α/β) jumped between 206 and 256 V and kept restarting its 1 s qualification |
+| Behaviour change | `GridObserver::updateEstimates(rms, hz, valid)` takes RMS and frequency directly (`update()` now calls it). Once the inverter's averaging window is full, the application feeds the observer RMS = averaged Vd / √2 and frequency = averaged ω / 2π. Detection after a grid step is delayed by up to one period (20 ms) on top of the 0.1 s trip delays |
+| Evidence | New L0-APP-09: on the bench-measured grid the observer qualifies in 1.03 s and step 1 reaches PWM_SETTLE in 1.13 s; with the instantaneous feed it never qualifies (checked). L0-APP-05.d window widened from 0.10–0.12 s to 0.10–0.14 s for the averaging latency; L0-GOB (observer alone) unchanged. Full L0: no new failure. Firmware builds |
+| Hardware check | Bench step 1: `sync:` line `grid_ok 1`, inverter state 1 → 9 → 8 |
+
