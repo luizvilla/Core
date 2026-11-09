@@ -903,7 +903,7 @@
    "tab": "inverter",
    "level": "L2",
    "title": "Bench pre-checks",
-   "criterion": ".a relay contacts open at start-up (GPIO 22 polarity); .b menu and telemetry; .c DC source 400 V, 0.5 A limit; .d bulb in series, breaker reachable",
+   "criterion": ".a relay on a dead bench: open at start-up (GPIO 22 polarity), closed with the manual test R, open again with R; .b menu and telemetry; .c DC source 400 V, 0.5 A limit; .d bulb in series, breaker reachable",
    "conditions": "Before any power. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
    "source": "docs/testing/bench/inverter-session.md",
    "status": "planned",

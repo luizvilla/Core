@@ -125,6 +125,10 @@ static constexpr float32_t inject_current_step = 0.01F;  /* A peak per key press
  * Polarity: set = closed (check on the dead-bus relay test, session step R). */
 static constexpr uint8_t relay_pin = 22U;
 static bool relay_command = false;
+/* Manual relay test (menu 'R'): close the relay alone, dead bench only (session pre-check L2-INV-10.e).
+ * Accepted only with the inverter OFF, the boost IDLE, the bridge stopped and no grid voltage. */
+static bool relay_test = false;
+static constexpr float32_t relay_test_vac_max = 20.0F;  /* V RMS: above this, a grid is present */
 static bool relay_closed = false;
 static uint16_t relay_hold_ticks = 0U;
 /* The burst generator is running on leg 1. */
@@ -254,6 +258,7 @@ void loop_communication_task()
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
                "|     press x : inverter OFF (relay open)|\n"
+               "|     press R : relay test (dead bench)  |\n"
                "|     press u : voltage reference UP     |\n"
                "|     press d : voltage reference DOWN   |\n"
                // "|     press w : deadtime UP              |\n"
@@ -267,6 +272,7 @@ void loop_communication_task()
         printk("idle mode\n");
         mode = IDLE;
         inverter_stage = INV_OFF;
+        relay_test = false;
         break;
     case 'p':
         printk("startup: converter 1, current clamped\n");
@@ -286,19 +292,23 @@ void loop_communication_task()
     case 'o':
         printk("inverter step 0: open loop to 230 V RMS (relay open)\n");
         inverter_stage = INV_OPEN_LOOP;
+        relay_test = false;
         break;
     case 'c':
         printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
         inverter_stage = INV_SETTLE;
+        relay_test = false;
         break;
     case 'g':
         printk("inverter step 2: settle %u periods, close the relay, zero current\n",
                static_cast<unsigned int>(app::inverter_settle_cycles));
         inverter_stage = INV_CONNECT;
+        relay_test = false;
         break;
     case 'n':
         printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
         inverter_stage = INV_INJECT;
+        relay_test = false;
         break;
     case 'j':
         inject_current += inject_current_step;
@@ -313,6 +323,28 @@ void loop_communication_task()
     case 'x':
         printk("inverter OFF: disconnect, relay open\n");
         inverter_stage = INV_OFF;
+        relay_test = false;
+        break;
+    case 'R':
+        if (relay_test)
+        {
+            relay_test = false;
+            printk("relay test: open\n");
+        }
+        else if (inverter_stage != INV_OFF || mode != IDLE || control.bridge_pwm_applied)
+        {
+            printk("relay test refused: inverter OFF (x) and boost IDLE (i) first\n");
+        }
+        else if (v_ac_rms_value > relay_test_vac_max || fabsf(v_ac_value) > relay_test_vac_max * 1.5F)
+        {
+            printk("relay test refused: grid voltage present (%.1f V RMS); unplug mains first\n",
+                   (double)v_ac_rms_value);
+        }
+        else
+        {
+            relay_test = true;
+            printk("relay test: CLOSED (press R again to open; any stage key opens it)\n");
+        }
         break;
     case 'u':
         // Keep the bus target inside the gain schedule's range, well below the full-burst level.
@@ -518,10 +550,17 @@ void loop_critical_task()
     }
     control.inverter.setPwmEnabled(control.bridge_pwm_applied && !control.open_loop_active);
 
-    /* Grid relay (GPIO 22): follow the command; report it closed/open once held for the contact time. */
-    if (out.relay_close != relay_command)
+    /* Grid relay (GPIO 22): follow the command; report it closed/open once held for the contact time.
+     * The manual test only holds while nothing else runs and no grid voltage appears. */
+    if (relay_test && (inverter_stage != INV_OFF || mode != IDLE || out.bridge_enable ||
+                       fabsf(v_ac_value) > relay_test_vac_max * 1.5F))
     {
-        relay_command = out.relay_close;
+        relay_test = false;
+    }
+    const bool relay_wanted = out.relay_close || relay_test;
+    if (relay_wanted != relay_command)
+    {
+        relay_command = relay_wanted;
         relay_hold_ticks = 0U;
         if (relay_command) spin.gpio.setPin(relay_pin);
         else spin.gpio.resetPin(relay_pin);

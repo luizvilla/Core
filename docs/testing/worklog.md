@@ -147,3 +147,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | L0: the new L0-APP-06…08 pass, Jean's L0-APP-04 passes with the stage encoding; full L0 99 pass, 7 known fails (#2, #5). Firmware builds (`pio run -e USB`). L1: the PWM adapter does not drive the bridge yet, so L1 runs that reach PWM_SETTLE stop (since Jean's `20c6073`); a bridge and relay adapter is the next L1 step |
 | Hardware check | The bench session itself (L2-INV-10 pre-checks first: relay polarity) |
 
+## 2026-11-09 — Manual relay test key (bench pre-check L2-INV-10.a)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): manual relay test …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Luiz: check that the relay closes before running the grid steps |
+| Behaviour change | Menu `R` toggles the relay on GPIO 22 alone. Accepted only with the inverter OFF, the boost IDLE, the bridge stopped and VAC below 20 V RMS (and below 30 V instantaneous); released by `R`, `x`, `i`, any stage key, or a grid voltage appearing. Hardware loop only (`main.cpp`); `controlStep` sees the relay feedback as usual and keeps the open-loop stage off while it is closed |
+| Evidence | Firmware builds (`pio run -e USB`). Not testable at L0 (hardware loop) |
+| Hardware check | It is the check: session pre-check L2-INV-10.a, on a dead bench |
+

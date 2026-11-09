@@ -9,6 +9,7 @@ The first hardware tests of the inverter: generate 230 V RMS, synchronize with t
 | 2 | `g` | `INV_CONNECT` | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
+| relay test | `R` | `INV_OFF` (dead bench only) | OFF | The relay closes and opens on its own (pre-check L2-INV-10.a) |
 
 Firmware: branch `test/microinverter-validation-v2`, the commit that adds this file or later. Build and flash with `pio run -e USB -t upload`. The stage logic is tested at L0 (`L0-APP-06…08`). The boost stays in IDLE for the whole session: the DC bus comes from the bench source.
 
@@ -49,7 +50,7 @@ The firmware scope (`r` downloads, `q` re-arms) records 10 channels: VAC, V_alph
 
 | # | Check | Expected | Result |
 |---|---|---|---|
-| a | Board powered, DC source off, mains unplugged: relay contacts measured with an ohmmeter | **Open** (GPIO 22 reset at start-up = open). If closed, the polarity is inverted: stop, swap `setPin`/`resetPin` for `relay_pin` in `main.cpp` | |
+| a | **Relay, dead bench** (board powered, DC source off, mains unplugged; ohmmeter across the relay contacts, scope CH4 on GPIO 22):<br>1. At start-up: contacts **open** (GPIO 22 reset = open). If closed, the polarity is inverted: stop, swap `setPin`/`resetPin` for `relay_pin` in `main.cpp`.<br>2. Press `R` (manual relay test): the relay clicks, contacts **closed**, GPIO 22 high, telemetry `relay` 11 after 20 ms.<br>3. Press `R` again: contacts **open**, `relay` 00. | open → closed → open; the firmware refuses `R` unless the inverter is OFF, the boost IDLE, the bridge stopped and VAC below 20 V RMS, and opens it on any stage key or if a grid voltage appears. **Never with mains connected:** with the bridge off, a closed relay rectifies the mains onto the bus through the bridge diodes | |
 | b | Menu `h` prints the inverter bench keys; telemetry runs; `stage` 0, `inverter_state` 0, relay `00` | as written | |
 | c | DC source: 400 V, current limit 0.5 A, output off | set | |
 | d | Bulb in series with the mains feed, mains breaker reachable | yes | |
