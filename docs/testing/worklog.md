@@ -158,3 +158,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds (`pio run -e USB`). Not testable at L0 (hardware loop) |
 | Hardware check | It is the check: session pre-check L2-INV-10.a, on a dead bench |
 
+## 2026-11-09 — Firmware scope: VDCBus and bridge duty, open-loop trigger
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(scope): VDCBus and bridge duty …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Luiz, bench step 0: the DC bus was not in the firmware capture, and the capture never triggered in the open-loop stage (it waits for Sync, which needs a grid) |
+| Behaviour change | Capture: 12 channels (adds VDCBus_V and the applied bridge duty), 12 KiB. In the open-loop stage it triggers on the bridge start (2 kHz); other stages unchanged |
+| Evidence | Firmware builds; ScopeMimicry buffer 256 × 12 × 4 B = 12 288 B, within its 65 535 B limit (static_assert) |
+| Hardware check | Bench step 0 |
+

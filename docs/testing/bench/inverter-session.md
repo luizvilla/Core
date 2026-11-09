@@ -44,7 +44,9 @@ Every 100 ms the board prints one line, fields separated by `:`:
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
 - `Id`, `Iq` in A peak (dq frame of the grid voltage: Id in phase), `P` in W and `Q` in var from the inverter's measurements.
 
-The firmware scope (`r` downloads, `q` re-arms) records 10 channels: VAC, V_alpha, V_beta, V_d, V_q, IAC, omega, Sync, relay command, inverter state. It triggers on Sync rising at 2 kHz (about 128 ms before and after); in the CONNECT and INJECT stages, on the relay command rising at 10 kHz (12.8 ms before and after).
+The DC bus voltage is the 8th telemetry field (`VDCBus`) and the DC source display; it needs no oscilloscope channel.
+
+The firmware scope (`r` downloads, `q` re-arms) records 12 channels: VAC, V_alpha, V_beta, V_d, V_q, IAC, omega, Sync, relay command, inverter state, VDCBus, applied bridge duty. It triggers on Sync rising at 2 kHz (about 64 ms before and after); in the open-loop stage, on the bridge start at 2 kHz (re-arm with `q` before pressing `o`); in the CONNECT and INJECT stages, on the relay command rising at 10 kHz (12.8 ms before and after).
 
 ## L2-INV-10 · Pre-checks (before any power)
 

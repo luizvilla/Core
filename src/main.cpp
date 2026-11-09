@@ -92,11 +92,12 @@ static float32_t v_ac_rms_square_sum;
 static uint32_t v_ac_rms_sample_count;
 
 /* ScopeMimicry */
-/* 10 KiB capture: 256 samples, half before and half after the trigger: Sync rising at 2 kHz,
- * or, in the CONNECT/INJECT stages, the relay command rising at 10 kHz.
+/* 12 KiB capture: 256 samples of 12 channels, half before and half after the trigger: Sync rising
+ * at 2 kHz; in the open-loop stage, the bridge start at 2 kHz; in CONNECT/INJECT, the relay command
+ * rising at 10 kHz.
  * Keep the byte count within ScopeMimicry's uint16_t buffer-size/dump limits. */
 static constexpr uint16_t scope_buffer_sample_count = 256U;
-static constexpr uint16_t scope_channel_count = 10U;
+static constexpr uint16_t scope_channel_count = 12U;
 static constexpr uint16_t scope_sample_divider = 5U;
 static_assert(scope_buffer_sample_count * scope_channel_count * sizeof(float32_t) <= UINT16_MAX,
               "Scope capture exceeds ScopeMimicry's buffer-size limit");
@@ -112,6 +113,8 @@ static float32_t scope_omega;
 static float32_t scope_sync;
 static float32_t scope_relay_closed;
 static float32_t scope_inverter_mode;
+static float32_t scope_bridge_duty;   /* applied bridge duty (0 when the bridge is off) */
+static float32_t scope_bridge_on;
 
 /*--------------------------------------------------------------- */
 
@@ -138,8 +141,9 @@ static bool inverter_pwm_staged = false;
 
 bool scope_trigger()
 {
-    /* Grid stages: capture the relay closing; otherwise the synchronization. */
+    /* Grid stages: capture the relay closing; open loop: the bridge start; otherwise the synchronization. */
     if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) return scope_relay_closed > 0.5F;
+    if (inverter_stage == INV_OPEN_LOOP) return scope_bridge_on > 0.5F;
     return scope_sync > 0.5F;
 }
 
@@ -217,6 +221,8 @@ void setup_routine()
     scope.connectChannel(scope_sync, "Sync");
     scope.connectChannel(scope_relay_closed, "relay_cmd");
     scope.connectChannel(scope_inverter_mode, "inverter_mode");
+    scope.connectChannel(v_dc_bus_value, "VDCBus_V");
+    scope.connectChannel(scope_bridge_duty, "bridge_duty");
     scope.set_trigger(&scope_trigger);
     scope.set_delay(0.5F);
     scope.start();
@@ -586,6 +592,8 @@ void loop_critical_task()
     scope_sync = control.inverter.getSync() ? 1.0F : 0.0F;
     scope_relay_closed = relay_command ? 1.0F : 0.0F;
     scope_inverter_mode = static_cast<float32_t>(control.inverter.getMode());
+    scope_bridge_on = control.bridge_pwm_applied ? 1.0F : 0.0F;
+    scope_bridge_duty = control.bridge_pwm_applied ? out.bridge_duty : 0.0F;
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
     const uint16_t divider = (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT) ? 1U : scope_sample_divider;
     if (++scope_sample_tick >= divider)
