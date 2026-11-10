@@ -214,7 +214,7 @@ bool scope_trigger()
     if (scope_trigger_on_trip) return control.bench_tripped;
     if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)
         return scope_relay_closed > 0.5F || scope_inverter_mode == static_cast<float32_t>(VSI_FAULT);
-    if (inverter_stage == INV_OPEN_LOOP) return scope_bridge_on > 0.5F;
+    if (inverter_stage == INV_OPEN_LOOP || inverter_stage == INV_SETTLE) return scope_bridge_on > 0.5F;
     return scope_sync > 0.5F;
 }
 
@@ -398,6 +398,7 @@ void loop_communication_task()
     case 'c':
         printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
         startStage(INV_SETTLE);
+        scope.start();  /* re-arm: capture the bridge start of step 1 (compare with step 2b) */
         scope_trigger_on_trip = false;
         relay_test = false;
         break;

@@ -457,3 +457,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Keys `o c a G g n` wait 30 ms after their console message before starting the stage. The scope snapshot (getters, RMS, trigger inputs) runs only on the ticks the scope samples (1 in 5 at 2 kHz) instead of every tick. New counter of lost critical ticks (a start gap ≥ 150 µs counts the periods it skipped), shown as `lost` at the end of the short telemetry line. No control change |
 | Evidence | Firmware builds |
 | Hardware check | Pending: `G` with the short telemetry; `lost` must stay at its value from before `G` |
+
+## 2026-11-10 — Lost ticks ruled out; step 1 capture for comparison
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(scope): …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench with `1084543` plus Jean Alinei's ADC dispatch fixes (`55160a7`, `7dbc6e0`): `G` still faults SYNC_LOST (12) at once while `lost` stays 0, so the lost-tick explanation of the previous entry is wrong (its changes stay: harmless, and the counter is useful). The ADC path returns the newest sample each tick, so no sampling lag either. The remaining difference between step 1 (works) and step 2b (faults) with the bridge on is the bridge waveform: PLL-synthesized sine (step 1) or VAC copy (step 2b) |
+| Behaviour change | Key `c` re-arms the scope; in step 1 it triggers on the bridge start (2 kHz, 64 ms on each side), so step 1 and step 2b captures compare directly. No control change |
+| Evidence | Firmware builds |
+| Hardware check | Pending: one capture of `c` and one of `G` (with `v` for 2 kHz) |
