@@ -159,7 +159,7 @@ static bool settle_count_test = false;
 static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the artificial sample (0: none) */
 static constexpr uint16_t trip_test_delay_ticks = 1000U;  /* 100 ms: fills the scope's pre-trigger half at 2 or 10 kHz */
 static bool scope_trigger_on_trip = false;  /* the capture waits for the bench trip (armed by 'z') */
-static constexpr float32_t trip_test_current = 3.0F;  /* A */
+static constexpr float32_t trip_test_current = 4.0F;  /* A, above the 3 A bench trip */
 /* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
 static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
 static inline void notePart(int part, uint32_t from, uint32_t to)

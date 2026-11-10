@@ -10,7 +10,7 @@
 ##   prod: the production application and library as pinned (tests/l1/dependencies.lock.json): step 2b
 ##     (stage 6, INV_FOLLOW_CONNECT) = VAC copy as feedforward until the predicted contact, current PI from the
 ##     relay request, PLL frozen 15 ms from the relay command, synthesized feedforward from the predicted contact
-##     to the end of the blanking, GRID_CONNECTED 60 ms after the command, output advance 0.3.
+##     to the end of the blanking, GRID_CONNECTED 20 ms after the command, output advance 0.3.
 ##   prod_kp2: the same with Kp 2 V/A, Ti 20 ms (a copy of src/app/control_step.h only).
 ## @par Runs (2 s each, 50 ns step; about 30 min on Jean's machine, 70 min on Luiz's)
 ##   step 2 (stage 3) @60 µs IEC; step 2b @80 µs IEC, cold bulb; @60 and @100 µs IEC; step 2b Kp 2 / Ti 20 ms @80 µs IEC.
@@ -107,7 +107,7 @@ def report():
     lines = ['# L1-GFL-14: connection on the switched model, step 2b (VAC copy, PI from the relay request, blanking)', '',
              'Switched model, real application through the bench stages (contract app-v3), production builds of `tests/l1/design/connection_l1.py`. '
              'Step 2b (stage 6): VAC copy as feedforward until the predicted contact, current PI from the relay request, PLL frozen 15 ms from the relay command, '
-             'synthesized feedforward from the predicted contact to the end of the blanking, GRID_CONNECTED 60 ms after the command, output advance 0.3. '
+             'synthesized feedforward from the predicted contact to the end of the blanking, GRID_CONNECTED 20 ms after the command, output advance 0.3. '
              'Step 2 (stage 3) is today\'s connection. The relay contact falls on a voltage zero crossing (the application\'s latch).', '',
              '| Run | Closest averaged result: peak (A) | Fault | Contact from zero crossing (°) | Closing peak, 100 ms (A) | Residual (A RMS) | Final I_d (A) | THD (%) |', '|---|---|---|---|---|---|---|---|']
     for v, scen, delay, stage in RUNS:

@@ -413,3 +413,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Library: `setCurrentLoopFromConnect`, `freezePll`, `holdFeedforward`, `setExternalFeedforward`, `setConnectionBlanking` (from the relay command; alignment not judged while the PLL is frozen), `setConnectWindow`, `notifyRelayCommand`; all off by default, the existing L0 results unchanged. Application: stage `INV_FOLLOW_CONNECT` (key `G`) with the VAC copy as external feedforward, PI from the relay request, advance 0.3, blanking 15 ms, connect window 60 ms; the relay command notified to the inverter in every stage (no effect unless a blanking or window is set). The 60 ms blanking proposed was set to 15 ms after D-GFL-04 (longer blanks raised the peak from 0.37 to 0.76 A); the 60 ms is the connect window |
 | Evidence | Firmware builds. L0-GFL-19.a–g and L0-APP-12.a pass; other L0 results unchanged (L0-APP-03.c and L0-BST-09 fail as before, findings #2 and #5). L1-GFL-14 rebuilt on the production library (no patch) |
 | Hardware check | Not done (L2-INV-07 is the check) |
+
+## 2026-11-10 — Bench trip 3 A; step 2b connected at 20 ms
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): bench trip 3 A …` commit that adds this entry |
+| Files | `src/app/control_step.h`, `src/main.cpp`, `tests/l0/app/test_app.cpp`, `docs/testing/bench/inverter-session.md` |
+| Reason | Luiz Villa: there is no relay feedback, so the grid is considered connected 20 ms after the command rather than 60 ms; and the bench current trip is raised to 3 A |
+| Behaviour change | `app::bench_inverter_current_trip` 1.5 → 3.0 A (every grid and open-loop stage); `app::follow_connect_window` 60 → 20 ms (step 2b); the `z` protection test injects 4 A instead of 3 A so it still crosses the trip |
+| Evidence | Firmware builds. L0-APP-08.a (2.9 A no trip, 3.1 A trip), L0-APP-11.b and L0-APP-12.a (CONNECTED 200 periods after the command) pass; other L0 results unchanged |
+| Hardware check | Not done |

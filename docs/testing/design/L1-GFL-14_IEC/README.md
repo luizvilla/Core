@@ -15,7 +15,7 @@ The run outputs stay in `tests/out/connection-l1/` (local, not committed). Only 
 
 ## What is being tested
 
-- **Step 2b (stage 6), as it will be flashed:** VAC copy as feedforward until the predicted contact, current PI (Kp 1 V/A, Ti 5 ms) from the relay request, PLL frozen 15 ms from the relay command, synthesized feedforward from the predicted contact to the end of the blanking, GRID_CONNECTED 60 ms after the command, output advance 0.3.
+- **Step 2b (stage 6), as it will be flashed:** VAC copy as feedforward until the predicted contact, current PI (Kp 1 V/A, Ti 5 ms) from the relay request, PLL frozen 15 ms from the relay command, synthesized feedforward from the predicted contact to the end of the blanking, GRID_CONNECTED 20 ms after the command, output advance 0.3.
 - **Production builds, nothing patched:** the library at the pinned commit (`build` refuses another checkout); the Kp 2 / Ti 20 ms variant only changes two constants in a copy of `src/app/control_step.h`.
 
 | Run | What it checks | Closest averaged result (peak before the step) |

@@ -140,7 +140,7 @@ inline constexpr float32_t open_loop_m_rate = 1.0F;
 /** @brief INJECT stage: largest |d-axis current| reference, in A peak (series bulb: keep small). */
 inline constexpr float32_t inject_current_max = 0.1F;
 /** @brief Bench protection: |IAC| above this trips the inverter (latched until OFF), in A. */
-inline constexpr float32_t bench_inverter_current_trip = 1.5F;
+inline constexpr float32_t bench_inverter_current_trip = 3.0F;
 /** @brief Relay contact time: command held this long before the feedback changes, in control ticks (20 ms). */
 inline constexpr uint16_t relay_contact_ticks = 200U;
 /** @brief Relay closing time, command to contact (bench 2026-11-09: 9.7 ms). The command is issued this long
@@ -166,7 +166,7 @@ inline constexpr float32_t inverter_output_phase_advance = 0.5F;
  * (0.01: the inverter aims 1 % above VAC, about 3.3 V peak). Applied as the feedforward gain 1 + offset. */
 inline constexpr float32_t inverter_vac_offset_step = 0.01F;
 /** @brief Largest inverter voltage offset (fraction of VAC). 5 % is 16 V peak: 0.4 A peak through the cold bulb
- * (40 Ω) at the contact, below the 1.5 A bench trip. The offset is never negative (never below the grid). */
+ * (40 Ω) at the contact, below the 3 A bench trip. The offset is never negative (never below the grid). */
 inline constexpr float32_t inverter_vac_offset_max = 0.05F;
 /** @brief Step 1d (VAC follower): VAC extrapolated this many control periods ahead, to compensate the actuation
  * delay (80 µs to the next carrier period, plus half the 100 µs hold): 1.3. */
@@ -182,9 +182,10 @@ inline constexpr float32_t follow_connect_advance = 0.3F;
  * optimum (5 ms after the contact), rounded up for the relay spread. Longer blanks raised the peak in D-GFL-04
  * (0.37 A at 5 ms after the contact, 0.76 A from 20 ms on) and only postpone the PLL's settling tail. */
 inline constexpr float32_t follow_connect_blanking = 0.015F;
-/** @brief Step 2b: GRID_CONNECT → GRID_CONNECTED this long after the relay command, counted by the inverter, in s
- * (relay 9.7 ms + settling + margin). The current PI runs from the relay request throughout. */
-inline constexpr float32_t follow_connect_window = 0.060F;
+/** @brief Step 2b: GRID_CONNECT → GRID_CONNECTED this long after the relay command, counted by the inverter, in s.
+ * There is no contact sensing: the grid is considered connected 20 ms after the command (relay 9.7 ms + margin), the
+ * same instant the application reports the relay closed (relay_contact_ticks). The current PI runs throughout. */
+inline constexpr float32_t follow_connect_window = 0.020F;
 
 }  // namespace app
 
