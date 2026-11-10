@@ -91,4 +91,26 @@ None reached the injection step. Two mechanisms, neither one about the gains:
 
 ### 6.2 Second batch (running): current PI from GRID_CONNECT
 
-Variant F: the library with the setters (`ab35e2f`), candidate C set from the application, and the current PI also active in GRID_CONNECT with a zero reference. With the relay open the measured current is zero, so the PI stays at zero until the contact. Runs: cold bulb, hot bulb (500 Ω), IEC grid, stiff grid. Variant E (the same library without the GRID_CONNECT change, C from the application) on the IEC grid checks that the application path reproduces candidate C. Results: to be added.
+Variant F: the library with the setters (`ab35e2f`), candidate C set from the application, and the current PI also active in GRID_CONNECT with a zero reference. With the relay open the measured current is zero, so the PI stays at zero until the contact. Runs: cold bulb, hot bulb (500 Ω), IEC grid, stiff grid. Variant E (the same library without the GRID_CONNECT change, C from the application) on the IEC grid checks that the application path reproduces candidate C.
+
+| Run | Fault | Closing peak (A) |
+|---|---|---|
+| E, IEC grid | 1.5156 s, bench trip | 1.63 (identical to C: the application path reproduces the candidate) |
+| F, IEC grid | 1.5159 s, bench trip | 1.58 |
+| F, stiff grid | 1.5181 s, bench trip | 12.7 |
+| F, cold bulb | 1.5591 s, bench trip | 1.62 |
+| F, hot bulb (500 Ω) | 1.6561 s, code 1 (BAD_GRID_QUALITY, observer) | 0.54; reached RUN, final I_d 0.044 A for 0.1 A, THD 36 % |
+
+**Running the PI from the contact does not help.** The current oscillates at about 2 kHz from the contact on. The cause is the current measurement, not the gains:
+- The library's SOGI computes β by a finite difference scaled by 1/(ω·Ts) ≈ 32. Any fast change of the sampled current is amplified in β: the contact step, the capacitor currents of the output filter, the switching ripple.
+- In the 5 ms after the contact, |I_dq| as the controller sees it reaches 3.2 A while the actual line current stays below 0.95 A (IEC and stiff grids; 0.43 A against 0.20 A through the bulb).
+- With Kp = 1 V/A, 3 A of measurement error is 3 V of command error each period. The loop closes on its own measurement noise and diverges.
+
+The averaged model (§2) copied the SOGI recursion but fed it a smooth current (no filter capacitors, no ripple, no contact step), so it could not show this. The same β construction was already behind finding #7 (harmonics amplified on the voltage).
+
+**Consequence:** no PI gain fixes this while the dq current comes from this SOGI. Options:
+- (a) a SOGI whose quadrature output is integrated (the standard qv = ω·∫ε form, a low-pass) instead of differenced;
+- (b) a low-pass or ripple-synchronous filter on IAC before the SOGI;
+- (c) a much lower Kp, which brings back the slow drift through the bulb.
+
+Library decision, then L1 again.
