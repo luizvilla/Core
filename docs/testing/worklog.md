@@ -435,3 +435,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | None intended. The step 2b settings and the feedforward gain are applied only when the stage or the offset changes; the VAC copy is computed only in steps 1d/2b; the library skips the connection bookkeeping when no relay command was notified; the grid observer counts its qualification and trip delays in integer samples instead of software `double` accumulation (same thresholds, computed once at init) |
 | Evidence | Firmware builds; `GridObserver::updateEstimates` no longer calls software double routines (9 calls before). L0: grid observer, application and inverter suites pass as before (L0-APP-03.c, L0-BST-09 known) |
 | Hardware check | Pending: the `load` field at idle and when the bridge starts |
+
+## 2026-11-10 — Firmware scope records the synchronization averages
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(scope): …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Bench: step 2b (`G`) faults SYNC_LOST (12) within half a second while step 1 holds; the check judges the period-averaged Vd, Vq and ω, which the capture did not record |
+| Behaviour change | Scope channels: `V_alpha_V` → `Vq_avg_V`, `V_beta_V` → `omega_avg_rad_s`, `VDCBus_V` → `Vd_avg_V` (the bus is in the telemetry). Same channel count. No control change |
+| Evidence | Firmware builds |
+| Hardware check | Pending: capture of the step 2b fault (`v` for 2 kHz, `G`, then `r`) |

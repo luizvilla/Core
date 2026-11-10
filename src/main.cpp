@@ -106,8 +106,9 @@ static ScopeMimicry scope(scope_buffer_sample_count, scope_channel_count);
 static bool is_scope_downloading;
 static uint16_t scope_sample_tick;
 /* ScopeMimicry requires persistent float channels, including flags and enums. */
-static float32_t scope_v_alpha;
-static float32_t scope_v_beta;
+static float32_t scope_v_alpha;  /* recorded as Vq_avg */
+static float32_t scope_v_beta;   /* recorded as omega_avg */
+static float32_t scope_vd_avg;
 static float32_t scope_v_d;
 static float32_t scope_v_q;
 static float32_t scope_omega;
@@ -286,8 +287,8 @@ void setup_routine()
         return;
     }
     scope.connectChannel(v_ac_value, "VAC_V");
-    scope.connectChannel(scope_v_alpha, "V_alpha_V");
-    scope.connectChannel(scope_v_beta, "V_beta_V");
+    scope.connectChannel(scope_v_alpha, "Vq_avg_V");      /* the averages the synchronization check judges (#7) */
+    scope.connectChannel(scope_v_beta, "omega_avg_rad_s");
     scope.connectChannel(scope_v_d, "V_d_V");
     scope.connectChannel(scope_v_q, "V_q_V");
     scope.connectChannel(i_ac_value, "IAC_A");
@@ -295,7 +296,7 @@ void setup_routine()
     scope.connectChannel(scope_sync, "Sync");
     scope.connectChannel(scope_relay_closed, "relay_cmd");
     scope.connectChannel(scope_inverter_mode, "inverter_mode");
-    scope.connectChannel(v_dc_bus_value, "VDCBus_V");
+    scope.connectChannel(scope_vd_avg, "Vd_avg_V");
     scope.connectChannel(scope_bridge_duty, "bridge_duty");
     scope.set_trigger(&scope_trigger);
     scope.set_delay(0.5F);
@@ -797,10 +798,13 @@ void loop_critical_task()
     const uint32_t t_applied = k_cycle_get_32();
     notePart(2, t_controlled, t_applied);
     /* Snapshot after this tick's control, grid verdict and PWM application. */
-    const clarke_t grid_voltage_ab = control.inverter.getVab();
     const dqo_t grid_voltage_dq = control.inverter.getVdq();
-    scope_v_alpha = grid_voltage_ab.alpha;
-    scope_v_beta = grid_voltage_ab.beta;
+    {
+        const dqo_t vdq_avg = control.inverter.getVdqAverage();
+        scope_v_alpha = vdq_avg.q;
+        scope_vd_avg = vdq_avg.d;
+        scope_v_beta = control.inverter.getwAverage();
+    }
     scope_v_d = grid_voltage_dq.d;
     scope_v_q = grid_voltage_dq.q;
     scope_omega = control.inverter.getw();
