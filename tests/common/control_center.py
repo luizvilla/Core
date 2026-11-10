@@ -124,6 +124,16 @@ def study_links(test,studs):
     return links
 
 
+def design_page(report):
+    """@brief report.html of a design test (D level), rendered from its report.md. @return its path."""
+    md_path=REPO/report
+    try:
+        import design_report
+        return design_report.write(md_path) if md_path.suffix=='.md' and md_path.exists() else md_path
+    except Exception as ex:
+        print(f'{report}: not rendered ({ex})',file=sys.stderr);return md_path
+
+
 def test_row(t,result,state,studs,findings,hardware):
     rel=lambda c:f'{e(c["dir"].name)}/report.html' if c['report'] else f'{e(c["dir"].name)}/record.md'
     when=''
@@ -137,7 +147,12 @@ def test_row(t,result,state,studs,findings,hardware):
     if t.get('conditions'):det.append(f'<p><b>Conditions.</b> {md(t["conditions"])}</p>')
     if t.get('harness'):det.append(f'<p><b>Harness.</b> {md(t["harness"])}</p>')
     if t.get('source'):det.append(f'<p><b>Source.</b> <code>{e(t["source"])}</code></p>')
-    if t.get('report'):det.append(f'<p><b>Report.</b> <a href="{e(os.path.relpath(REPO/t["report"],REPO/"tests/out"))}">{e(t["report"])}</a></p>')
+    if t.get('report'):
+        page_=os.path.relpath(design_page(t['report']),REPO/'tests/out')
+        det.append(f'<p><b>Report.</b> <a href="{e(page_)}">{e(t["report"])}</a></p>')
+        if not result and (REPO/t['report']).exists():  # a design test's report is its run (ADR 0004)
+            ts=(REPO/t['report']).stat().st_mtime
+            when=f'<a href="{e(page_)}">{dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")}</a><div class="sub">{ago(ts)} · report</div>'
     det.append(f'<p><b>Implementation.</b> {e(catalogue.STATUS_TEXT[t["status"]])}'+(f' — {md(t["status_note"])}' if t.get('status_note') else '')+'</p>')
     if result:
         det.append('<table class="crit"><tr><th>Criterion</th><th>Verdict</th><th>Limit</th><th>Measured</th></tr>'+''.join(

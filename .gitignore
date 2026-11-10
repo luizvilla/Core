@@ -11,3 +11,4 @@ src/Data_records/*
 # Generated test records (docs/testing/test-procedure.md §7)
 tests/out/
 __pycache__/
+docs/testing/design/**/report.html
