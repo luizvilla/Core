@@ -391,3 +391,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | The VAC DC estimate is now a first-order filter (τ 2 s, two operations per period, no array, no loop); about 0.5 V of 50 Hz ripple left on the estimate; settled about 6 s after boot. RAM −0.8 kB |
 | Evidence | Firmware builds (RAM 29.5 %). L0-APP-11.a–b pass. Cause of the overload not confirmed on the board yet: check the `load us` telemetry line |
 | Hardware check | Pending |
+
+## 2026-11-10 — Shorter serial telemetry
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(bench): short telemetry …` commit that adds this entry |
+| Files | `src/main.cpp`, `docs/testing/bench/inverter-session.md` |
+| Reason | Luiz Villa: the serial output is too verbose and the board answers slowly to `+` / `-` |
+| Behaviour change | Telemetry only (background task): by default one short line every 500 ms (stage, inverter state, relay, VAC RMS, IAC, VDCBus, Id, Iq, grid_ok, fault, offset, critical-task load) instead of four lines every 100 ms; key `l` toggles the previous full telemetry; trip messages print once when they latch instead of every 100 ms. Control unchanged |
+| Evidence | Firmware builds |
+| Hardware check | Pending |

@@ -38,11 +38,13 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 ## Telemetry
 
-Every 100 ms the board prints one line, fields separated by `:`:
+**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs>`. Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending `+` / `-` so the menu stays responsive.
+
+**Full (`l`):** every 100 ms one line, fields separated by `:`:
 
 `ILow1 : VLow : duty1 : VAC : VAC_rms : grid_angle : IAC : VDCBus : boost_mode : burst_skip : stage : inverter_state : relay(cmd)(fb) : Id : Iq : P : Q : Id_ref : load_us`
 
-- `stage`: 0 OFF, 1 SETTLE, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT.
+- `stage`: 0 OFF, 1 SETTLE, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT, 5 VAC_FOLLOW.
 - `inverter_state`: 0 OFF, 1 VOLTAGE_SYNC, 2 GRID_CONNECT, 3 GRID_CONNECTED, 4 RUN, 5 STOPPING, 6 DISCONNECT, 7 FAULT, 8 PWM_SETTLE, 9 PWM_WAIT.
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
 - A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF), `fault` (inverter fault reason), `offset` (inverter voltage offset of step 1c, % of VAC). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.

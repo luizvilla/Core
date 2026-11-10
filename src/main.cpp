@@ -125,6 +125,8 @@ static boost_mode mode = IDLE;
 static InverterStage inverter_stage = INV_OFF;
 static float32_t inject_current = 0.0F;
 static constexpr float32_t inject_current_step = 0.01F;  /* A peak per key press */
+/* Telemetry: short line every 500 ms by default; key l toggles the full lines every 100 ms. */
+static bool telemetry_verbose = false;
 /* Bench step 1c: inverter voltage offset (fraction of VAC, keys + / -), never below the grid. */
 static float32_t inverter_vac_offset = 0.0F;
 /* Grid relay on GPIO 22: command, and feedback once held for the contact time.
@@ -346,6 +348,7 @@ void loop_communication_task()
                "|     press r : retrieve scope data      |\n"
                "|     press q : restart scope acquisition|\n"
                "|     press f : force scope trigger now  |\n"
+               "|     press l : full telemetry on/off    |\n"
                "|     press v : CONNECT scope 10k/2k Hz  |\n"
                "|     press e : step 1 settle counter on |\n"
                "|     press z : protection test (3 A)    |\n"
@@ -496,6 +499,10 @@ void loop_communication_task()
         scope_fast_connect = !scope_fast_connect;
         printk("scope in CONNECT/INJECT: %s\n", scope_fast_connect ? "10 kHz" : "2 kHz");
         break;
+    case 'l':
+        telemetry_verbose = !telemetry_verbose;
+        printk("telemetry: %s\n", telemetry_verbose ? "full, every 100 ms" : "short, every 500 ms");
+        break;
     case 'f':
         scope_force_trigger = true;
         printk("scope trigger forced: wait 70 ms, then r\n");
@@ -526,8 +533,32 @@ void loop_application_task()
     if (mode == IDLE && inverter_stage == INV_OFF) spin.led.turnOff();
     else spin.led.turnOn();
 
-    if (control.boost.isTripped()) printk("boost tripped: press i (idle) to clear\n");
-    if (control.bench_tripped) printk("inverter bench current trip: press x (inverter OFF) to clear\n");
+    /* Trip messages once, when they latch. */
+    static bool boost_trip_shown = false, bench_trip_shown = false;
+    if (control.boost.isTripped() && !boost_trip_shown) printk("boost tripped: press i (idle) to clear\n");
+    if (control.bench_tripped && !bench_trip_shown) printk("inverter bench current trip: press x (inverter OFF) to clear\n");
+    boost_trip_shown = control.boost.isTripped();
+    bench_trip_shown = control.bench_tripped;
+
+    /* Default: one short line every 500 ms; key l toggles the full telemetry every 100 ms. */
+    static uint8_t telemetry_tick = 0U;
+    if (!telemetry_verbose)
+    {
+        if (++telemetry_tick < 5U) { task.suspendBackgroundMs(100); return; }
+        telemetry_tick = 0U;
+        const dqo_t idq_s = control.inverter.getIdq();
+        const uint32_t load_s = critical_max_us;
+        critical_max_us = 0U;
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u\n",
+               static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
+               static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
+               (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
+               static_cast<unsigned int>(control.grid_observer.canOperate()),
+               static_cast<unsigned int>(control.inverter.getFaultReason()),
+               (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)), static_cast<unsigned int>(load_s));
+        task.suspendBackgroundMs(100);
+        return;
+    }
     /* ILow1, VLow, duty1, VAC, VACrms, angle, IAC, VDCBus, mode, burst skip. */
     printk("%7.3f:", (double)i_low_1_value);
     // printk("%7.3f:", (double)i_low_2_value);
