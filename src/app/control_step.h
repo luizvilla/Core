@@ -174,6 +174,17 @@ inline constexpr float32_t vac_follow_advance = 1.3F;
 /** @brief Step 1d: time constant of the VAC DC estimate (bench offset about -5.7 V), in s. A first-order filter,
  * two operations per period: 50 Hz ripple on the estimate about Vpk/(w·tau) = 0.5 V; 95 % settled 6 s after boot. */
 inline constexpr float32_t vac_follow_dc_tau = 2.0F;
+/** @brief Step 2b: output advance, in control periods (D-GFL-04 optimum: 80 µs + half a period of hold, minus the
+ * one-sample lead of the PLL angle). Other stages keep inverter_output_phase_advance. */
+inline constexpr float32_t follow_connect_advance = 0.3F;
+/** @brief Step 2b: connection blanking, from the relay command, in s: the PLL frozen, the VAC copy until the predicted
+ * contact (relay_close_delay), then the synthesized feedforward to the end. 15 ms = 9.7 ms relay + the D-GFL-04
+ * optimum (5 ms after the contact), rounded up for the relay spread. Longer blanks raised the peak in D-GFL-04
+ * (0.37 A at 5 ms after the contact, 0.76 A from 20 ms on) and only postpone the PLL's settling tail. */
+inline constexpr float32_t follow_connect_blanking = 0.015F;
+/** @brief Step 2b: GRID_CONNECT → GRID_CONNECTED this long after the relay command, counted by the inverter, in s
+ * (relay 9.7 ms + settling + margin). The current PI runs from the relay request throughout. */
+inline constexpr float32_t follow_connect_window = 0.060F;
 
 }  // namespace app
 
@@ -200,7 +211,9 @@ enum InverterStage : uint8_t {
     INV_OPEN_LOOP = 2,  ///< Step 0: fixed 50 Hz modulation to 230 V RMS, no grid controller, relay open (menu 'o').
     INV_CONNECT = 3,    ///< Step 2: settle, close the relay, regulate zero current (GRID_CONNECTED) (menu 'g').
     INV_INJECT = 4,     ///< Step 3: as CONNECT, then inject a fixed d-axis current (RUN) (menu 'n').
-    INV_VAC_FOLLOW = 5  ///< Step 1d: once the grid is qualified, the bridge copies the measured VAC; relay never closed (menu 'a').
+    INV_VAC_FOLLOW = 5, ///< Step 1d: once the grid is qualified, the bridge copies the measured VAC; relay never closed (menu 'a').
+    INV_FOLLOW_CONNECT = 6  ///< Step 2b: as CONNECT, with the VAC copy as feedforward until the contact, the current PI from the
+                            ///< relay request, the PLL frozen from the command and the feedforward held after the contact (menu 'G').
 };
 
 /** @brief Operator requests from the serial menu. */

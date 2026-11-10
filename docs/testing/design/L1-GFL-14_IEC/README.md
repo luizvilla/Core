@@ -15,16 +15,16 @@ The run outputs stay in `tests/out/connection-l1/` (local, not committed). Only 
 
 ## What is being tested
 
-- **Strategy:** the current PI runs from the relay request, the output advance is 0.3 period, and from the relay command until 5 ms after the contact the feedforward is the period-averaged Vd rotated by the PLL angle while the PLL frequency is frozen.
-- **Study builds, nothing changes in production:** `connection_l1.py build` patches copies of the library (`holdConnectionReference()`) and of `src/app/control_step.{h,cpp}` under `tests/out/connection-l1/variants/`.
+- **Step 2b (stage 6), as it will be flashed:** VAC copy as feedforward until the predicted contact, current PI (Kp 1 V/A, Ti 5 ms) from the relay request, PLL frozen 15 ms from the relay command, synthesized feedforward from the predicted contact to the end of the blanking, GRID_CONNECTED 60 ms after the command, output advance 0.3.
+- **Production builds, nothing patched:** the library at the pinned commit (`build` refuses another checkout); the Kp 2 / Ti 20 ms variant only changes two constants in a copy of `src/app/control_step.h`.
 
-| Run | What it checks | Averaged prediction (peak before the step) |
+| Run | What it checks | Closest averaged result (peak before the step) |
 |---|---|---|
-| best, IEC grid, 80 µs | the design point | 0.37–0.41 A |
-| best, Kp 2 V/A, Ti 20 ms, IEC, 80 µs | the gain variant | 0.25–0.32 A |
-| best, cold bulb (40 Ω), 80 µs | the bench condition | 3.8 A (trips) |
-| best, IEC, 60 µs | delay sensitivity | 7.0 A (trips) |
-| best, IEC, 100 µs | delay sensitivity | 7.3 A (trips) |
-| today, IEC, 60 µs | today's settings at the other plausible delay | 9.8 A (trips) |
+| step 2b, IEC grid, 80 µs | the design point | ≈0.4 A (D-GFL-04) |
+| step 2b, Kp 2 V/A, Ti 20 ms, IEC, 80 µs | the gain variant | ≈0.3 A (D-GFL-06) |
+| step 2b, cold bulb (40 Ω), 80 µs | the bench condition | ≈3.8 A (trips, D-GFL-06) |
+| step 2b, IEC, 60 µs | delay sensitivity | ≈7 A (trips, D-GFL-06) |
+| step 2b, IEC, 100 µs | delay sensitivity | ≈7 A (trips, D-GFL-06) |
+| step 2 (today), IEC, 60 µs | today's connection at the other plausible delay | 9.8 A (trips) |
 
-The delay rows matter most: the averaged model says the result depends on the actuation delay to within 20 µs, because the filter resonance with the relay closed sits at the 10 kHz control rate (D-GFL-07). If the switched model agrees, the next design step is that resonance, not the connection strategy.
+The averaged results are the closest simulated cases: D-GFL-04/06 used the synthesized feedforward from the relay command, while step 2b copies VAC until the contact (not simulated). The delay rows matter most: the averaged model says the result depends on the actuation delay to within 20 µs, because the filter resonance with the relay closed sits at the 10 kHz control rate (D-GFL-07).

@@ -973,5 +973,124 @@ int main() {
         }
     }
 
+    // ---------------------------------------------------------------- L0-GFL-19
+    {
+        /** @test L0-GFL-19.a: Connection features off by default: no PI in GRID_CONNECT, no freeze, no hold, no external feedforward */
+        tc::Criterion c("L0-GFL-19.a", "Connection features off by default: no PI in GRID_CONNECT, no freeze, no hold, no external feedforward");
+        singlePhaseInverterFollowing inv; Grid grid; grid.current = 0.5;
+        c.check("from-connect off", !inv.getCurrentLoopFromConnect());
+        if (reachConnect(c, inv, grid)) {
+            step(inv, grid);
+            c.near("GRID_CONNECT output = feedforward only (V)", inv.getVdqOut().d - inv.getVdq().d, 0.0, 1e-4);
+            c.check("not frozen, not held", !inv.isPllFrozen() && !inv.isFeedforwardHeld());
+        }
+    }
+    {
+        /** @test L0-GFL-19.b: With setCurrentLoopFromConnect the PI acts in GRID_CONNECT (measured current 0.5 A, Kp 1 V/A) */
+        tc::Criterion c("L0-GFL-19.b", "With setCurrentLoopFromConnect the PI acts in GRID_CONNECT (measured current 0.5 A, Kp 1 V/A)");
+        singlePhaseInverterFollowing inv; Grid grid;
+        inv.setCurrentLoopFromConnect(true);
+        if (reachConnect(c, inv, grid)) {
+            c.check("gains", inv.setCurrentPiGains(1.0F, 0.005F));
+            grid.current = 0.5;
+            for (int k = 0; k < 20; ++k) step(inv, grid);
+            c.check("PI correction present in GRID_CONNECT (|ΔVd| > 0.1 V)", std::fabs(inv.getVdqOut().d - inv.getVdq().d) > 0.1F);
+            c.check("still GRID_CONNECT", inv.getMode() == VSI_GRID_CONNECT);
+        }
+    }
+    {
+        /** @test L0-GFL-19.c: freezePll latches the period-averaged frequency, holds it for the duration, then releases */
+        tc::Criterion c("L0-GFL-19.c", "freezePll latches the period-averaged frequency, holds it for the duration, then releases");
+        singlePhaseInverterFollowing inv; Grid grid; grid.hz = 50.5;
+        c.check("init", initDefault(inv)); inv.requestSync();
+        for (int k = 0; k < 2 * ticks_per_s; ++k) step(inv, grid);
+        for (float d : {-0.1F, 1.1F, f_nan}) c.check("invalid duration rejected", !inv.freezePll(d));
+        c.check("freeze 10 ms", inv.freezePll(0.01F));
+        const float w0_ = inv.getwAverage(); bool constant = true; int frozen = 0;
+        grid.hz = 50.0;  // the grid moves during the freeze: the PLL must not follow
+        for (int k = 0; k < 150; ++k) { step(inv, grid); if (inv.isPllFrozen()) { ++frozen; constant &= std::fabs(inv.getw() - w0_) < 1e-4F; } }
+        c.check("frequency = the latched average while frozen", constant);
+        c.near("frozen for 100 periods (10 ms)", frozen, 100.0, 1.0);
+        c.check("released afterwards", !inv.isPllFrozen());
+    }
+    {
+        /** @test L0-GFL-19.d: holdFeedforward replaces the measured Vdq by the averaged Vd (Vq 0) for the duration */
+        tc::Criterion c("L0-GFL-19.d", "holdFeedforward replaces the measured Vdq by the averaged Vd (Vq 0) for the duration");
+        singlePhaseInverterFollowing inv; Grid grid;
+        if (reachConnect(c, inv, grid)) {
+            const float vd_avg = inv.getVdqAverage().d;
+            c.check("hold 5 ms", inv.holdFeedforward(0.005F));
+            grid.amplitude *= 1.05;  // the grid moves during the hold: the feedforward must not follow
+            step(inv, grid);
+            c.near("output Vd = held average (V)", inv.getVdqOut().d, vd_avg, 0.05);
+            c.near("output Vq = 0 (V)", inv.getVdqOut().q, 0.0, 1e-4);
+            int held = 1; while (inv.isFeedforwardHeld() && held < 100) { step(inv, grid); ++held; }
+            c.near("held for 50 periods (5 ms)", held, 50.0, 1.0);
+            for (int k = 0; k < 400; ++k) step(inv, grid);
+            c.near("released: output follows the measured Vd again (V)", inv.getVdqOut().d, inv.getVdq().d, 0.05);
+        }
+    }
+    {
+        /** @test L0-GFL-19.e: An external feedforward sets the duty in PWM_SETTLE/GRID_CONNECT (gain applied); a hold overrides it */
+        tc::Criterion c("L0-GFL-19.e", "An external feedforward sets the duty in PWM_SETTLE/GRID_CONNECT (gain applied); a hold overrides it");
+        singlePhaseInverterFollowing inv; Grid grid;
+        if (reachConnect(c, inv, grid)) {
+            c.check("gain 1.02", inv.setFeedforwardGain(1.02F));
+            inv.setExternalFeedforward(100.0F, true);
+            const float duty = step(inv, grid);
+            c.near("duty = 1.02 · 100 V / (2 Vbus) + 0.5", duty, 1.02F * 100.0F / (2.0F * V_bus) + 0.5F, 1e-5);
+            inv.holdFeedforward(0.001F);
+            inv.setExternalFeedforward(100.0F, true);
+            const float duty_h = step(inv, grid);
+            c.check("hold overrides the external feedforward", std::fabs(duty_h - duty) > 1e-3F);
+            inv.setExternalFeedforward(f_nan, true);
+            for (int k = 0; k < 20; ++k) step(inv, grid);
+            c.near("non-finite disables it: output = measured feedforward (V)", inv.getVdqOut().d, 1.02 * inv.getVdq().d, 0.05);
+        }
+    }
+
+    {
+        /** @test L0-GFL-19.f: notifyRelayCommand with a 15 ms blanking: PLL frozen 15 ms from the call, external feedforward until the predicted contact (9.7 ms), feedforward held from there to the end of the blanking */
+        tc::Criterion c("L0-GFL-19.f", "notifyRelayCommand, blanking 15 ms: PLL frozen 15 ms, external feedforward until the predicted contact, feedforward held to the end of the blanking");
+        singlePhaseInverterFollowing inv; Grid grid;
+        for (float d : {-0.1F, 0.6F, f_nan}) c.check("invalid blanking rejected", !inv.setConnectionBlanking(d));
+        c.check("blanking 15 ms", inv.setConnectionBlanking(0.015F));
+        if (reachConnect(c, inv, grid)) {
+            c.check("notify, 9.7 ms", inv.notifyRelayCommand(0.0097F));
+            int frozen = 0, held_from = -1, held = 0, ext_until = -1;
+            for (int k = 0; k < 300; ++k) {
+                inv.setExternalFeedforward(100.0F, true);
+                const float duty = step(inv, grid);
+                if (inv.isPllFrozen()) ++frozen;
+                if (inv.isFeedforwardHeld()) { if (held_from < 0) held_from = k; ++held; }
+                if (std::fabs(duty - (100.0F / (2.0F * V_bus) + 0.5F)) < 1e-4F) ext_until = k;
+            }
+            c.near("PLL frozen for 150 periods (15 ms)", frozen, 150.0, 1.0);
+            c.near("feedforward held from period 96 (the predicted contact)", held_from, 96.0, 1.0);
+            c.near("held to the end of the blanking (53 periods)", held, 53.0, 1.0);
+            c.near("external feedforward used until the predicted contact", ext_until, 95.0, 1.0);
+            c.check("contact predicted", inv.isContactPredicted());
+        }
+    }
+    {
+        /** @test L0-GFL-19.g: With a 60 ms connect window, GRID_CONNECTED comes 60 ms after the relay command (feedback closed from 20 ms), not on the feedback; without a window, on the feedback */
+        tc::Criterion c("L0-GFL-19.g", "Connect window 60 ms: GRID_CONNECTED 60 ms after the relay command, not on the feedback; without a window, on the feedback");
+        for (bool window : {true, false}) {
+            singlePhaseInverterFollowing inv; Grid grid;
+            if (window) { c.check("window 60 ms", inv.setConnectWindow(0.060F)); inv.setConnectionBlanking(0.015F); }
+            if (!reachConnect(c, inv, grid)) continue;
+            inv.notifyRelayCommand(0.0097F);
+            int k_conn = -1;
+            for (int k = 0; k < 2000 && k_conn < 0; ++k) {
+                inv.setGridConnected(k >= 200);  // the application's feedback: 20 ms after the command
+                step(inv, grid);
+                if (inv.getMode() == VSI_GRID_CONNECTED) k_conn = k;
+            }
+            if (window) c.near("GRID_CONNECTED at 60 ms (periods)", k_conn, 599.0, 2.0);
+            else c.near("GRID_CONNECTED on the feedback at 20 ms (periods)", k_conn, 200.0, 2.0);
+            c.check("no fault", inv.getFaultReason() == VSI_FAULT_NONE);
+        }
+    }
+
     return tc::finish();
 }

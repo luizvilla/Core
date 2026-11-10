@@ -402,3 +402,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Telemetry only (background task): by default one short line every 500 ms (stage, inverter state, relay, VAC RMS, IAC, VDCBus, Id, Iq, grid_ok, fault, offset, critical-task load) instead of four lines every 100 ms; key `l` toggles the previous full telemetry; trip messages print once when they latch instead of every 100 ms. Control unchanged |
 | Evidence | Firmware builds |
 | Hardware check | Pending |
+
+## 2026-11-10 — Step 2b: connection with the VAC copy, PI from the relay request, blanking and connect window
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): bench step 2b …` commit that adds this entry; library `luizvilla/single_phase_inverter` `8a145fc`, `80de00a` |
+| Files | `owntech/lib/USB/single_phase_inverter/src/singlePhaseInverterFollowing.{h,cpp}`, `src/app/control_step.{h,cpp}`, `src/main.cpp`, `tests/l1/dependencies.lock.json`, `tests/l1/design/connection_l1.py` |
+| Reason | Luiz Villa asked for a connection test that uses the VAC copy, starts the current PI before the contact and blanks the PLL around it, with the inverter counting from the relay command and moving to CONNECTED 60 ms later (L2-INV-07) |
+| Behaviour change | Library: `setCurrentLoopFromConnect`, `freezePll`, `holdFeedforward`, `setExternalFeedforward`, `setConnectionBlanking` (from the relay command; alignment not judged while the PLL is frozen), `setConnectWindow`, `notifyRelayCommand`; all off by default, the existing L0 results unchanged. Application: stage `INV_FOLLOW_CONNECT` (key `G`) with the VAC copy as external feedforward, PI from the relay request, advance 0.3, blanking 15 ms, connect window 60 ms; the relay command notified to the inverter in every stage (no effect unless a blanking or window is set). The 60 ms blanking proposed was set to 15 ms after D-GFL-04 (longer blanks raised the peak from 0.37 to 0.76 A); the 60 ms is the connect window |
+| Evidence | Firmware builds. L0-GFL-19.a–g and L0-APP-12.a pass; other L0 results unchanged (L0-APP-03.c and L0-BST-09 fail as before, findings #2 and #5). L1-GFL-14 rebuilt on the production library (no patch) |
+| Hardware check | Not done (L2-INV-07 is the check) |

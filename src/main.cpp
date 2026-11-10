@@ -209,7 +209,7 @@ bool scope_trigger()
     /* Grid stages: capture the relay closing, or an inverter fault before it; open loop: the bridge
      * start; otherwise the synchronization. */
     if (scope_trigger_on_trip) return control.bench_tripped;
-    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT)
+    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)
         return scope_relay_closed > 0.5F || scope_inverter_mode == static_cast<float32_t>(VSI_FAULT);
     if (inverter_stage == INV_OPEN_LOOP) return scope_bridge_on > 0.5F;
     return scope_sync > 0.5F;
@@ -336,6 +336,7 @@ void loop_communication_task()
                "|     press c : step 1 PWM_SETTLE hold   |\n"
                "|     press a : step 1d copy VAC, no relay|\n"
                "|     press g : step 2 connect (relay)   |\n"
+               "|     press G : step 2b connect, VAC copy|\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
                "|     press + / - : inverter V offset +/-|\n"
@@ -392,6 +393,13 @@ void loop_communication_task()
         inverter_stage = INV_VAC_FOLLOW;
         scope_trigger_on_trip = false;
         relay_test = false;
+        break;
+    case 'G':
+        printk("inverter step 2b: VAC copy until the contact, PI from the relay request, PLL frozen and feedforward held (5 ms)\n");
+        inverter_stage = INV_FOLLOW_CONNECT;
+        scope_trigger_on_trip = false;
+        relay_test = false;
+        scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'g':
         printk("inverter step 2: settle %u periods, close the relay, zero current\n",
@@ -803,7 +811,7 @@ void loop_critical_task()
     scope_bridge_on = control.bridge_pwm_applied ? 1.0F : 0.0F;
     scope_bridge_duty = control.bridge_pwm_applied ? out.bridge_duty : 0.0F;
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
-    const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT)) ?
+    const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)) ?
                              1U : scope_sample_divider;
     if (++scope_sample_tick >= divider)
     {

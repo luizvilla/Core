@@ -789,5 +789,50 @@ int main() {
         c.check("bridge stopped on the trip tick", !out.bridge_enable);
     }
 
+    // ---------------------------------------------------------------- L0-APP-12
+    {
+        /** @test L0-APP-12.a: Step 2b: VAC copy in PWM_SETTLE, PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */
+        tc::Criterion c("L0-APP-12.a", "Step 2b: VAC copy in PWM_SETTLE, PI from the relay request, blanking 15 ms from the command, GRID_CONNECTED 60 ms after it; advance 0.3 in this stage only");
+        ControlState state; Grid grid; Relay relay;
+        OperatorCommands cmd; cmd.inverter_stage = INV_FOLLOW_CONNECT;
+        c.check("controlInit", controlInit(state) == 0);
+        bool settle_seen = false, copy_ok = true, froze = false, held_ff = false, faulted = false;
+        int k_cmd = -1, k_freeze_end = -1, k_hold = -1, k_hold_end = -1, k_conn = -1;
+        for (int k = 0; k < 4 * ticks_per_s; ++k) {
+            const float v_now = grid.v(), v_prev = state.vac_prev; const float dc = state.vac_dc;
+            Measurements m; m.v_dc_bus = v_bus; m.v_ac = v_now; m.v_ac_updated = true; m.i_ac = 0.0F; m.relay_closed = relay.closed;
+            const ControlOutputs out = controlStep(state, m, cmd);
+            state.bridge_pwm_applied = out.bridge_enable; relay.apply(out); grid.advance();
+            const vsi_mode_t mode = state.inverter.getMode();
+            if (mode == VSI_PWM_SETTLE) {
+                settle_seen = true;
+                const double dc_next = dc + (v_now - dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
+                const double expect = 0.5 + (v_now + app::vac_follow_advance * (v_now - v_prev) - dc_next) / (2.0 * v_bus);
+                copy_ok &= std::fabs(out.bridge_duty - expect) < 1e-4;
+            }
+            if (out.relay_close && k_cmd < 0) k_cmd = k;
+            if (state.inverter.isPllFrozen()) froze = true; else if (froze && k_freeze_end < 0) k_freeze_end = k;
+            if (state.inverter.isFeedforwardHeld()) { held_ff = true; if (k_hold < 0) k_hold = k; } else if (held_ff && k_hold_end < 0) k_hold_end = k;
+            faulted |= mode == VSI_FAULT;
+            if (mode == VSI_GRID_CONNECTED && k_conn < 0) k_conn = k;
+        }
+        c.check("PWM_SETTLE reached", settle_seen);
+        c.check("duty = VAC copy in PWM_SETTLE", copy_ok);
+        c.check("PI from the relay request", state.inverter.getCurrentLoopFromConnect());
+        c.near("advance 0.3 in step 2b", state.inverter.getOutputPhaseAdvance(), app::follow_connect_advance, 1e-6);
+        c.check("relay commanded", k_cmd >= 0);
+        c.near("PLL frozen from the command for 15 ms (periods)", k_freeze_end - k_cmd, 150.0, 2.0);
+        c.near("feedforward held from the predicted contact (periods after the command)", k_hold - k_cmd, 97.0, 2.0);
+        c.near("held to the end of the blanking (periods)", k_hold_end - k_hold, 53.0, 2.0);
+        c.near("GRID_CONNECTED 60 ms after the command, counted by the inverter (periods)", k_conn - k_cmd, 600.0, 3.0);
+        c.check("GRID_CONNECTED, no fault", state.inverter.getMode() == VSI_GRID_CONNECTED && !faulted);
+        cmd.inverter_stage = INV_CONNECT;
+        Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.relay_closed = relay.closed;
+        controlStep(state, m, cmd);
+        c.near("back to step 2: advance 0.5", state.inverter.getOutputPhaseAdvance(), app::inverter_output_phase_advance, 1e-6);
+        c.check("back to step 2: PI from the relay feedback again", !state.inverter.getCurrentLoopFromConnect());
+        c.near("back to step 2: no connect window", state.inverter.getConnectWindow(), 0.0, 0.0);
+    }
+
     return tc::finish();
 }

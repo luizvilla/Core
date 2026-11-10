@@ -874,6 +874,16 @@
    "status_note": "Implemented 2026-11-10"
   },
   {
+   "id": "L0-GFL-19",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Connection support: PI from GRID_CONNECT, PLL freeze, feedforward hold, external feedforward, relay-command anticipation, connect window",
+   "criterion": ".a all off by default; .b the PI acts in GRID_CONNECT when enabled; .c freezePll latches the averaged frequency for the duration; .d holdFeedforward replaces Vdq by the averaged Vd for the duration; .e an external feedforward sets the duty, a hold overrides it; .f notifyRelayCommand with a 15 ms blanking: PLL frozen 15 ms, external feedforward until the predicted contact, hold to the end; .g a 60 ms connect window: GRID_CONNECTED 60 ms after the command, not on the feedback",
+   "source": "library 80de00a",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-10"
+  },
+  {
    "id": "L1-GFL-01",
    "tab": "inverter",
    "level": "L1",
@@ -1025,13 +1035,13 @@
    "id": "L1-GFL-14",
    "tab": "inverter",
    "level": "L1",
-   "title": "Connection strategy of D-GFL-04 on the switched model: synthesized feedforward and PLL frozen until 5 ms after the contact, advance 0.3",
+   "title": "Connection on the switched model: step 2b (VAC copy, PI from the relay request, 15 ms blanking, CONNECTED at 60 ms) against step 2",
    "criterion": "INFO (validation of the design tests, ADR 0004): .a trip or no trip at the contact and peak line current against the averaged prediction of D-GFL-06; .b sensitivity to the actuation delay (60 / 80 / 100 µs); .c the cold bulb; .d Kp 2 V/A, Ti 20 ms. Pass/fail limits to be set from the result (provisional design target: peak below 0.3 A)",
-   "conditions": "Switched model, real application through the bench stages (contract app-v3), study builds by tests/l1/design/connection_l1.py: library with the current PI from the relay request and holdConnectionReference(); application calling it when the relay command is latched (relay_close_delay + 5 ms); output advance 0.3. Runs: today@60 µs IEC, best@80 µs IEC, best@80 µs cold bulb, best@60 µs IEC, best@100 µs IEC, best Kp 2 / Ti 20 ms @80 µs IEC. How to run: python3 tests/l1/design/connection_l1.py build; ... run [--jobs N]; ... report; then python3 tests/common/control_center.py, and commit docs/testing/design/L1-GFL-14_IEC/report.md",
+   "conditions": "Switched model, real application through the bench stages (contract app-v3), production library 80de00a, builds by tests/l1/design/connection_l1.py (prod, and prod_kp2 = Kp 2 / Ti 20 ms). Runs: step 2 @60 µs IEC; step 2b @80 µs IEC and cold bulb, @60 and @100 µs IEC; step 2b Kp 2 / Ti 20 ms @80 µs IEC. How to run: python3 tests/l1/design/connection_l1.py build; ... run [--jobs N]; ... report; then python3 tests/common/control_center.py, and commit docs/testing/design/L1-GFL-14_IEC/report.md",
    "source": "tests/l1/design/connection_l1.py; D-GFL-04, D-GFL-06",
    "status": "implemented",
    "report": "docs/testing/design/L1-GFL-14_IEC/report.md",
-   "status_note": "Prepared 2026-11-10 for Jean Alinei's machine (about 30 min with the six runs in parallel); not run yet"
+   "status_note": "Prepared 2026-11-10 for Jean Alinei's machine (about 30 min with the six runs in parallel); rebuilt the same day on the production step 2b; not run yet"
   },
   {
    "id": "L2-INV-00",
@@ -1088,6 +1098,17 @@
    "criterion": ".a no bridge before the grid is qualified, relay never commanded; .b inverter-side amplitude within ±2 % of the grid; .c phase within ±1°; INFO .d voltage across the open relay, step 1d against step 1",
    "conditions": "Bench session, stage INV_VAC_FOLLOW (a), grid wired through the bulb on the other side of the relay, relay open",
    "source": "`controlStep` INV_VAC_FOLLOW, `app::vac_follow_advance`, `app::vac_follow_window`",
+   "status": "planned",
+   "status_note": "Defined 2026-11-10 with Luiz Villa"
+  },
+  {
+   "id": "L2-INV-07",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 2b: connection with the VAC copy, the current PI from the relay request and a 15 ms blanking",
+   "criterion": "As L2-INV-02 .a–.f (closing peak < 1.5 A without trip, settled within 100 ms, residual < 0.05 A RMS, orderly opening), plus .g GRID_CONNECTED 60 ms (±2 ms) after the relay command; INFO .h closing peak and settling against step 2",
+   "conditions": "Bench session, stage INV_FOLLOW_CONNECT (G), grid through the cold bulb on the other side of the relay",
+   "source": "`setCurrentLoopFromConnect`, `setExternalFeedforward`, `setConnectionBlanking`, `setConnectWindow`, `notifyRelayCommand` (library 80de00a); `app::follow_connect_blanking`, `app::follow_connect_window`",
    "status": "planned",
    "status_note": "Defined 2026-11-10 with Luiz Villa"
   },
@@ -1234,6 +1255,16 @@
    "title": "Step 1d: the bridge copies VAC once the grid is qualified, relay never commanded",
    "criterion": ".a no bridge before qualification; then duty = 0.5 + (VAC extrapolated 1.3 periods − one-period mean) / (2 Vbus), amplitude 325 V peak with a −5.7 V VAC offset removed, relay never commanded, inverter controller OFF; .b the offset of step 1c scales the copy; a bench trip stops the bridge on its tick",
    "source": "`controlStep` INV_VAC_FOLLOW",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-10"
+  },
+  {
+   "id": "L0-APP-12",
+   "tab": "app",
+   "level": "L0",
+   "title": "Step 2b: connection with the VAC copy, PI from the relay request, blanking 15 ms, CONNECTED at 60 ms",
+   "criterion": ".a duty = VAC copy in PWM_SETTLE; PI from the relay request; PLL frozen 15 ms from the relay command; feedforward held from the predicted contact to the end of the blanking; GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage, 0.5 and feedback-driven connection back in step 2",
+   "source": "`controlStep` INV_FOLLOW_CONNECT",
    "status": "implemented",
    "status_note": "Implemented 2026-11-10"
   },

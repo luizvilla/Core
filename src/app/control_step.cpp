@@ -98,7 +98,8 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     /* ---- Inverter bench stage (docs/testing/bench/inverter-session.md) ---- */
     const InverterStage stage = cmd.inverter_stage;
     const bool bus_valid = isfinite(meas.v_dc_bus) && meas.v_dc_bus > 0.0F;
-    const bool grid_stage = stage == INV_SETTLE || stage == INV_CONNECT || stage == INV_INJECT;
+    const bool follow_connect = stage == INV_FOLLOW_CONNECT;
+    const bool grid_stage = stage == INV_SETTLE || stage == INV_CONNECT || stage == INV_INJECT || follow_connect;
     /* Keep the PLL running in idle, using a positive bus value for duty scaling; a grid
      * stage passes any bus value so the inverter faults on an invalid one. The open-loop
      * stage does not use the grid-following inverter, so it never faults it. */
@@ -108,7 +109,7 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     const bool on_grid = vsi == VSI_GRID_CONNECT || vsi == VSI_GRID_CONNECTED || vsi == VSI_RUN ||
                          vsi == VSI_STOPPING || vsi == VSI_DISCONNECT;
     /* Relay closure only in CONNECT and INJECT; SETTLE holds PWM_SETTLE (zero dwell). */
-    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT) ? app::inverter_settle_cycles :
+    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT || follow_connect) ? app::inverter_settle_cycles :
                                       (cmd.settle_count_test ? app::settle_count_test_cycles : 0U));
     /* Back to SETTLE from the grid: disconnect first (relay opens), then synchronize again. */
     if (grid_stage && !(stage == INV_SETTLE && on_grid) && !state.bench_tripped)
@@ -136,6 +137,17 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     /* PWM start-up acknowledgement (single_phase_inverter PWM_WAIT/PWM_SETTLE): report
      * whether the hardware loop actually applied the inverter's own bridge PWM last period. */
     state.inverter.setPwmEnabled(state.bridge_pwm_applied && !state.open_loop_active);
+    /* VAC copy (steps 1d and 2b): DC removed, extrapolated over the actuation delay. */
+    const float32_t vac = isfinite(meas.v_ac) ? meas.v_ac : state.vac_prev;
+    state.vac_dc += (vac - state.vac_dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
+    const float32_t vac_copy = vac + app::vac_follow_advance * (vac - state.vac_prev) - state.vac_dc;
+    /* Step 2b: current PI from the relay request, D-GFL-04 advance, VAC copy as feedforward until the predicted
+     * contact (the PLL freeze and the feedforward hold are started by the relay logic below). */
+    state.inverter.setCurrentLoopFromConnect(follow_connect);
+    state.inverter.setOutputPhaseAdvance(follow_connect ? app::follow_connect_advance : app::inverter_output_phase_advance);
+    state.inverter.setConnectionBlanking(follow_connect ? app::follow_connect_blanking : 0.0F);
+    state.inverter.setConnectWindow(follow_connect ? app::follow_connect_window : 0.0F);
+    state.inverter.setExternalFeedforward(vac_copy, follow_connect && !state.bench_tripped);  /* stops at the predicted contact */
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
     const clarke_t grid_voltage_ab = state.inverter.getVab();
     /* The observer judges one-period averages once the inverter's window is full (as its
@@ -178,15 +190,13 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     /* Step 1d: VAC follower. Once the grid is qualified, the bridge copies the measured VAC (DC removed,
      * extrapolated over the actuation delay, offset of step 1c applied), ramped in like step 0. The inverter
      * controller stays OFF, so the relay is never requested. */
-    const float32_t vac = isfinite(meas.v_ac) ? meas.v_ac : state.vac_prev;
-    state.vac_dc += (vac - state.vac_dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
     const bool vac_follow = stage == INV_VAC_FOLLOW && !state.bench_tripped && bus_valid && state.grid_observer.canOperate() &&
                             (vsi_now == VSI_OFF || vsi_now == VSI_FAULT) && !meas.relay_closed;
     if (vac_follow)
     {
         const float32_t step = app::open_loop_m_rate * app::hot_loop_period;
         state.open_loop_m += fminf(fmaxf(1.0F - state.open_loop_m, -step), step);
-        const float32_t predicted = vac + app::vac_follow_advance * (vac - state.vac_prev) - state.vac_dc;
+        const float32_t predicted = vac_copy;
         const float32_t gain = 1.0F + fminf(fmaxf(cmd.vac_offset, 0.0F), app::inverter_vac_offset_max);
         out.bridge_duty = 0.5F + state.open_loop_m * gain * predicted / (2.0F * meas.v_dc_bus);
         out.bridge_enable = true;
@@ -213,6 +223,7 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     /* Relay: once the inverter requests the connection, issue the command app::relay_close_delay before a
      * grid-voltage zero crossing, so the contact closes near zero voltage. Locked, v = Vd·cos(theta): zero
      * crossings at theta = pi/2 (mod pi). The averaged frequency projects the angle over the closing time. */
+    const bool was_latched = state.relay_command_latched;
     if (!state.inverter.isGridConnectionRequested())
     {
         state.relay_command_latched = false;
@@ -232,6 +243,9 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
             if (phi < 1.5F * w * app::hot_loop_period) state.relay_command_latched = true;
         }
     }
+    /* Tell the inverter the relay was just commanded: it anticipates the contact relay_close_delay later (step 2b:
+     * PLL frozen from now, feedforward held from the predicted contact, VAC copy stopped there). */
+    if (state.relay_command_latched && !was_latched) state.inverter.notifyRelayCommand(app::relay_close_delay);
     out.relay_close = state.relay_command_latched;
     out.bench_trip = state.bench_tripped;
     return out;
