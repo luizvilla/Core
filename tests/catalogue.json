@@ -245,8 +245,9 @@
    "criterion": "One factor at a time on rung 1: feedforward of the measured VAC vs the exact grid voltage; current PI on vs off; delay compensation 0 / 0.5 / 1 period. Identifies which path carries the 1.3 A transient. Reported for every case (INFO): peak line current over 10 and 20 ms after the contact; settling within ±0.05 A of the reference; |I_dq| seen by the controller against the line current; PLL deviation (largest angle and frequency excursion); for linear cases the loop diagram, open- and closed-loop Bode plots, crossover, phase and gain margins, closed-loop bandwidth and peak",
    "conditions": "Averaged model (tests/l1/design/ladder.py, loop_linear.py): averaged bridge, 500 µH (r 0.1 Ω), library arithmetic (SOGI, park, PI, PLL, output advance), bench sequence from PWM_SETTLE, relay contact 9.7 ms after the command; candidate C (Kp 1 V/A, Ti 5 ms, current SOGI 2000 rad/s, advance 0.5) unless varied; rung 1 (ideal angle, no capacitors, delay one period); IEC grid",
    "source": "ADR 0004; docs/testing/inverter-current-loop-design.md",
-   "status": "planned",
-   "status_note": "Defined 2026-11-10 with Luiz Villa (target for the ideal case to be set by him; proposed peak < 0.3 A, settling < 20 ms)"
+   "status": "implemented",
+   "status_note": "Run 2026-11-10 on the IEC grid: the disturbance is the inverter-grid voltage mismatch at the contact, set by the output timing (1.5 periods of delay); exact feedforward with a 1.5-period advance removes it (0.016 A); today 1.29 A, best advance with the measured feedforward 0.7 (0.78 A)",
+   "report": "docs/testing/design/D-GFL-02_IEC/report.md"
   },
   {
    "id": "D-GFL-03",
@@ -256,8 +257,9 @@
    "criterion": "Contact instant swept over 0–180° in 5° steps relative to the voltage zero crossing (the relay command shifted accordingly); best angle and flatness of the optimum against the relay closing-time spread. Hypothesis: the voltage across the contacts is the inverter-grid mismatch, proportional to dv/dt, so the voltage peak may beat the zero crossing. Reported for every case (INFO): peak line current over 10 and 20 ms after the contact; settling within ±0.05 A of the reference; |I_dq| seen by the controller against the line current; PLL deviation (largest angle and frequency excursion); for linear cases the loop diagram, open- and closed-loop Bode plots, crossover, phase and gain margins, closed-loop bandwidth and peak",
    "conditions": "Averaged model (tests/l1/design/ladder.py, loop_linear.py): averaged bridge, 500 µH (r 0.1 Ω), library arithmetic (SOGI, park, PI, PLL, output advance), bench sequence from PWM_SETTLE, relay contact 9.7 ms after the command; candidate C (Kp 1 V/A, Ti 5 ms, current SOGI 2000 rad/s, advance 0.5) unless varied; rung 1, then rung 4; IEC grid",
    "source": "ADR 0004; docs/testing/inverter-current-loop-design.md",
-   "status": "planned",
-   "status_note": "Defined 2026-11-10 with Luiz Villa"
+   "status": "implemented",
+   "status_note": "Run 2026-11-10 on the IEC grid: the angle is second order with today's feedforward (1.17–1.70 A, no angle meets the target); with the synthesized feedforward the rung-4 peak falls to 0.09–0.38 A but a slow 0.4 A oscillation remains (PLL coupling); the PLL leads by one sample (1.8°)",
+   "report": "docs/testing/design/D-GFL-03_IEC/report.md"
   },
   {
    "id": "D-GFL-04",

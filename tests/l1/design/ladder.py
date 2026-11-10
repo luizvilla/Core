@@ -79,20 +79,21 @@ def plant(caps, rg, lg, closed):
 
 
 def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0.005, kr_i=2000.0,
-        adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP):
+        adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP, ff='measured', contact_deg=0.0):
     """@return dict of traces at the control rate and the trip time (None if no trip)."""
     sv, si = Sogi(500.0), Sogi(kr_i)
     pid, piq = Pi(kp, ti, -30.0, 30.0), Pi(kp, ti, -30.0, 30.0)
     wn = 3.0 / (2 * math.pi / W0); kpp = 2 * wn * 0.7 / VPK; kip = wn * wn / VPK
     pll_pi = Pi(kpp, kpp / kip, -10 * W0, 10 * W0)
     # Relay command: the application latches it so the contact (9.7 ms later) falls on a zero crossing.
-    t_contact = math.ceil((T_CMD_NOMINAL + RELAY_CLOSE) * 100) / 100 + 0.0  # voltage zero at k·10 ms
+    # contact_deg: grid-voltage angle at the contact, from a rising zero crossing (v = Vpk·sin, zero at k·20 ms).
+    t_contact = math.ceil((T_CMD_NOMINAL + RELAY_CLOSE) / 0.02) * 0.02 + (contact_deg % 360) / 360 * 0.02
     t_cmd = t_contact - RELAY_CLOSE; t_fb = t_cmd + RELAY_FEEDBACK
     mats = {c: plant(caps, rg, lg, c) for c in (False, True)}
     x = np.zeros(mats[False][2]); was_closed = False
     theta, w, vq_prev = 0.0, W0, 0.0; ilp = 0.0; a_lp = 1 - math.exp(-2 * math.pi * lpf_fc * TS) if lpf_fc else None
     pending = []  # (time it takes effect, bridge voltage)
-    vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty')}
+    vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err')}
     trip_t = None
     for k in range(steps):
         t = k * TS; closed = t >= t_contact
@@ -118,7 +119,8 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
         c, s = math.cos(theta), math.sin(theta)
         vd, vq = a * c + b * s, -a * s + b * c; idm, iqm = ia * c + ib * s, -ia * s + ib * c
         vq_prev = vq
-        active = t >= (t_cmd if pi_from == 'command' else t_fb)
+        if ff == 'exact': vd, vq = VPK, 0.0   # feedforward from the true grid voltage instead of the measured VAC
+        active = pi_from != 'never' and t >= (t_cmd if pi_from == 'command' else t_fb)
         if active:
             ref = iref if t >= T_STEP else 0.0
             ud = vd + pid(ref, idm); uq = vq + piq(0.0, iqm)
@@ -133,7 +135,8 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
             tj = t + j * H
             while pending and pending[0][0] <= tj + 1e-12: vb = pending.pop(0)[1]
             x = Ad @ x + Bd @ np.array([vb, VPK * math.sin(W0 * (tj + H / 2))])
-        for key, val in (('t', t), ('ig', ig), ('idm', idm), ('iqm', iqm), ('vd', vd), ('vq', vq), ('w', w), ('duty', duty)):
+        th_err = (theta - (W0 * t - math.pi / 2) + math.pi) % (2 * math.pi) - math.pi
+        for key, val in (('t', t), ('ig', ig), ('idm', idm), ('iqm', iqm), ('vd', vd), ('vq', vq), ('w', w), ('duty', duty), ('th_err', th_err)):
             rec[key][k] = val
         if closed and abs(ig) > trip and trip_t is None: trip_t = t
         if trip_t is not None and t > trip_t + 0.02: rec = {kk: v[:k + 1] for kk, v in rec.items()}; break

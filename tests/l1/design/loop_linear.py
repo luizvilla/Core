@@ -85,11 +85,13 @@ def controller_response(w, kp, ti, kr_i, adv, lpf_fc=None, kr_v=500.0):
     return K, F
 
 
-def loop(caps, rg, lg, delay, kp, ti, kr_i, adv, lpf_fc=None, f_dq=None):
+def loop(caps, rg, lg, delay, kp, ti, kr_i, adv, lpf_fc=None, f_dq=None, ff='measured', pi=True):
     """@return dict: dq-frame frequency (Hz), open loop L, closed loop T, at ω = ω0 + 2π f_dq."""
     if f_dq is None: f_dq = np.logspace(0, math.log10(1 / (2 * TS) - 60), 3000)
     w = W0 + 2 * math.pi * f_dq
     Pi_, Pv = plant_response(w, caps, rg, lg, delay); K, F = controller_response(w, kp, ti, kr_i, adv, lpf_fc)
+    if ff == 'exact': F = 0 * F    # feedforward from the true grid voltage: not a function of the plant
+    if not pi: K = 0 * K
     L = K * Pi_ - F * Pv; T = K * Pi_ / (1 + L)
     return {'f': f_dq, 'L': L, 'T': T}
 
