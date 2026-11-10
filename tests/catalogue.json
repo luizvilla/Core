@@ -267,10 +267,11 @@
    "level": "D",
    "title": "Blanking time after the contact: PLL and/or feedforward frozen",
    "criterion": "During a blank time T_b after the contact (0–40 ms swept) freeze (a) the PLL (angle advancing at the averaged frequency), (b) the feedforward (Vd, Vq held at their pre-contact values), (c) both; time-domain judgement (time-varying), margins of the loop after the blank time. Reported for every case (INFO): peak line current over 10 and 20 ms after the contact; settling within ±0.05 A of the reference; |I_dq| seen by the controller against the line current; PLL deviation (largest angle and frequency excursion); for linear cases the loop diagram, open- and closed-loop Bode plots, crossover, phase and gain margins, closed-loop bandwidth and peak",
-   "conditions": "Averaged model (tests/l1/design/ladder.py, loop_linear.py): averaged bridge, 500 µH (r 0.1 Ω), library arithmetic (SOGI, park, PI, PLL, output advance), bench sequence from PWM_SETTLE, relay contact 9.7 ms after the command; candidate C (Kp 1 V/A, Ti 5 ms, current SOGI 2000 rad/s, advance 0.5) unless varied; best contact angle from D-GFL-03; rungs 1–4; IEC grid",
+   "conditions": "Averaged model (tests/l1/design/ladder.py, loop_linear.py): averaged bridge, 500 µH (r 0.1 Ω), library arithmetic (SOGI, park, PI, PLL, output advance), bench sequence from PWM_SETTLE, relay contact 9.7 ms after the command; candidate C (Kp 1 V/A, Ti 5 ms, current SOGI 2000 rad/s, advance 0.5) unless varied; best contact angle from D-GFL-03; rungs 1–4; IEC grid; swept: blank 0–80 ms, fade 0/10/30 ms, advance 0.5/0.3; contact 45° and 0°",
    "source": "ADR 0004; docs/testing/inverter-current-loop-design.md",
-   "status": "planned",
-   "status_note": "Defined 2026-11-10 with Luiz Villa"
+   "status": "implemented",
+   "status_note": "Run 2026-11-10 on the IEC grid (rung 4): advance 0.3 alone 1.44 → 0.66 A; best synthesized feedforward + PLL frozen 5 ms: 0.37 A peak; no case meets the target: an 80–90 ms tail from the PLL remains (Kp 2, Ti 20 ms: 0.32 A, 80 ms)",
+   "report": "docs/testing/design/D-GFL-04_IEC/report.md"
   },
   {
    "id": "D-GFL-05",

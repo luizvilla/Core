@@ -79,7 +79,12 @@ def plant(caps, rg, lg, closed):
 
 
 def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0.005, kr_i=2000.0,
-        adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP, ff='measured', contact_deg=0.0):
+        adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP, ff='measured', contact_deg=0.0,
+        synth_blank=None, adv_synth=0.3, fade=0.0, pll_freeze=None):
+    """synth_blank (s): feedforward synthesized (pre-command period average of Vd, PLL angle, advance adv_synth)
+    from the relay command to contact + synth_blank, then faded to the measured one over fade (s).
+    pll_freeze (s): PLL integrator held and ω latched (pre-command period average) from the contact to
+    contact + pll_freeze; θ free-runs."""
     """@return dict of traces at the control rate and the trip time (None if no trip)."""
     sv, si = Sogi(500.0), Sogi(kr_i)
     pid, piq = Pi(kp, ti, -30.0, 30.0), Pi(kp, ti, -30.0, 30.0)
@@ -93,6 +98,7 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
     x = np.zeros(mats[False][2]); was_closed = False
     theta, w, vq_prev = 0.0, W0, 0.0; ilp = 0.0; a_lp = 1 - math.exp(-2 * math.pi * lpf_fc * TS) if lpf_fc else None
     pending = []  # (time it takes effect, bridge voltage)
+    hist_vd, hist_w = [], []; vd_lat, w_lat = VPK, W0
     vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err')}
     trip_t = None
     for k in range(steps):
@@ -107,7 +113,10 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
         else:  # no capacitors: VAC = vg + rg·i + lg·di/dt, di/dt from the applied bridge voltage
             vpcc = vg + rg * ig + lg * (vb - vg - (R_F + rg) * ig) / (L_F + lg)
         # --- controller (calculateDuty order) ---
-        if pll:
+        frozen = pll_freeze is not None and t_contact <= t < t_contact + pll_freeze
+        if pll and frozen:
+            w = w_lat; theta = (theta + w * TS) % (2 * math.pi)
+        elif pll:
             w = W0 + pll_pi(0.0, -vq_prev); theta = (theta + w * TS) % (2 * math.pi)
         else:
             w = W0; theta = (W0 * t - math.pi / 2) % (2 * math.pi)
@@ -119,14 +128,22 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
         c, s = math.cos(theta), math.sin(theta)
         vd, vq = a * c + b * s, -a * s + b * c; idm, iqm = ia * c + ib * s, -ia * s + ib * c
         vq_prev = vq
+        hist_vd.append(vd); hist_w.append(w)
+        if t < t_cmd: vd_lat = float(np.mean(hist_vd[-200:])); w_lat = float(np.mean(hist_w[-200:]))
         if ff == 'exact': vd, vq = VPK, 0.0   # feedforward from the true grid voltage instead of the measured VAC
         active = pi_from != 'never' and t >= (t_cmd if pi_from == 'command' else t_fb)
         if active:
             ref = iref if t >= T_STEP else 0.0
-            ud = vd + pid(ref, idm); uq = vq + piq(0.0, iqm)
+            pd_, pq_ = pid(ref, idm), piq(0.0, iqm)
         else:
-            pid.reset(); piq.reset(); ud, uq = vd, vq
-        tho = theta + adv * w * TS; va = ud * math.cos(tho) - uq * math.sin(tho)
+            pid.reset(); piq.reset(); pd_, pq_ = 0.0, 0.0
+        ks = 0.0  # weight of the synthesized feedforward
+        if synth_blank is not None and t >= t_cmd:
+            t_end_s = t_contact + synth_blank
+            ks = 1.0 if t < t_end_s else (max(0.0, 1.0 - (t - t_end_s) / fade) if fade > 0 else 0.0)
+        tho = theta + adv * w * TS; ths = theta + adv_synth * w * TS
+        va = ((pd_ + (1 - ks) * vd) * math.cos(tho) - (pq_ + (1 - ks) * vq) * math.sin(tho)
+              + ks * vd_lat * math.cos(ths))
         duty = min(max(va / (2 * VBUS) + 0.5, 0.05), 0.95)
         pending.append((t + delay, VBUS * (2 * duty - 1)))
         # --- plant over one control period ---

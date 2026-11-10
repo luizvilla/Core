@@ -29,13 +29,13 @@ def metrics(rg, lg, **kw):
     m10, m20, m5 = after & (t < tc + 0.01), after & (t < tc + 0.02), after & (t < tc + 0.005)
     out_band = np.where(pre & (np.abs(ig) > SETTLE_BAND))[0]
     settle = float(1e3 * (t[out_band[-1]] - tc)) if len(out_band) else 0.0
-    res = {'peak10': float(np.abs(ig[m10]).max()), 'peak20': float(np.abs(ig[m20]).max()), 'settle_ms': settle,
+    res = {'peak10': float(np.abs(ig[m10]).max()), 'peak20': float(np.abs(ig[m20]).max()), 'peak_all': float(np.abs(ig[pre]).max()), 'settle_ms': settle,
            'real5': float(np.abs(ig[m5]).max()), 'seen5': float(np.hypot(r['idm'][m5], r['iqm'][m5]).max()),
            'th_dev_deg': float(np.degrees(np.abs(r['th_err'][pre] - r['th_err'][after][0]).max())),
            'w_dev_hz': float(np.abs(r['w'][pre] - ld.W0).max() / (2 * math.pi)),
            'trips': bool(np.abs(ig[after]).max() > ld.TRIP), 'final_id': float(r['idm'][t > ld.T_END - 0.04].mean()),
            'trace': (t[after & (t < tc + 0.06)] - tc, ig[after & (t < tc + 0.06)])}
-    res['meets'] = res['peak10'] < TARGET_PEAK and res['settle_ms'] < TARGET_SETTLE_MS
+    res['meets'] = res['peak_all'] < TARGET_PEAK and res['settle_ms'] < TARGET_SETTLE_MS
     return res
 
 
@@ -153,10 +153,73 @@ def test03(grid, out):
     (out / 'report.md').write_text('\n'.join(lines) + '\n'); print('\n'.join(lines[8:]))
 
 
+def test04(grid, out):
+    import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+    rg, lg = ld.GRIDS[grid]; blanks = [0.0, 0.005, 0.01, 0.02, 0.04, 0.08]
+    variants = [('a. PLL frozen', lambda tb: {'pll_freeze': tb}),
+                ('b. synthesized feedforward', lambda tb: {'synth_blank': tb}),
+                ('c. both', lambda tb: {'synth_blank': tb, 'pll_freeze': tb})]
+    grid_res = []  # (variant, adv, fade, tb, contact, metrics)
+    for vname, vk in variants:
+        for adv in (0.5, 0.3):
+            for fade in (0.0, 0.01, 0.03):
+                if vname.startswith('a') and fade: continue
+                for tb in blanks:
+                    m = metrics(rg, lg, contact_deg=45.0, **{**BASE, **RUNG4, 'adv': adv, 'fade': fade, **vk(tb)})
+                    grid_res.append((vname, adv, fade, tb, 45.0, m))
+    today = metrics(rg, lg, contact_deg=45.0, **{**BASE, **RUNG4}); today0 = metrics(rg, lg, contact_deg=0.0, **{**BASE, **RUNG4})
+    score = lambda m: (not m['meets'], m['peak_all'] + m['settle_ms'] / 100)
+    best = sorted(grid_res, key=lambda r: score(r[5]))
+    b = best[0]; b0 = metrics(rg, lg, contact_deg=0.0, **{**BASE, **RUNG4, 'adv': b[1], 'fade': b[2], **dict(variants)[b[0]](b[3])})
+    out.mkdir(parents=True, exist_ok=True)
+    fig, (a1, a2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True, facecolor='#fcfcfb')
+    for (vname, _), col in zip(variants, COLORS):
+        for adv, fade, ls in ((0.3, 0.03 if not vname.startswith('a') else 0.0, '-'),):
+            ms = [r[5] for r in grid_res if r[0] == vname and r[1] == adv and r[2] == fade]
+            a1.plot([1e3 * x for x in blanks], [m['peak_all'] for m in ms], color=col, lw=1.5, marker='o', ms=3, ls=ls, label=f'{vname} (advance {adv}' + (f', fade {fade * 1e3:g} ms)' if fade else ')'))
+            a2.plot([1e3 * x for x in blanks], [m['settle_ms'] for m in ms], color=col, lw=1.5, marker='o', ms=3, ls=ls)
+    a1.axhline(TARGET_PEAK, color='#52514e', lw=0.8, ls='--'); a1.axhline(today['peak_all'], color='#e34948', lw=0.8, ls=':')
+    a2.axhline(TARGET_SETTLE_MS, color='#52514e', lw=0.8, ls='--')
+    for ax in (a1, a2): style(ax)
+    a1.set_ylabel('Peak line current before the step (A)'); a2.set_ylabel('Settling ±0.05 A (ms)'); a2.set_xlabel('Blank time after the contact (ms)')
+    a1.set_title(f'Blanking, rung 4, {grid} grid, contact at 45° (dashed: target; dotted: today)', loc='left', fontsize=11); a1.legend(frameon=False, fontsize=8)
+    fig.tight_layout(); fig.savefig(out / 'blank_sweep.png', dpi=130); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(8, 3.6), facecolor='#fcfcfb')
+    for (label, m), col in zip((('today, 45°', today), (f'best ({b[0]}, advance {b[1]}, fade {b[2] * 1e3:g} ms, blank {b[3] * 1e3:g} ms), 45°', b[5]), ('best, 0°', b0)), COLORS):
+        ax.plot(1e3 * m['trace'][0], m['trace'][1], color=col, lw=1.2, label=label)
+    style(ax); ax.set_xlabel('Time after the contact (ms)'); ax.set_ylabel('Line current (A)'); ax.legend(frameon=False, fontsize=8)
+    ax.set_title(f'Connection transient, rung 4, {grid} grid', loc='left', fontsize=11); fig.tight_layout(); fig.savefig(out / 'transient.png', dpi=130); plt.close(fig)
+    lin_during = ll.margins(ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, **{**BASE, 'adv': b[1]}, ff='exact'))
+    lin_after = ll.margins(ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, **{**BASE, 'adv': b[1]}))
+    lines = header('D-GFL-04', 'blanking time after the contact', grid, rg, lg,
+                   'Rung 4 of D-GFL-01 (library PLL, filter capacitors, 80 µs delay), candidate C, current PI from the relay command, contact at 45° (D-GFL-03). '
+                   'Variants: (a) PLL integrator held and ω latched from the contact for the blank time; (b) feedforward synthesized from the pre-command period average of Vd and the PLL angle (advance 0.3 period) from the relay command to the end of the blank time, then faded to the measured feedforward; (c) both. '
+                   'Swept: blank time 0–80 ms, fade 0 / 10 / 30 ms, advance of the measured feedforward and the PI 0.5 (today) or 0.3.')
+    lines += ['## Margins and bandwidth (linear model, relay closed, ideal angle)', '',
+              'During the blank time the synthesized feedforward does not depend on the plant, so the loop is the current PI alone; after it, the measured feedforward adds its own path. Margins are open-loop properties; the closed loop is described by its bandwidth and resonance peak.', '',
+              '| Loop | Open loop: crossover (Hz) | Open loop: phase margin (°) | Open loop: gain margin (dB) | Closed loop: bandwidth −3 dB (Hz) | Closed loop: peak (dB) | Closed loop: peak at (Hz) |',
+              '|---|---|---|---|---|---|---|']
+    for label, lm in ((f'during the blank (synthesized feedforward), advance {b[1]}', lin_during), (f'after the blank (measured feedforward), advance {b[1]}', lin_after)):
+        lines.append(f"| {label} | {f(lm['crossover_Hz'])} | {f(lm['pm_deg'])} | {f(lm['gm_dB'])} | {f(lm['bandwidth_Hz'])} | {f(lm['peak_dB'])} | {f(lm['peak_Hz'])} |")
+    lines += ['', '![Blank sweep](blank_sweep.png)', '', '![Transient](transient.png)', '',
+              '## Best cases (time domain)', '', 'Ranked: meets the target first, then peak before the step plus settling/100 ms.', '',
+              '| Case | Peak before the step (A) | Peak, 10 ms (A) | Settling ±0.05 A (ms) | Meets target | Would trip | \\|I_dq\\| seen, 5 ms (A) | PLL angle excursion (°) |', '|---|---|---|---|---|---|---|---|']
+    row = lambda label, m: f"| {label} | {f(m['peak_all'])} | {f(m['peak10'])} | {f(m['settle_ms'])} | {'yes' if m['meets'] else 'no'} | {'yes' if m['trips'] else 'no'} | {f(m['seen5'])} | {f(m['th_dev_deg'])} |"
+    lines.append(row('today, contact at 45°', today)); lines.append(row('today, contact at 0° (zero crossing)', today0))
+    for vname, adv, fade, tb, _, m in best[:10]:
+        lines.append(row(f'{vname}, advance {adv}, fade {fade * 1e3:g} ms, blank {tb * 1e3:g} ms', m))
+    lines.append(row(f'best case with the contact at 0°', b0))
+    lines += ['', '## All cases', '', '| Variant | Advance | Fade (ms) | Blank (ms) | Peak before the step (A) | Settling (ms) | Meets target |', '|---|---|---|---|---|---|---|']
+    for vname, adv, fade, tb, _, m in grid_res:
+        lines.append(f"| {vname} | {adv} | {fade * 1e3:g} | {tb * 1e3:g} | {f(m['peak_all'])} | {f(m['settle_ms'])} | {'yes' if m['meets'] else 'no'} |")
+    (out / 'report.md').write_text('\n'.join(lines) + '\n')
+    i0 = lines.index('## Best cases (time domain)'); print('\n'.join(lines[i0:i0 + 18]))
+
+
 def main():
-    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03'], required=True)
+    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04'], required=True)
     a.add_argument('--grid', default='IEC'); a.add_argument('--out', type=Path, required=True); o = a.parse_args()
-    (test02 if o.test == '02' else test03)(o.grid, o.out)
+    {'02': test02, '03': test03, '04': test04}[o.test](o.grid, o.out)
 
 
 if __name__ == '__main__':
