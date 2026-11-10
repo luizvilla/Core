@@ -296,6 +296,18 @@
    "status_note": "Defined 2026-11-10 with Luiz Villa"
   },
   {
+   "id": "D-GFL-07",
+   "tab": "model",
+   "level": "D",
+   "title": "Voltage mismatch at the contact and the output capacitors",
+   "criterion": ".a mismatch across the open relay before the contact (amplitude, phase) in the switched runs and the averaged variants; .b fidelity: trip timing of the averaged variants against the switched model; .c resonances of the capacitor network and the switched model's spectrum after the contact; .d feedforward amplitude/phase error map; .e capacitor ablation (C122, C113, C7 branch, R3, a resistor in series with C113) with today's and the D-GFL-04 settings. INFO only",
+   "conditions": "Averaged model with the board's capacitor network (C120 1 nF, C113 120 nF, C7 680 nF + R3 4.7 Ω on the filter node; C122 120 nF on the grid side of the relay, reference/output_filter.png); rung 4, IEC grid, contact 45° (0° for the fidelity check); switched runs C-bench_iec and F-bench_iec reused",
+   "source": "ADR 0004; tests/l1/plant/reference/output_filter.png; docs/testing/inverter-current-loop-design.md",
+   "status": "implemented",
+   "report": "docs/testing/design/D-GFL-07_IEC/report.md",
+   "status_note": "Run 2026-11-10 on the IEC grid: the switched model's inverter side is +1.14 % / +0.33° above the grid before the contact (4.15 V; averaged −0.01 %); the closed-relay resonance (9.5–10.1 kHz) sits at the 10 kHz control rate and folds to 130–540 Hz; C7 + R3 is the essential damping; with C122 the averaged model disagrees with the switched one (trip 2.4 vs 6 ms), so capacitor results are indicative; switched runs proposed"
+  },
+  {
    "id": "L0-BST-01",
    "tab": "boost",
    "level": "L0",

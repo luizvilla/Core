@@ -58,6 +58,47 @@ class Pi:
     def reset(self): self.i = 0.0
 
 
+# Capacitor network on the filter node. DEFAULT_NET is the one used up to D-GFL-04 (C113 on the node, C7 + R3);
+# SCHEMATIC_NET follows the board (reference/output_filter.png): C120 1 nF and C113 120 nF on the node, C7 680 nF
+# + R3 4.7 Ω, and C122 120 nF on the grid side of the relay, charged by the grid while the relay is open.
+DEFAULT_NET = dict(C113=C113, C120=0.0, C7=C7, R3=R3, R113=0.0, C122=0.0)
+SCHEMATIC_NET = dict(C113=120e-9, C120=1e-9, C7=680e-9, R3=4.7, R113=0.0, C122=120e-9)
+
+
+def capnet(rg, lg, closed, net):
+    """@return (Ad, Bd, names, Cn): exact sub-step matrices of the capacitor network, the state names and the
+    node capacitance. States: iL, vn, [v7], [v113 when C113 has a series resistor], [vp: C122 with the relay
+    open], [ig when the grid has inductance]. Inputs [v_bridge, v_grid]."""
+    names = ['iL', 'vn']
+    if net['C7'] > 0: names.append('v7')
+    if net['R113'] > 0 and net['C113'] > 0: names.append('v113')
+    if net['C122'] > 0 and not closed: names.append('vp')
+    grid_state = lg > 0 and (closed or net['C122'] > 0)
+    if grid_state: names.append('ig')
+    ix = {k: i for i, k in enumerate(names)}; n = len(names); A = np.zeros((n, n)); B = np.zeros((n, 2))
+    cn = net['C120'] + (net['C113'] if net['R113'] == 0 else 0.0) + (net['C122'] if closed else 0.0)
+    cn = max(cn, 1e-12)
+    A[ix['iL'], ix['iL']] = -R_F / L_F; A[ix['iL'], ix['vn']] = -1 / L_F; B[ix['iL'], 0] = 1 / L_F
+    A[ix['vn'], ix['iL']] += 1 / cn
+    for st, c, r in (('v7', net['C7'], net['R3']), ('v113', net['C113'], net['R113'])):
+        if st in ix:
+            g = 1 / r; A[ix['vn'], ix['vn']] -= g / cn; A[ix['vn'], ix[st]] += g / cn
+            A[ix[st], ix['vn']] += g / c; A[ix[st], ix[st]] -= g / c
+    if closed:
+        if grid_state:
+            A[ix['vn'], ix['ig']] -= 1 / cn; A[ix['ig'], ix['vn']] = 1 / lg; A[ix['ig'], ix['ig']] = -rg / lg; B[ix['ig'], 1] = -1 / lg
+        else:
+            A[ix['vn'], ix['vn']] -= 1 / (rg * cn); B[ix['vn'], 1] += 1 / (rg * cn)
+    elif 'vp' in ix:
+        c = net['C122']
+        if grid_state:
+            A[ix['vp'], ix['ig']] = -1 / c; A[ix['ig'], ix['vp']] = 1 / lg; A[ix['ig'], ix['ig']] = -rg / lg; B[ix['ig'], 1] = -1 / lg
+        else:
+            A[ix['vp'], ix['vp']] = -1 / (rg * c); B[ix['vp'], 1] = 1 / (rg * c)
+    M = np.zeros((n + 2, n + 2)); M[:n, :n] = A; M[:n, n:] = B
+    E = expm(M * H); return E[:n, :n], E[:n, n:], names, cn
+
+
 def plant(caps, rg, lg, closed):
     """@return (Ad, Bd, n_states) for x' = A x + B [v_bridge, v_grid], exact over one sub-step.
     States: i_L, then (caps) v_n (C113), v_7 (C7), then (closed, lg > 0) i_g."""
@@ -80,7 +121,7 @@ def plant(caps, rg, lg, closed):
 
 def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0.005, kr_i=2000.0,
         adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP, ff='measured', contact_deg=0.0,
-        synth_blank=None, adv_synth=0.3, fade=0.0, pll_freeze=None):
+        synth_blank=None, adv_synth=0.3, fade=0.0, pll_freeze=None, net=None, ff_gain=1.0, ff_phase_deg=0.0, bridge_gain=1.0, bridge_phase_deg=0.0):
     """synth_blank (s): feedforward synthesized (pre-command period average of Vd, PLL angle, advance adv_synth)
     from the relay command to contact + synth_blank, then faded to the measured one over fade (s).
     pll_freeze (s): PLL integrator held and ω latched (pre-command period average) from the contact to
@@ -94,23 +135,41 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
     # contact_deg: grid-voltage angle at the contact, from a rising zero crossing (v = Vpk·sin, zero at k·20 ms).
     t_contact = math.ceil((T_CMD_NOMINAL + RELAY_CLOSE) / 0.02) * 0.02 + (contact_deg % 360) / 360 * 0.02
     t_cmd = t_contact - RELAY_CLOSE; t_fb = t_cmd + RELAY_FEEDBACK
-    mats = {c: plant(caps, rg, lg, c) for c in (False, True)}
-    x = np.zeros(mats[False][2]); was_closed = False
+    if caps:
+        net = {**DEFAULT_NET, **(net or {})}
+        cmats = {c: capnet(rg, lg, c, net) for c in (False, True)}
+        names = cmats[False][2]; x = np.zeros(len(names))
+    else:
+        mats = {c: plant(caps, rg, lg, c) for c in (False, True)}
+        x = np.zeros(mats[False][2])
+    was_closed = False
     theta, w, vq_prev = 0.0, W0, 0.0; ilp = 0.0; a_lp = 1 - math.exp(-2 * math.pi * lpf_fc * TS) if lpf_fc else None
     pending = []  # (time it takes effect, bridge voltage)
     hist_vd, hist_w = [], []; vd_lat, w_lat = VPK, W0
-    vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err')}
+    vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err', 'vn', 'vac', 'vg')}
     trip_t = None
     for k in range(steps):
         t = k * TS; closed = t >= t_contact
-        if closed and not was_closed:  # relay contact: grid branch appears, capacitor voltages kept
-            n_new = mats[True][2]; x = np.concatenate([x, np.zeros(n_new - len(x))]); was_closed = True
+        if closed and not was_closed:  # relay contact
+            if caps:  # node and C122 joined: charge shared; other states carried over by name
+                old = dict(zip(names, x)); new_names = cmats[True][2]; cn_open = cmats[False][3]
+                if 'vp' in old: old['vn'] = (cn_open * old['vn'] + net['C122'] * old['vp']) / (cn_open + net['C122'])
+                x = np.array([old.get(k, 0.0) for k in new_names]); names = new_names
+            else:
+                n_new = mats[True][2]; x = np.concatenate([x, np.zeros(n_new - len(x))])
+            was_closed = True
         vg = VPK * math.sin(W0 * t)
-        if caps: ig = (x[3] if len(x) > 3 else (x[1] - vg) / rg) if closed else 0.0
-        else: ig = x[0] if closed else 0.0
-        if not closed: vpcc = vg
-        elif caps: vpcc = x[1]  # VAC at the PCC = filter node once connected
-        else:  # no capacitors: VAC = vg + rg·i + lg·di/dt, di/dt from the applied bridge voltage
+        if caps:
+            xs = dict(zip(names, x)); vn_now = xs['vn']
+            if 'ig' in xs: ig = xs['ig']
+            elif closed: ig = (xs['vn'] - vg) / rg
+            elif 'vp' in xs: ig = (xs['vp'] - vg) / rg
+            else: ig = 0.0
+            vpcc = xs['vn'] if closed else xs.get('vp', vg)   # VAC on the grid side of the relay
+        else:
+            ig = x[0] if closed else 0.0; vn_now = math.nan
+        if not caps and not closed: vpcc = vg
+        elif not caps:  # no capacitors: VAC = vg + rg·i + lg·di/dt, di/dt from the applied bridge voltage
             vpcc = vg + rg * ig + lg * (vb - vg - (R_F + rg) * ig) / (L_F + lg)
         # --- controller (calculateDuty order) ---
         frozen = pll_freeze is not None and t_contact <= t < t_contact + pll_freeze
@@ -142,18 +201,26 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
             t_end_s = t_contact + synth_blank
             ks = 1.0 if t < t_end_s else (max(0.0, 1.0 - (t - t_end_s) / fade) if fade > 0 else 0.0)
         tho = theta + adv * w * TS; ths = theta + adv_synth * w * TS
-        va = ((pd_ + (1 - ks) * vd) * math.cos(tho) - (pq_ + (1 - ks) * vq) * math.sin(tho)
+        thf = tho + math.radians(ff_phase_deg); g_ff = (1 - ks) * ff_gain
+        va = (pd_ * math.cos(tho) - pq_ * math.sin(tho) + g_ff * (vd * math.cos(thf) - vq * math.sin(thf))
               + ks * vd_lat * math.cos(ths))
         duty = min(max(va / (2 * VBUS) + 0.5, 0.05), 0.95)
-        pending.append((t + delay, VBUS * (2 * duty - 1)))
+        vb_cmd = VBUS * (2 * duty - 1)
+        if bridge_gain != 1.0 or bridge_phase_deg:
+            # Plant-side error of the bridge fundamental (emulates the switched model's unloaded bridge, D-GFL-07):
+            # the voltage actually produced is the command scaled and rotated (rotation applied to the AC command).
+            vb_cmd = bridge_gain * (va * math.cos(math.radians(bridge_phase_deg)) - (va_q := (pd_ * math.sin(tho) + pq_ * math.cos(tho)
+                     + g_ff * (vd * math.sin(thf) + vq * math.cos(thf)) + ks * vd_lat * math.sin(ths))) * math.sin(math.radians(bridge_phase_deg)))
+            vb_cmd = min(max(vb_cmd, VBUS * (2 * 0.05 - 1)), VBUS * (2 * 0.95 - 1))
+        pending.append((t + delay, vb_cmd))
         # --- plant over one control period ---
-        Ad, Bd, _ = mats[closed]
+        Ad, Bd = (cmats[closed][0], cmats[closed][1]) if caps else mats[closed][:2]
         for j in range(SUB):
             tj = t + j * H
             while pending and pending[0][0] <= tj + 1e-12: vb = pending.pop(0)[1]
             x = Ad @ x + Bd @ np.array([vb, VPK * math.sin(W0 * (tj + H / 2))])
         th_err = (theta - (W0 * t - math.pi / 2) + math.pi) % (2 * math.pi) - math.pi
-        for key, val in (('t', t), ('ig', ig), ('idm', idm), ('iqm', iqm), ('vd', vd), ('vq', vq), ('w', w), ('duty', duty), ('th_err', th_err)):
+        for key, val in (('t', t), ('ig', ig), ('idm', idm), ('iqm', iqm), ('vd', vd), ('vq', vq), ('w', w), ('duty', duty), ('th_err', th_err), ('vn', vn_now), ('vac', vpcc), ('vg', vg)):
             rec[key][k] = val
         if closed and abs(ig) > trip and trip_t is None: trip_t = t
         if trip_t is not None and t > trip_t + 0.02: rec = {kk: v[:k + 1] for kk, v in rec.items()}; break

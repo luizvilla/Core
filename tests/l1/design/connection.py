@@ -216,10 +216,102 @@ def test04(grid, out):
     i0 = lines.index('## Best cases (time domain)'); print('\n'.join(lines[i0:i0 + 18]))
 
 
+def phasor(t, v, t0, t1):
+    m = (t >= t0) & (t < t1); return 2 * np.mean(v[m] * np.exp(-1j * 2 * np.pi * 50 * t[m]))
+
+
+def test07(grid, out):
+    import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+    rg, lg = ld.GRIDS[grid]; S = ld.SCHEMATIC_NET; D = ld.DEFAULT_NET; out.mkdir(parents=True, exist_ok=True)
+    l1_dir = Path(__file__).resolve().parents[3] / 'tests/out/current-loop-l1'
+    # 1. Mismatch before the contact (last grid period), switched model runs and averaged variants.
+    mism = []
+    for run in ('C-bench_iec', 'F-bench_iec'):
+        f_ = l1_dir / run / 'waveforms.npz'
+        if f_.exists():
+            w = np.load(f_); t = w['time']; a = phasor(t, w['V(F1_L)'] - w['V(F1_N)'], 1.48, 1.50); b = phasor(t, w['V(GRID_L)'] - w['V(GRID_N)'], 1.48, 1.50)
+            br = phasor(t, 400 * (2 * w['duty_bridge'] - 1), 1.48, 1.50)
+            mism.append((f'switched model (L1 run {run})', a, b, br))
+    for name, kw in (('averaged, network up to D-GFL-04', {}), ('averaged, board network (with C122)', {'net': S}),
+                     ('averaged, board network + bridge error +1.14 %, +0.93°', {'net': S, 'bridge_gain': 1.0114, 'bridge_phase_deg': 0.93})):
+        r = ld.run(rg, lg, trip=1e9, **{**BASE, **RUNG4, **kw}); t = r['t']; tc = r['t_contact']
+        mism.append((name, phasor(t, r['vn'], tc - 0.02, tc), phasor(t, r['vac'], tc - 0.02, tc), phasor(t, 400 * (2 * r['duty'] - 1), tc - 0.02, tc)))
+    # 2. Fidelity: first crossing of the 1.5 A trip after the contact.
+    fid = []
+    for run in ('C-bench_iec', 'F-bench_iec'):
+        f_ = l1_dir / run / 'waveforms.npz'
+        if f_.exists():
+            w = np.load(f_); t = w['time']; ig = w['IP(Grid_current)']; tc = 1.5002 + 0.0097; m = t >= tc
+            k = np.argmax(np.abs(ig[m]) > ld.TRIP); fid.append((f'switched model ({run})', 1e3 * (t[m][k] - tc)))
+    for name, kw in (('averaged, network up to D-GFL-04', {}), ('averaged, board network', {'net': S}),
+                     ('averaged, board network + bridge error', {'net': S, 'bridge_gain': 1.0114, 'bridge_phase_deg': 0.93})):
+        r = ld.run(rg, lg, contact_deg=0.0, **{**BASE, **RUNG4, **kw}); fid.append((name, None if r['trip'] is None else 1e3 * (r['trip'] - r['t_contact'])))
+    # 3. Resonances (eigenvalues) and the switched model's spectrum after the contact.
+    res = []
+    for name, net in (('network up to D-GFL-04', D), ('board network', S)):
+        for closed in (False, True):
+            Ad, Bd, names, cn_ = ld.capnet(rg, lg, closed, net); ev = np.log(np.linalg.eigvals(Ad).astype(complex)) / ld.H
+            res.append((name, 'closed' if closed else 'open', ', '.join(f'{abs(e.imag) / 2 / np.pi / 1e3:.2f} kHz (ζ {-e.real / abs(e):.3f}, folds to {abs((abs(e.imag) / 2 / np.pi + 5e3) % 1e4 - 5e3):.0f} Hz)' for e in ev if e.imag > 1)))
+    spec = []
+    f_ = l1_dir / 'C-bench_iec' / 'waveforms.npz'
+    if f_.exists():
+        w = np.load(f_); t = w['time']; ig = w['IP(Grid_current)']; tc = 1.5099; m = (t >= tc) & (t < tc + 0.005)
+        x = ig[m] - np.mean(ig[m]); n = 8192; X = np.abs(np.fft.rfft(x * np.hanning(len(x)), n)); fr = np.fft.rfftfreq(n, np.median(np.diff(t)))
+        fig, ax = plt.subplots(figsize=(8, 3.4), facecolor='#fcfcfb'); ax.semilogy(fr / 1e3, X / X.max(), color=COLORS[0], lw=1.2)
+        style(ax); ax.set_xlim(0, 25); ax.set_xlabel('Frequency (kHz)'); ax.set_ylabel('Relative amplitude')
+        ax.set_title('Line current, 5 ms after the contact, switched model (L1 run C-bench_iec)', loc='left', fontsize=11)
+        fig.tight_layout(); fig.savefig(out / 'l1_spectrum.png', dpi=130); plt.close(fig)
+        pk = sorted([(fr[i], X[i] / X.max()) for i in range(1, len(X) - 1) if X[i] > X[i - 1] and X[i] > X[i + 1] and fr[i] > 300], key=lambda q: -q[1])[:5]
+        spec = sorted(pk)
+    # 4. Amplitude / phase error map of the feedforward (board network, today's settings, contact 45°).
+    gains = [0.98, 0.99, 1.0, 1.01, 1.02]; phases = [-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0]
+    grid_map = np.array([[metrics(rg, lg, contact_deg=45.0, net=S, ff_gain=g, ff_phase_deg=ph, **{**BASE, **RUNG4})['peak_all'] for ph in phases] for g in gains])
+    fig, ax = plt.subplots(figsize=(7, 3.8), facecolor='#fcfcfb')
+    im = ax.imshow(grid_map, cmap='Blues', aspect='auto', origin='lower')
+    for i in range(len(gains)):
+        for j in range(len(phases)):
+            ax.text(j, i, f'{grid_map[i, j]:.2f}', ha='center', va='center', fontsize=8, color='#0b0b0b' if grid_map[i, j] < grid_map.max() * 0.6 else '#ffffff')
+    ax.set_xticks(range(len(phases)), [f'{p:+g}' for p in phases]); ax.set_yticks(range(len(gains)), [f'{g:.2f}' for g in gains])
+    ax.set_xlabel('Feedforward phase added (°)'); ax.set_ylabel('Feedforward gain')
+    ax.set_title('Peak line current before the step (A), board network, today, 45°', loc='left', fontsize=11)
+    fig.colorbar(im, ax=ax, label='A'); fig.tight_layout(); fig.savefig(out / 'ff_map.png', dpi=130); plt.close(fig)
+    # 5. Capacitor ablation (board network), today's settings and the D-GFL-04 best settings.
+    best04 = {'adv': 0.3, 'synth_blank': 0.005, 'pll_freeze': 0.005}
+    abl = [('board network', {}), ('without C122', {'C122': 0.0}), ('without C113', {'C113': 0.0}), ('without the C7 branch', {'C7': 0.0}),
+           ('R3 1 Ω', {'R3': 1.0}), ('R3 10 Ω', {'R3': 10.0}), ('R3 22 Ω', {'R3': 22.0}),
+           ('4.7 Ω in series with C113', {'R113': 4.7}), ('10 Ω in series with C113', {'R113': 10.0})]
+    abl_rows = []
+    for name, chg in abl:
+        net = {**S, **chg}
+        mt = metrics(rg, lg, contact_deg=45.0, net=net, **{**BASE, **RUNG4}); mb = metrics(rg, lg, contact_deg=45.0, net=net, **{**BASE, **RUNG4, **best04})
+        lm = ll.margins(ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, net=net, **BASE))
+        abl_rows.append((name, mt, mb, lm))
+    lines = header('D-GFL-07', 'voltage mismatch at the contact and the output capacitors', grid, rg, lg,
+                   'Rung 4 of D-GFL-01 (library PLL, filter capacitors, 80 µs delay), candidate C, current PI from the relay command. The capacitor network now follows the board ([output_filter.png](../../../../tests/l1/plant/reference/output_filter.png)): C120 1 nF, C113 120 nF and C7 680 nF + R3 4.7 Ω on the filter node, and C122 120 nF on the grid side of the relay (charged by the grid while the relay is open, sharing its charge with the filter node at the contact). IAC and VAC are measured on the grid side of the relay.')
+    f2 = lambda c: f'{abs(c):.2f}'
+    lines += ['## 1. Voltage across the relay before the contact', '', 'Fundamental phasors over the last grid period before the contact. "Bridge" is the commanded bridge voltage (duty × bus), not delayed.', '',
+              '| Model | Filter node (V peak) | Grid side (V peak) | Node − grid amplitude | Node − grid phase (°) | Mismatch (V peak) | Node / bridge command |', '|---|---|---|---|---|---|---|']
+    for name, a, b, br in mism:
+        lines.append(f'| {name} | {f2(a)} | {f2(b)} | {100 * (abs(a) / abs(b) - 1):+.2f} % | {np.degrees(np.angle(a / b)):+.3f} | {abs(a - b):.2f} | {100 * (abs(a) / abs(br) - 1):+.2f} %, {np.degrees(np.angle(a / br)):+.2f}° |')
+    lines += ['', '## 2. Fidelity: first crossing of the 1.5 A trip after the contact (zero crossing)', '', '| Model | Time (ms) |', '|---|---|']
+    lines += [f'| {n} | {f(v)} |' for n, v in fid]
+    lines += ['', '## 3. Resonances of the capacitor network', '', 'Eigenvalues of the averaged network; "folds to" is the frequency the 10 kHz sampling shows it at.', '',
+              '| Network | Relay | Resonances |', '|---|---|---|'] + [f'| {a} | {b} | {c} |' for a, b, c in res]
+    if spec:
+        lines += ['', 'Switched model, line current in the 5 ms after the contact, strongest peaks above 300 Hz: ' + ', '.join(f'{a / 1e3:.2f} kHz ({b:.2f})' for a, b in spec) + '.', '', '![L1 spectrum](l1_spectrum.png)']
+    lines += ['', '## 4. Feedforward amplitude and phase error (averaged, indicative)', '', '![Map](ff_map.png)', '',
+              '## 5. Capacitor ablation (averaged, indicative)', '', 'Today: advance 0.5, no blank. D-GFL-04 best: advance 0.3, synthesized feedforward and PLL frozen for 5 ms. Contact at 45°. Margins of the loop with the relay closed, today\'s settings.', '',
+              '| Network | Today: peak before the step (A) | Today: settling (ms) | D-GFL-04 best: peak (A) | D-GFL-04 best: settling (ms) | Phase margin (°) | Gain margin (dB) | Bandwidth (Hz) |', '|---|---|---|---|---|---|---|---|']
+    for name, mt, mb, lm in abl_rows:
+        lines.append(f"| {name} | {f(mt['peak_all'])} | {f(mt['settle_ms'])} | {f(mb['peak_all'])} | {f(mb['settle_ms'])} | {f(lm['pm_deg'])} | {f(lm['gm_dB'])} | {f(lm['bandwidth_Hz'])} |")
+    (out / 'report.md').write_text('\n'.join(lines) + '\n')
+    i0 = lines.index('## 1. Voltage across the relay before the contact'); print('\n'.join(lines[i0:]))
+
+
 def main():
-    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04'], required=True)
+    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04', '07'], required=True)
     a.add_argument('--grid', default='IEC'); a.add_argument('--out', type=Path, required=True); o = a.parse_args()
-    {'02': test02, '03': test03, '04': test04}[o.test](o.grid, o.out)
+    {'02': test02, '03': test03, '04': test04, '07': test07}[o.test](o.grid, o.out)
 
 
 if __name__ == '__main__':
