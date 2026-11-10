@@ -310,6 +310,18 @@
    "status_note": "Run 2026-11-10 on the IEC grid: the switched model's inverter side is +1.14 % / +0.33° above the grid before the contact (4.15 V; averaged −0.01 %); the closed-relay resonance (9.5–10.1 kHz) sits at the 10 kHz control rate and folds to 130–540 Hz; C7 + R3 is the essential damping; with C122 the averaged model disagrees with the switched one (trip 2.4 vs 6 ms), so capacitor results are indicative; switched runs proposed"
   },
   {
+   "id": "D-GFL-08",
+   "tab": "model",
+   "level": "D",
+   "title": "Current PI at nominal power: ramp to 400 W after the connection",
+   "criterion": ".a power, I_d and I_q at 400 W against the reference; .b current THD; .c modulation index and duty clipping; .d PI output against its ±30 V limit; .e ramp tracking; .f power steps 100 → 50 → 100 % (settling, overshoot). INFO only",
+   "conditions": "Averaged model, rung 4, best connection strategy (D-GFL-04), Kp 1 / Ti 5 ms and Kp 2 / Ti 20 ms; contact at the zero crossing, I_d 0 for 300 ms after the contact, ramp to 2.46 A peak (400 W) over 200 ms, hold 200 ms, 50 % step for 150 ms and back; IEC and stiff grid at 80 µs, IEC at 60 / 100 µs and with the board network; pure-sine grid, ideal 400 V bus",
+   "source": "ADR 0004; tests/l1/design/connection.py --test 08",
+   "status": "implemented",
+   "report": "docs/testing/design/D-GFL-08_IEC/report.md",
+   "status_note": "Run 2026-11-10: the PI delivers 400 W in every condition (I_d exact, I_q within ±0.09 A, ramp within 0.05 A, modulation 0.816, no clipping, PI output ≤ 13.5 V of ±30 V); Kp 2 / Ti 20 ms settles power steps in 6–8 ms (5–6 % overshoot) against 57–60 ms for Kp 1 / Ti 5 ms; the delay sensitivity is confined to the connection"
+  },
+  {
    "id": "L0-BST-01",
    "tab": "boost",
    "level": "L0",

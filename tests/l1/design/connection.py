@@ -316,6 +316,92 @@ def test06(grid, out):
     i0 = lines.index('## Peak before the step and settling'); print('\n'.join(lines[i0:]))
 
 
+P_NOM = 400.0
+I_NOM = 2 * P_NOM / ld.VPK            # I_d peak for 400 W (P = Vd·Id / 2)
+T_RAMP0, T_RAMP1, T_HALF, T_FULL, T_END8 = 0.72, 0.92, 1.12, 1.27, 1.47
+
+
+def power_profile(t):
+    """0 until 300 ms after the contact (≈0.42 s), ramp to 400 W over 200 ms, hold, 50 % step, back to 100 %."""
+    if t < T_RAMP0: return 0.0
+    if t < T_RAMP1: return I_NOM * (t - T_RAMP0) / (T_RAMP1 - T_RAMP0)
+    if t < T_HALF: return I_NOM
+    if t < T_FULL: return 0.5 * I_NOM
+    return I_NOM
+
+
+def power_metrics(rg, lg, **kw):
+    r = ld.run(rg, lg, trip=1e9, t_end=T_END8, iref_fn=power_profile, **kw); t = r['t']; ig = r['ig']; tc = r['t_contact']
+    w = (t >= T_HALF - 0.1) & (t < T_HALF)                                   # 5 periods at 400 W
+    th = ld.W0 * t
+    res = {'p_pcc': float(np.mean(r['vac'][w] * ig[w])), 'p_grid': float(np.mean(r['vg'][w] * ig[w])),
+           'irms': float(np.sqrt(np.mean(ig[w] ** 2))), 'id_true': float(2 * np.mean(ig[w] * np.sin(th[w]))),
+           'iq_true': float(2 * np.mean(ig[w] * np.cos(th[w]))), 'id_meas': float(np.mean(r['idm'][w])), 'iq_meas': float(np.mean(r['iqm'][w])),
+           'mod': float(np.max(np.abs(2 * r['duty'][w] - 1))), 'clip': float(np.mean((r['duty'][w] <= 0.0501) | (r['duty'][w] >= 0.9499))),
+           'pi_max': float(max(np.abs(r['pid_d'][w]).max(), np.abs(r['pid_q'][w]).max())),
+           'peak_contact': float(np.abs(ig[(t >= tc) & (t < T_RAMP0)]).max()), 'peak_all': float(np.abs(ig[t >= tc]).max())}
+    x = ig[w] - np.mean(ig[w]); X = np.abs(np.fft.rfft(x * np.hanning(len(x)))); fr = np.fft.rfftfreq(len(x), ld.TS)
+    k1 = np.argmin(np.abs(fr - 50)); fund = X[k1 - 1:k1 + 2].max()
+    harm = [X[np.argmin(np.abs(fr - h * 50)) - 1:np.argmin(np.abs(fr - h * 50)) + 2].max() for h in range(2, 41)]
+    res['thd'] = float(np.sqrt(np.sum(np.square(harm))) / fund)
+    ramp = (t >= T_RAMP0) & (t < T_RAMP1); res['ramp_err'] = float(np.abs(r['idm'][ramp] - r['ref'][ramp]).max())
+    def step(t0, t1, target, start):
+        m = (t >= t0) & (t < t1); y = r['idm'][m]; tt = t[m] - t0; band = 0.05 * abs(target - start)
+        bad = np.where(np.abs(y - target) > band)[0]
+        over = (np.min(y) - target) / (start - target) * -100 if target < start else (np.max(y) - target) / (target - start) * 100
+        return (float(1e3 * tt[bad[-1]]) if len(bad) else 0.0), max(0.0, float(over))
+    res['down_settle'], res['down_over'] = step(T_HALF, T_FULL, 0.5 * I_NOM, I_NOM)
+    res['up_settle'], res['up_over'] = step(T_FULL, T_END8, I_NOM, 0.5 * I_NOM)
+    res['trace'] = r
+    return res
+
+
+def test08(grid, out):
+    import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+    out.mkdir(parents=True, exist_ok=True)
+    best = {'adv': 0.3, 'synth_blank': 0.005, 'pll_freeze': 0.005}
+    sets = [('best, Kp 1 V/A, Ti 5 ms', best), ('best, Kp 2 V/A, Ti 20 ms', {**best, 'kp': 2.0, 'ti': 0.02})]
+    conds = [('IEC grid, 80 µs', 'IEC', {**RUNG4}), ('stiff grid, 80 µs', 'stiff', {**RUNG4}),
+             ('IEC grid, 60 µs', 'IEC', {**RUNG4, 'delay': 60e-6}), ('IEC grid, 100 µs', 'IEC', {**RUNG4, 'delay': 100e-6}),
+             ('IEC grid, board network', 'IEC', {**RUNG4, 'net': ld.SCHEMATIC_NET})]
+    res = []
+    for cl, g, ck in conds:
+        rg, lg = ld.GRIDS[g]
+        for sn, sk in sets: res.append((cl, sn, power_metrics(rg, lg, contact_deg=0.0, **{**BASE, **ck, **sk})))
+    r0 = res[0][2]['trace']; t = r0['t']
+    fig, (a1, a2, a3) = plt.subplots(3, 1, figsize=(8, 7.6), sharex=True, facecolor='#fcfcfb')
+    a1.plot(t, r0['ig'], color=COLORS[0], lw=0.6, label='line current'); a1.set_ylabel('Line current (A)')
+    a2.plot(t, r0['ref'], color='#52514e', lw=1.0, ls='--', label='I_d reference'); a2.plot(t, r0['idm'], color=COLORS[0], lw=1.2, label='I_d measured (controller)')
+    a2.plot(t, r0['iqm'], color=COLORS[1], lw=1.0, label='I_q measured'); a2.set_ylabel('Current, dq (A)'); a2.legend(frameon=False, fontsize=8)
+    a3.plot(t, r0['duty'], color=COLORS[2], lw=0.6); a3.axhline(0.95, color='#e34948', lw=0.8, ls=':'); a3.axhline(0.05, color='#e34948', lw=0.8, ls=':')
+    a3.set_ylabel('Bridge duty'); a3.set_xlabel('Time (s)')
+    for ax in (a1, a2, a3): style(ax); ax.set_xlim(0.38, T_END8)
+    a1.set_title(f'Power ramp to {P_NOM:g} W, {res[0][1]}, {res[0][0]}', loc='left', fontsize=11)
+    fig.tight_layout(); fig.savefig(out / 'power_ramp.png', dpi=130); plt.close(fig)
+    curves = []
+    for g in ('IEC', 'stiff'):
+        rg, lg = ld.GRIDS[g]
+        for sn, sk in sets:
+            curves.append((f'{sn.split(", ", 1)[1]}, {g}', ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, **{**BASE, 'adv': 0.3, **{k: v for k, v in sk.items() if k in ('kp', 'ti')}})))
+    bode_pair(out, curves, grid, 'rung 4, connected')
+    lines = header('D-GFL-08', f'current PI at nominal power: ramp to {P_NOM:g} W', grid, *ld.GRIDS['IEC'],
+                   f'Best connection strategy (D-GFL-04: advance 0.3, synthesized feedforward and PLL frozen 5 ms), rung 4, contact at the zero crossing. The 20 ms settling target is relaxed: the I_d reference stays at 0 for 300 ms after the contact, then ramps to {I_NOM:.2f} A peak ({P_NOM:g} W at 230 V) over 200 ms, holds 200 ms, steps to 50 % for 150 ms and back to 100 %. '
+                   'The 1.5 A bench trip is not applied (nominal power is far above it). The grid voltage is a pure sine: the THD is the control\'s own distortion.')
+    lines[0] = f'# D-GFL-08: current PI at nominal power, ramp to {P_NOM:g} W'
+    lines += ['## Margins and bandwidth (linear model, relay closed)', '', 'The linear loop does not depend on the operating point; what changes at power is the room left in the duty (0.05–0.95) and in the PI output (±30 V).', '', *MARGIN_HEAD]
+    lines += [margin_row(lbl, ll.margins(r)) for lbl, r in curves]
+    lines += ['', '![Open loop](bode_open.png)', '', '![Closed loop](bode_closed.png)', '', '![Power ramp](power_ramp.png)', '', '## At 400 W (last 100 ms of the hold)', '',
+              '| Condition | Settings | Power at the PCC (W) | Line current (A RMS) | I_d true / measured (A) | I_q true / measured (A) | THD (%) | Modulation index | Duty clipped (%) | PI output max (V of ±30) |',
+              '|---|---|---|---|---|---|---|---|---|---|']
+    for cl, sn, m in res:
+        lines.append(f"| {cl} | {sn} | {m['p_pcc']:.0f} | {m['irms']:.2f} | {m['id_true']:.2f} / {m['id_meas']:.2f} | {m['iq_true']:+.2f} / {m['iq_meas']:+.2f} | {100 * m['thd']:.2f} | {m['mod']:.3f} | {100 * m['clip']:.1f} | {m['pi_max']:.1f} |")
+    lines += ['', '## Ramp and steps at power', '', '| Condition | Settings | Contact peak (A) | Ramp: largest I_d error (A) | 100 → 50 %: settling 5 % (ms) / overshoot (%) | 50 → 100 %: settling 5 % (ms) / overshoot (%) |', '|---|---|---|---|---|---|']
+    for cl, sn, m in res:
+        lines.append(f"| {cl} | {sn} | {m['peak_contact']:.2f} | {m['ramp_err']:.3f} | {m['down_settle']:.1f} / {m['down_over']:.1f} | {m['up_settle']:.1f} / {m['up_over']:.1f} |")
+    (out / 'report.md').write_text('\n'.join(lines) + '\n')
+    i0 = lines.index('## At 400 W (last 100 ms of the hold)'); print('\n'.join(lines[i0:]))
+
+
 def phasor(t, v, t0, t1):
     m = (t >= t0) & (t < t1); return 2 * np.mean(v[m] * np.exp(-1j * 2 * np.pi * 50 * t[m]))
 
@@ -409,9 +495,9 @@ def test07(grid, out):
 
 
 def main():
-    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04', '05', '06', '07'], required=True)
+    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04', '05', '06', '07', '08'], required=True)
     a.add_argument('--grid', default='IEC'); a.add_argument('--out', type=Path, required=True); o = a.parse_args()
-    {'02': test02, '03': test03, '04': test04, '05': test05, '06': test06, '07': test07}[o.test](o.grid, o.out)
+    {'02': test02, '03': test03, '04': test04, '05': test05, '06': test06, '07': test07, '08': test08}[o.test](o.grid, o.out)
 
 
 if __name__ == '__main__':

@@ -122,7 +122,7 @@ def plant(caps, rg, lg, closed):
 def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0.005, kr_i=2000.0,
         adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP, ff='measured', contact_deg=0.0,
         synth_blank=None, adv_synth=0.3, fade=0.0, pll_freeze=None, net=None, ff_gain=1.0, ff_phase_deg=0.0, bridge_gain=1.0, bridge_phase_deg=0.0,
-        clamp_v=None, clamp_i=None, clamp_window=0.0, clamp_pll=False, ff_off=None):
+        clamp_v=None, clamp_i=None, clamp_window=0.0, clamp_pll=False, ff_off=None, t_end=None, iref_fn=None):
     """synth_blank (s): feedforward synthesized (pre-command period average of Vd, PLL angle, advance adv_synth)
     from the relay command to contact + synth_blank, then faded to the measured one over fade (s).
     pll_freeze (s): PLL integrator held and ω latched (pre-command period average) from the contact to
@@ -147,7 +147,8 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
     theta, w, vq_prev = 0.0, W0, 0.0; ilp = 0.0; a_lp = 1 - math.exp(-2 * math.pi * lpf_fc * TS) if lpf_fc else None
     pending = []  # (time it takes effect, bridge voltage)
     hist_vd, hist_w, hist_vq = [], [], []; vd_lat, w_lat = VPK, W0
-    vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err', 'vn', 'vac', 'vg')}
+    vb = 0.0; steps = int((t_end or T_END) / TS)
+    rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err', 'vn', 'vac', 'vg', 'ref', 'pid_d', 'pid_q')}
     trip_t = None
     for k in range(steps):
         t = k * TS; closed = t >= t_contact
@@ -204,10 +205,10 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
             vd = float(np.mean(hist_vd[-200:])); vq = float(np.mean(hist_vq[-200:])) if ff == 'avg' else 0.0
         active = pi_from != 'never' and t >= (t_cmd if pi_from == 'command' else t_fb)
         if active:
-            ref = iref if t >= T_STEP else 0.0
+            ref = iref_fn(t) if iref_fn else (iref if t >= T_STEP else 0.0)
             pd_, pq_ = pid(ref, idm), piq(0.0, iqm)
         else:
-            pid.reset(); piq.reset(); pd_, pq_ = 0.0, 0.0
+            pid.reset(); piq.reset(); pd_, pq_ = 0.0, 0.0; ref = 0.0
         ks = 0.0  # weight of the synthesized feedforward
         if synth_blank is not None and t >= t_cmd:
             t_end_s = t_contact + synth_blank
@@ -236,7 +237,7 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
             while pending and pending[0][0] <= tj + 1e-12: vb = pending.pop(0)[1]
             x = Ad @ x + Bd @ np.array([vb, VPK * math.sin(W0 * (tj + H / 2))])
         th_err = (theta - (W0 * t - math.pi / 2) + math.pi) % (2 * math.pi) - math.pi
-        for key, val in (('t', t), ('ig', ig), ('idm', idm), ('iqm', iqm), ('vd', vd), ('vq', vq), ('w', w), ('duty', duty), ('th_err', th_err), ('vn', vn_now), ('vac', vpcc), ('vg', vg)):
+        for key, val in (('t', t), ('ig', ig), ('idm', idm), ('iqm', iqm), ('vd', vd), ('vq', vq), ('w', w), ('duty', duty), ('th_err', th_err), ('vn', vn_now), ('vac', vpcc), ('vg', vg), ('ref', ref), ('pid_d', pd_), ('pid_q', pq_)):
             rec[key][k] = val
         if closed and abs(ig) > trip and trip_t is None: trip_t = t
         if trip_t is not None and t > trip_t + 0.02: rec = {kk: v[:k + 1] for kk, v in rec.items()}; break
