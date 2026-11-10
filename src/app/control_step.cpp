@@ -65,6 +65,10 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
 {
     ControlOutputs out;
 
+    /* Bench step 1c: the inverter aims vac_offset above the measured grid voltage, never below it. */
+    const float32_t vac_offset = fminf(fmaxf(cmd.vac_offset, 0.0F), app::inverter_vac_offset_max);
+    state.inverter.setFeedforwardGain(1.0F + vac_offset);
+
     if (state.grid_voltage_age_ticks < app::grid_voltage_stale_ticks) ++state.grid_voltage_age_ticks;
     if (meas.v_ac_updated) state.grid_voltage_age_ticks = 0U;
 

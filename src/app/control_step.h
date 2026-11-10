@@ -162,6 +162,12 @@ inline constexpr float32_t inverter_current_limit = 30.0F;
 inline constexpr float32_t inverter_current_sogi_gain = 2000.0F;
 /** @brief Output rotation advance compensating the actuation delay, in control periods. */
 inline constexpr float32_t inverter_output_phase_advance = 0.5F;
+/** @brief Bench step 1c: inverter voltage offset step per key press, as a fraction of the measured grid voltage
+ * (0.01: the inverter aims 1 % above VAC, about 3.3 V peak). Applied as the feedforward gain 1 + offset. */
+inline constexpr float32_t inverter_vac_offset_step = 0.01F;
+/** @brief Largest inverter voltage offset (fraction of VAC). 5 % is 16 V peak: 0.4 A peak through the cold bulb
+ * (40 Ω) at the contact, below the 1.5 A bench trip. The offset is never negative (never below the grid). */
+inline constexpr float32_t inverter_vac_offset_max = 0.05F;
 
 }  // namespace app
 
@@ -197,6 +203,7 @@ struct OperatorCommands {
     float32_t inject_current = 0.0F; ///< INJECT d-axis current reference, A peak (clamped to app::inject_current_max).
     float32_t v_bus_ref = app::initial_voltage_reference;  ///< VDCBus reference (V).
     bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
+    float32_t vac_offset = 0.0F;     ///< Inverter voltage offset, fraction of VAC, clamped to [0, app::inverter_vac_offset_max].
 };
 
 /** @brief PWM commands for one control period. */

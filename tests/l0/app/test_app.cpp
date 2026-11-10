@@ -713,5 +713,24 @@ int main() {
         c.check("GRID_CONNECTED within 1 s", connected > 0);
     }
 
+    // ---------------------------------------------------------------- L0-APP-10
+    {
+        /** @test L0-APP-10.a: The inverter voltage offset sets the feedforward gain 1 + offset, clamped to [0, 5 %] */
+        tc::Criterion c("L0-APP-10.a", "The inverter voltage offset sets the feedforward gain 1 + offset, clamped to [0, 5 %]");
+        ControlState state;
+        Grid grid;
+        float held = 0.0F;
+        OperatorCommands cmd;
+        c.check("controlInit", controlInit(state) == 0);
+        for (float off : {0.0F, 0.01F, 0.03F, app::inverter_vac_offset_max}) {
+            cmd.vac_offset = off; gridStep(state, grid, cmd, true, held);
+            c.near("gain = 1 + offset", state.inverter.getFeedforwardGain(), 1.0 + off, 1e-6);
+        }
+        cmd.vac_offset = -0.02F; gridStep(state, grid, cmd, true, held);
+        c.near("negative offset: gain 1 (never below the grid)", state.inverter.getFeedforwardGain(), 1.0, 1e-6);
+        cmd.vac_offset = 0.2F; gridStep(state, grid, cmd, true, held);
+        c.near("offset above the limit: gain 1 + 5 %", state.inverter.getFeedforwardGain(), 1.0 + app::inverter_vac_offset_max, 1e-6);
+    }
+
     return tc::finish();
 }

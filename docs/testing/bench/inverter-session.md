@@ -1,13 +1,14 @@
 # Inverter bench session
 
-The first hardware tests of the inverter: generate 230 V RMS, synchronize with the grid, close the relay, inject a small current. Each step has its own firmware stage, selected from the serial menu, and its own record. The catalogue IDs are `L2-INV-00…04` (Inverter tab, level L2: on the board); the pre-checks are `L2-INV-10`.
+The first hardware tests of the inverter: generate 230 V RMS, synchronize with the grid, close the relay, inject a small current. Each step has its own firmware stage, selected from the serial menu, and its own record. The catalogue IDs are `L2-INV-00…05` (Inverter tab, level L2: on the board); the pre-checks are `L2-INV-10`.
 
 | Step | Menu | Firmware stage | Inverter controller state | What it shows |
 |---|---|---|---|---|
 | 0 | `o` | `INV_OPEN_LOOP` | not used (OFF) | The bridge and filter make a 230 V RMS, 50 Hz wave with no grid |
 | 1 | `c` | `INV_SETTLE` | PWM_SETTLE, held | The inverter-side voltage matches the grid before the relay |
 | 1b | `g` | `INV_CONNECT`, relay power contacts unwired | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | Dry run of step 2: the sequence and the relay timing, with nothing connected (L2-INV-04) |
-| 2 | `g` | `INV_CONNECT` | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
+| 1c | `c`, then `+`/`-` | `INV_SETTLE`, grid on the other side of the relay | PWM_SETTLE, held | The inverter-side voltage raised a little above the grid, so current flows out of the inverter at the contact (L2-INV-05) |
+| 2 | `g` | `INV_CONNECT`, grid on the other side, offset from step 1c | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
 | relay test | `R` | `INV_OFF` (dead bench only) | OFF | The relay closes and opens on its own (pre-check L2-INV-10.a) |
@@ -43,7 +44,7 @@ Every 100 ms the board prints one line, fields separated by `:`:
 - `stage`: 0 OFF, 1 SETTLE, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT.
 - `inverter_state`: 0 OFF, 1 VOLTAGE_SYNC, 2 GRID_CONNECT, 3 GRID_CONNECTED, 4 RUN, 5 STOPPING, 6 DISCONNECT, 7 FAULT, 8 PWM_SETTLE, 9 PWM_WAIT.
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
-- A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.
+- A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF), `fault` (inverter fault reason), `offset` (inverter voltage offset of step 1c, % of VAC). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.
 - A `load us:` line: the critical task's longest run (total and per part).
 - `load_us`: the critical task's longest run since the previous line, in µs. Its period is 100 µs: above about 80 µs the serial menu and the telemetry slow down or stop.
 - `Id`, `Iq` in A peak (dq frame of the grid voltage: Id in phase), `P` in W and `Q` in var from the inverter's measurements.
@@ -147,9 +148,35 @@ Step 2 run with nothing behind the relay: the firmware goes through the whole co
 | .e INFO: the three closing times, bounces and release times; IAC and `Id`, `Iq` in state 3 | record | sets `app::relay_contact_ticks` | |
 | .f Protection test (`z`, 3 A for one period in state 3): fault in the same period, bridge stopped, relay command dropped, latched until `x` | yes | checks the bench current trip end to end before the relay connects to the mains | **Pass** (4 captures, e.g. 2026-11-09_21-44-56): on sample 129, IAC 3.00 A, `inverter_mode` 3 → 7, `bridge_duty` 0.71 → 0, `relay_cmd` 1 → 0, all in the same 100 µs period; latched until `x`. A 2 kHz capture misses the single 3 A sample (one period in five recorded) |
 
+## L2-INV-05 · Step 1c: inverter voltage offset, relay open, grid on the other side
+
+**Why.** At the contact the current is driven by the voltage across the open relay: the inverter-side voltage minus the grid voltage. Raising the inverter side a little above the grid (an offset on the feedforward) makes that current flow out of the inverter, with a size set on purpose instead of by chance. The design tests found that the mismatch, not the current loop, drives the connection transient (D-GFL-02), and that the phase matters more than the amplitude (1° is about 5.7 V at the peak, D-GFL-07). The switched model also predicts that the bridge alone already puts the inverter side about 1.1 % and 0.3° above the grid (D-GFL-07): measure it at offset 0 first.
+
+**Firmware.** Keys `+` / `-`: the inverter aims `offset` above the measured grid voltage, as a feedforward gain 1 + offset (`setFeedforwardGain`, library `2f6616f`). Step `app::inverter_vac_offset_step` = 1 % of VAC (about 3.3 V peak) per press, limited to 0–5 % (`app::inverter_vac_offset_max`): never below the grid, at most 16 V peak, which drives at most about 0.4 A peak through the cold bulb (40 Ω) at the contact. The value is printed on each press and in the `sync:` line (`offset`); it is kept across stages until changed or the board restarts. Tested at L0 (`L0-GFL-18`, `L0-APP-10`).
+
+**Conditions.** As step 1, with the grid wired on the other side of the relay through the bulb (as for step 2). Relay open. Scope: CH1 inverter-side L–N, CH2 grid side L–N (both on the same differential-probe scale), or one mains-rated differential probe across the open relay contacts (it shows the mismatch directly). 5 ms/div, trigger on the grid voltage.
+
+**Sequence.**
+1. Press `c`; wait for PWM_SETTLE (state 8) and `offset 0.0 %` in the telemetry.
+2. At offset 0, record the inverter-side and grid RMS, the phase between them, and the voltage across the relay (peak and RMS).
+3. Press `+` once (1 %), wait one second, record the same; repeat up to the offset you want to try (at most 5 %). `-` lowers it, never below 0 %.
+4. Choose the offset for step 2: the inverter side clearly above the grid, by a measured amount (1–3 % is 3–10 V peak, 80–250 mA peak out of the inverter through the cold bulb at the contact).
+5. Keep it and go to step 2 (`g`).
+
+**Acceptance.**
+
+| Criterion | Limit | Why | Result |
+|---|---|---|---|
+| .a `offset` follows the keys | 0 → 5 % in 1 % steps; never below 0, never above 5 % | the firmware limits | |
+| .b Inverter-side amplitude follows the offset | rises by offset × VAC within ±0.5 % of VAC, phase unchanged within ±1° | the gain scales the feedforward only | |
+| .c INFO: voltage across the open relay at each offset (peak, RMS, phase), including offset 0 | record | the voltage that drives the contact current; compare offset 0 with the simulation (+1.1 %, +0.3°) | |
+| .d INFO: offset chosen for step 2 | record | — | |
+
 ## L2-INV-02 · Step 2: close the relay, then zero current (GRID_CONNECT → GRID_CONNECTED)
 
-**Conditions.** As step 1, inverter in PWM_SETTLE (state 8). Scope: trigger on CH4 (relay command) rising, 2 ms/div; CH3 current, CH1 and CH2 voltages.
+**Conditions.** As step 1c: grid wired on the other side of the relay through the cold bulb, inverter in PWM_SETTLE (state 8) with the offset chosen in L2-INV-05 (telemetry `offset`). Scope: trigger on CH4 (relay command) rising, 2 ms/div; CH3 current, CH1 and CH2 voltages.
+
+**What the simulation predicts.** Through the cold bulb the switched model (L1-GFL-09/11) trips the 1.5 A bench protection 20–60 ms after the contact: once connected, VAC is measured on the inverter side of the bulb and the PLL follows the inverter's own voltage. The protection stops it (L2-INV-04.f); a trip here is a result to record, not a failure of the bench.
 
 **Sequence.**
 1. Press `g`. The inverter settles 10 grid periods (200 ms), then commands the relay (`relay` 10), and reports it closed 20 ms later (`relay` 11): `inverter_state` 2 → 3 (GRID_CONNECTED).
@@ -167,6 +194,7 @@ Step 2 run with nothing behind the relay: the firmware goes through the whole co
 | .c Residual current in GRID_CONNECTED | < 0.05 A RMS; bulb dark | the current loop regulates to zero | |
 | .d Opening with `x`: relay opens only after the current is at zero; no trip | yes | STOPPING then DISCONNECT | |
 | .e INFO: voltage disturbance at closing (peak, duration), relay bounce visible on CH3 | record | — | |
+| .f INFO: direction of the current at the contact (out of the inverter with a positive offset) and the offset used | record | step 1c | |
 
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 

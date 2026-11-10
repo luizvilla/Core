@@ -864,6 +864,16 @@
    "status_note": "Implemented 2026-11-10"
   },
   {
+   "id": "L0-GFL-18",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Feedforward gain (inverter voltage offset)",
+   "criterion": ".a default 1, values outside [0.5, 1.5] rejected, kept across init(); .b in GRID_CONNECT the output voltage is the feedforward times the gain, same phase; .c in RUN the feedforward part scales with the gain",
+   "source": "`setFeedforwardGain` (library 2f6616f)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-10"
+  },
+  {
    "id": "L1-GFL-01",
    "tab": "inverter",
    "level": "L1",
@@ -1060,6 +1070,17 @@
    "hardware": "bench"
   },
   {
+   "id": "L2-INV-05",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 1c: inverter voltage offset with the relay open and the grid on the other side",
+   "criterion": ".a offset follows the + / - keys, 0–5 % in 1 % steps, never below 0; .b inverter-side amplitude rises by offset × VAC (±0.5 % of VAC), phase unchanged (±1°); INFO .c voltage across the open relay at each offset, including 0; .d offset chosen for step 2",
+   "conditions": "Bench session (docs/testing/bench/inverter-session.md), stage INV_SETTLE (c), grid wired through the bulb on the other side of the relay, relay open",
+   "source": "`setFeedforwardGain` (library 2f6616f), `app::inverter_vac_offset_step`, `app::inverter_vac_offset_max`",
+   "status": "planned",
+   "status_note": "Defined 2026-11-10 with Luiz Villa"
+  },
+  {
    "id": "L2-INV-02",
    "tab": "inverter",
    "level": "L2",
@@ -1184,6 +1205,16 @@
    "source": "`controlStep`: observer fed one-period averages (`GridObserver::updateEstimates`)",
    "status": "implemented",
    "status_note": "Implemented 2026-11-09 (#7)"
+  },
+  {
+   "id": "L0-APP-10",
+   "tab": "app",
+   "level": "L0",
+   "title": "Inverter voltage offset from the operator command",
+   "criterion": ".a the feedforward gain is 1 + offset, the offset clamped to [0, app::inverter_vac_offset_max]: a negative offset gives 1 (never below the grid)",
+   "source": "`OperatorCommands::vac_offset`, `app::inverter_vac_offset_max`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-10"
   },
   {
    "id": "L1-APP-01",

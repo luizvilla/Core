@@ -931,5 +931,47 @@ int main() {
         c.near("rotated by w·Ts (rad)", angle, b.getw() * Ts, 1e-4);
     }
 
+    // ---------------------------------------------------------------- L0-GFL-18
+    {
+        /** @test L0-GFL-18.a: The feedforward gain defaults to 1, rejects values outside [0.5, 1.5] and is kept across init() */
+        tc::Criterion c("L0-GFL-18.a", "The feedforward gain defaults to 1, rejects values outside [0.5, 1.5] and is kept across init()");
+        singlePhaseInverterFollowing inv;
+        c.check("init", initDefault(inv));
+        c.near("default 1", inv.getFeedforwardGain(), 1.0, 0.0);
+        for (float g : {0.49F, 1.51F, f_nan, f_inf, -1.0F}) c.check("rejected", !inv.setFeedforwardGain(g));
+        c.near("unchanged", inv.getFeedforwardGain(), 1.0, 0.0);
+        c.check("1.03 accepted", inv.setFeedforwardGain(1.03F));
+        c.check("init again", initDefault(inv));
+        c.near("kept across init", inv.getFeedforwardGain(), 1.03, 1e-7);
+    }
+    {
+        /** @test L0-GFL-18.b: In GRID_CONNECT the output voltage is the feedforward times the gain, same phase */
+        tc::Criterion c("L0-GFL-18.b", "In GRID_CONNECT the output voltage is the feedforward times the gain, same phase");
+        singlePhaseInverterFollowing a, b;
+        Grid ga, gb;
+        c.check("gain accepted", b.setFeedforwardGain(1.02F));
+        c.check("reach GRID_CONNECT (gain 1)", reachConnect(c, a, ga));
+        c.check("reach GRID_CONNECT (gain 1.02)", reachConnect(c, b, gb));
+        const clarke_t va = a.getVabOutput(), vb = b.getVabOutput();
+        const dqo_t qa = a.getVdq(), qb = b.getVdq();
+        c.near("|V_out| / |V_dq| = 1.02", std::hypot(vb.alpha, vb.beta) / std::hypot(qb.d, qb.q), 1.02, 1e-4);
+        c.near("|V_out| / |V_dq| = 1 without gain", std::hypot(va.alpha, va.beta) / std::hypot(qa.d, qa.q), 1.0, 1e-4);
+        const double angle = wrap((std::atan2(vb.beta, vb.alpha) - b.getTheta()) - (std::atan2(va.beta, va.alpha) - a.getTheta()));
+        c.near("same phase relative to theta (rad)", angle, 0.0, 1e-4);
+    }
+    {
+        /** @test L0-GFL-18.c: In RUN the feedforward part of the output scales with the gain; the PI adds on top */
+        tc::Criterion c("L0-GFL-18.c", "In RUN the feedforward part of the output scales with the gain; the PI adds on top");
+        singlePhaseInverterFollowing inv;
+        Grid grid;
+        if (reachRun(c, inv, grid)) {
+            c.check("gain accepted in RUN", inv.setFeedforwardGain(1.05F));
+            step(inv, grid);
+            // Default PI (Kp 0.001 V/A): the correction is negligible next to 5 % of Vd.
+            c.near("V_out,d / V_d = 1.05", inv.getVdqOut().d / inv.getVdq().d, 1.05, 1e-3);
+            c.check("still RUN", inv.getMode() == VSI_RUN);
+        }
+    }
+
     return tc::finish();
 }

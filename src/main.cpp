@@ -125,6 +125,8 @@ static boost_mode mode = IDLE;
 static InverterStage inverter_stage = INV_OFF;
 static float32_t inject_current = 0.0F;
 static constexpr float32_t inject_current_step = 0.01F;  /* A peak per key press */
+/* Bench step 1c: inverter voltage offset (fraction of VAC, keys + / -), never below the grid. */
+static float32_t inverter_vac_offset = 0.0F;
 /* Grid relay on GPIO 22: command, and feedback once held for the contact time.
  * Polarity: set = closed (check on the dead-bus relay test, session step R). */
 static constexpr uint8_t relay_pin = 22U;
@@ -333,6 +335,7 @@ void loop_communication_task()
                "|     press g : step 2 connect (relay)   |\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
+               "|     press + / - : inverter V offset +/-|\n"
                "|     press x : inverter OFF (relay open)|\n"
                "|     press R : relay test (dead bench)  |\n"
                "|     press u : voltage reference UP     |\n"
@@ -394,6 +397,14 @@ void loop_communication_task()
         scope_trigger_on_trip = false;
         relay_test = false;
         scope.start();  /* re-arm: capture this stage's start (or a fault) */
+        break;
+    case '+':
+    case '-':
+        inverter_vac_offset += (received_serial_char == '+' ? 1.0F : -1.0F) * app::inverter_vac_offset_step;
+        if (inverter_vac_offset < 0.0F) inverter_vac_offset = 0.0F;  /* never below the grid voltage */
+        if (inverter_vac_offset > app::inverter_vac_offset_max) inverter_vac_offset = app::inverter_vac_offset_max;
+        printk("inverter voltage offset: +%.1f %% of VAC (feedforward gain %.3f)\n",
+               (double)(100.0F * inverter_vac_offset), (double)(1.0F + inverter_vac_offset));
         break;
     case 'j':
         inject_current += inject_current_step;
@@ -547,12 +558,13 @@ void loop_application_task()
     for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
     /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
     const dqo_t vdq_avg = control.inverter.getVdqAverage();
-    printk("sync: Vd_avg %.1f (293-358) Vq_avg %.2f (|.|<3.25) w_avg %.2f (298.5-329.9) window %u grid_ok %u trip %u fault %u\n",
+    printk("sync: Vd_avg %.1f (293-358) Vq_avg %.2f (|.|<3.25) w_avg %.2f (298.5-329.9) window %u grid_ok %u trip %u fault %u offset %.1f %%\n",
            (double)vdq_avg.d, (double)vdq_avg.q, (double)control.inverter.getwAverage(),
            static_cast<unsigned int>(control.inverter.isSyncWindowFull()),
            static_cast<unsigned int>(control.grid_observer.canOperate()),
            static_cast<unsigned int>(control.grid_observer.getTripReason()),
-           static_cast<unsigned int>(control.inverter.getFaultReason()));
+           static_cast<unsigned int>(control.inverter.getFaultReason()),
+           (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)));
     printk("%u:%u:%u%u:%7.3f:%7.3f:%7.1f:%7.1f:%6.3f:%u\n", static_cast<unsigned int>(inverter_stage),
            static_cast<unsigned int>(control.inverter.getMode()), static_cast<unsigned int>(relay_command),
            static_cast<unsigned int>(relay_closed), (double)idq.d, (double)idq.q, (double)pq.d, (double)pq.q,
@@ -632,6 +644,7 @@ void loop_critical_task()
     cmd.inverter_stage = inverter_stage;
     cmd.settle_count_test = settle_count_test;
     cmd.inject_current = inject_current;
+    cmd.vac_offset = inverter_vac_offset;
     cmd.v_bus_ref = voltage_reference;
 
     const ControlOutputs out = controlStep(control, meas, cmd);

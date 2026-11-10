@@ -358,3 +358,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Yes. Library: new setters/getters, defaults unchanged; the INVALID_CONTROL_STATE recovery now re-initializes the current SOGI with the configured gain instead of 500. Application: `controlInit()` sets candidate C (Kp 1 V/A, Ti 5 ms, limit 30 V, current SOGI 2000 rad/s, advance 0.5 period). `main.cpp`: LEG1_HIGH and LEG2_HIGH maximum duty 0.95 (Luiz Villa's two lines, now with the constant); with the 0.005 minimum the bridge duty spans 0.05–0.95 |
 | Evidence | Firmware builds. L0: L0-GFL-17.a–e pass (new); the other L0 results are unchanged, L0-APP-03.c fails as before (finding #2). L1 (switched model, 2026-11-10): with today's library behaviour the connection trips at the contact whatever the gains (no current PI in GRID_CONNECT; through the bulb the PLL locks on the inverter's own voltage), see the design note §6; the C gains alone do not make step 2 pass |
 | Hardware check | Not done |
+
+## 2026-11-10 — Inverter voltage offset for the connection (bench step 1c)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): inverter voltage offset …` commit that adds this entry; library `luizvilla/single_phase_inverter` `2f6616f` |
+| Files | `owntech/lib/USB/single_phase_inverter/src/singlePhaseInverterFollowing.{h,cpp}`, `src/app/control_step.{h,cpp}`, `src/main.cpp`, `tests/l1/dependencies.lock.json`, `tests/l1/design/connection_l1.py` |
+| Reason | Luiz Villa asked for a small offset on the inverter side so that current flows out of the inverter when the relay closes, adjustable from the bench with keys, never below the grid voltage (bench step 1c, L2-INV-05) |
+| Behaviour change | Yes. Library: `setFeedforwardGain()` (0.5–1.5, default 1) scales the grid-voltage feedforward. Application: `OperatorCommands::vac_offset`, clamped to [0, 5 %], sets the gain 1 + offset every control step; default 0, so behaviour is unchanged until `+` is pressed. `main.cpp`: keys `+` / `-` (1 % of VAC per press), the offset in the `sync:` telemetry line |
+| Evidence | Firmware builds. L0-GFL-18.a–c and L0-APP-10.a pass; other L0 results unchanged (L0-APP-03.c fails as before, finding #2). The L1-GFL-14 study patch follows the new library lines and still builds |
+| Hardware check | Not done (L2-INV-05 is the check) |

@@ -54,11 +54,11 @@ def patch_library(dst, hold):
         s = rep(s, "    _w = _w_ref + _pll_pi.calculateWithReturn(0, -1.0F * _Vdq.q);",
                 "    if (_hold_remaining > 0.0F) { _w = _hold_w; _hold_remaining -= _Ts; }  // STUDY: PLL frozen during the hold\n"
                 "    else { _w = _w_ref + _pll_pi.calculateWithReturn(0, -1.0F * _Vdq.q); }")
-        s = rep(s, "        _Vdq_output.d = _Vdq.d + _current_d_pi.calculateWithReturn(id_ref, _Idq.d);\n"
-                   "        _Vdq_output.q = _Vdq.q + _current_q_pi.calculateWithReturn(iq_ref, _Idq.q);",
+        s = rep(s, "        _Vdq_output.d = _feedforward_gain * _Vdq.d + _current_d_pi.calculateWithReturn(id_ref, _Idq.d);\n"
+                   "        _Vdq_output.q = _feedforward_gain * _Vdq.q + _current_q_pi.calculateWithReturn(iq_ref, _Idq.q);",
                 "        const bool hold_ff = _hold_remaining > 0.0F;  // STUDY: synthesized feedforward during the hold\n"
-                "        _Vdq_output.d = (hold_ff ? _hold_vd : _Vdq.d) + _current_d_pi.calculateWithReturn(id_ref, _Idq.d);\n"
-                "        _Vdq_output.q = (hold_ff ? 0.0F : _Vdq.q) + _current_q_pi.calculateWithReturn(iq_ref, _Idq.q);")
+                "        _Vdq_output.d = _feedforward_gain * (hold_ff ? _hold_vd : _Vdq.d) + _current_d_pi.calculateWithReturn(id_ref, _Idq.d);\n"
+                "        _Vdq_output.q = _feedforward_gain * (hold_ff ? 0.0F : _Vdq.q) + _current_q_pi.calculateWithReturn(iq_ref, _Idq.q);")
         s += """
 // STUDY (tests/l1/design/connection_l1.py): connection reference hold.
 void singlePhaseInverterFollowing::holdConnectionReference(float32_t duration) {
