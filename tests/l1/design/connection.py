@@ -216,6 +216,106 @@ def test04(grid, out):
     i0 = lines.index('## Best cases (time domain)'); print('\n'.join(lines[i0:i0 + 18]))
 
 
+def bode_pair(out, curves, grid, tag):
+    """Open- and closed-loop Bode figures (dq frame) for [(label, loop dict)]."""
+    import matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+    for key, name, title in (('L', 'bode_open.png', 'Open loop L'), ('T', 'bode_closed.png', 'Closed loop T')):
+        fig, (am, ap) = plt.subplots(2, 1, figsize=(8, 6.4), sharex=True, facecolor='#fcfcfb')
+        for (label, r), col in zip(curves, COLORS):
+            am.semilogx(r['f'], 20 * np.log10(np.abs(r[key])), color=col, lw=1.5, label=label)
+            ap.semilogx(r['f'], np.degrees(np.unwrap(np.angle(r[key]))), color=col, lw=1.5)
+        for ax in (am, ap): style(ax)
+        am.axhline(0 if key == 'L' else -3, color='#52514e', lw=0.8, ls='-' if key == 'L' else '--')
+        am.set_ylabel('Magnitude (dB)'); ap.set_ylabel('Phase (°)'); ap.set_xlabel('Frequency in the dq frame (Hz, offset from 50 Hz)')
+        am.set_title(f'{title}, {tag}, {grid} grid', loc='left', fontsize=11); am.legend(frameon=False, fontsize=8)
+        fig.tight_layout(); fig.savefig(out / name, dpi=130); plt.close(fig)
+
+
+MARGIN_HEAD = ['| Loop | Open loop: crossover (Hz) | Open loop: phase margin (°) | Open loop: gain margin (dB) | Closed loop: bandwidth −3 dB (Hz) | Closed loop: peak (dB) | Closed loop: peak at (Hz) |',
+               '|---|---|---|---|---|---|---|']
+
+
+def margin_row(label, lm):
+    return f"| {label} | {f(lm['crossover_Hz'])} | {f(lm['pm_deg'])} | {f(lm['gm_dB'])} | {f(lm['bandwidth_Hz'])} | {f(lm['peak_dB'])} | {f(lm['peak_Hz'])} |"
+
+
+def test05(grid, out):
+    rg, lg = ld.GRIDS[grid]; out.mkdir(parents=True, exist_ok=True)
+    cases = []
+    for adv in (0.5, 0.3):
+        for win in (0.01, 0.04, 0.1):
+            for cv in (0.5, 1.0, 2.0, 5.0):
+                cases.append((f'a. feedforward clamp ±{cv:g} V', adv, win, {'clamp_v': cv}))
+                cases.append((f'b. feedforward and PLL input clamp ±{cv:g} V', adv, win, {'clamp_v': cv, 'clamp_pll': True}))
+            for ci in (0.5, 1.0, 2.0):
+                cases.append((f'c. as b (±2 V) plus measured current clamp ±{ci:g} A', adv, win, {'clamp_v': 2.0, 'clamp_pll': True, 'clamp_i': ci}))
+    rows = [(n, adv, win, metrics(rg, lg, contact_deg=45.0, **{**BASE, **RUNG4, 'adv': adv, 'clamp_window': win, **kw})) for n, adv, win, kw in cases]
+    refs = [(f'reference: no clamp, advance {adv}', metrics(rg, lg, contact_deg=45.0, **{**BASE, **RUNG4, 'adv': adv})) for adv in (0.5, 0.3)]
+    refs.append(('reference: D-GFL-04 best (advance 0.3, synthesized feedforward and PLL frozen 5 ms)',
+                 metrics(rg, lg, contact_deg=45.0, **{**BASE, **RUNG4, 'adv': 0.3, 'synth_blank': 0.005, 'pll_freeze': 0.005})))
+    board = [(n, metrics(rg, lg, contact_deg=45.0, net=ld.SCHEMATIC_NET, **{**BASE, **RUNG4, **kw})) for n, kw in
+             (('board network, no clamp, advance 0.3', {'adv': 0.3}), ('board network, best clamp case', None))] if False else []
+    best = sorted(rows, key=lambda r: (not r[3]['meets'], r[3]['peak_all'] + r[3]['settle_ms'] / 100))
+    b = best[0]
+    bkw = next(kw for n, adv, win, kw in cases if n == b[0] and adv == b[1] and win == b[2])
+    board = [('board network: no clamp, advance 0.3', metrics(rg, lg, contact_deg=45.0, net=ld.SCHEMATIC_NET, **{**BASE, **RUNG4, 'adv': 0.3})),
+             (f'board network: best clamp case', metrics(rg, lg, contact_deg=45.0, net=ld.SCHEMATIC_NET, **{**BASE, **RUNG4, 'adv': b[1], 'clamp_window': b[2], **bkw}))]
+    curves = [(f'advance {adv}', ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, **{**BASE, 'adv': adv})) for adv in (0.5, 0.3)]
+    bode_pair(out, curves, grid, 'rung 4, after the clamp window')
+    lines = header('D-GFL-05', 'clamp after the park transform', grid, rg, lg,
+                   'Rung 4 of D-GFL-01 (library PLL, filter capacitors as up to D-GFL-04, 80 µs delay), candidate C, current PI from the relay command, contact at 45°. '
+                   'From the relay command to the end of a window after the contact, the park outputs are clamped around their pre-command values: (a) the feedforward Vd, Vq; (b) also the Vq fed to the PLL; (c) also the measured I_d, I_q. '
+                   'Swept: clamp level, window 10 / 40 / 100 ms, output advance 0.5 (today) or 0.3 (D-GFL-04).')
+    lines += ['## Margins and bandwidth (linear model, relay closed)', '', 'The clamp is nonlinear and only active in its window; once it releases, the loop is the base loop below.', '', *MARGIN_HEAD]
+    lines += [margin_row(lbl, ll.margins(r)) for lbl, r in curves]
+    lines += ['', '![Open loop](bode_open.png)', '', '![Closed loop](bode_closed.png)', '', '## Best cases (time domain)', '', 'Ranked: meets the target first, then peak before the step plus settling/100 ms.', '',
+              '| Case | Peak before the step (A) | Peak, 10 ms (A) | Settling ±0.05 A (ms) | Meets target | Would trip |', '|---|---|---|---|---|---|']
+    row = lambda label, m: f"| {label} | {f(m['peak_all'])} | {f(m['peak10'])} | {f(m['settle_ms'])} | {'yes' if m['meets'] else 'no'} | {'yes' if m['trips'] else 'no'} |"
+    lines += [row(n, m) for n, m in refs]
+    lines += [row(f'{n}, advance {adv}, window {win * 1e3:g} ms', m) for n, adv, win, m in best[:8]]
+    lines += [row(n, m) for n, m in board]
+    lines += ['', '## All cases', '', '| Case | Advance | Window (ms) | Peak before the step (A) | Settling (ms) | Would trip |', '|---|---|---|---|---|---|']
+    lines += [f"| {n} | {adv} | {win * 1e3:g} | {f(m['peak_all'])} | {f(m['settle_ms'])} | {'yes' if m['trips'] else 'no'} |" for n, adv, win, m in rows]
+    (out / 'report.md').write_text('\n'.join(lines) + '\n')
+    i0 = lines.index('## Best cases (time domain)'); print('\n'.join(lines[i0:i0 + 18]))
+
+
+def test06(grid, out):
+    out.mkdir(parents=True, exist_ok=True)
+    best = {'adv': 0.3, 'synth_blank': 0.005, 'pll_freeze': 0.005}
+    sets = [('today', {}), ('best (D-GFL-04)', best), ('best, Kp 2 V/A, Ti 20 ms', {**best, 'kp': 2.0, 'ti': 0.02})]
+    conds = []  # (group, label, grid, kwargs)
+    for g in ('IEC', 'bulb cold', 'bulb hot'): conds.append(('grid', g, g, {**RUNG4}))
+    for name, kw in (('rung 2 (PLL, no capacitors, delay 100 µs)', {'pll': True, 'caps': False, 'delay': ld.TS}),
+                     ('rung 3 (capacitors, delay 100 µs)', {'pll': True, 'caps': True, 'delay': ld.TS}), ('rung 4', RUNG4)):
+        conds.append(('rung', name, 'IEC', kw))
+    for d in (60e-6, 80e-6, 100e-6, 120e-6): conds.append(('delay', f'delay {d * 1e6:g} µs (advance kept for 80 µs)', 'IEC', {**RUNG4, 'delay': d}))
+    for a in (0.0, 45.0, 90.0, 135.0): conds.append(('angle', f'contact at {a:g}°', 'IEC', {**RUNG4, 'contact_deg': a}))
+    conds.append(('network', 'board network (with C122)', 'IEC', {**RUNG4, 'net': ld.SCHEMATIC_NET}))
+    res = []
+    for grp, label, g, kw in conds:
+        rg, lg = ld.GRIDS[g]; kw = {'contact_deg': 45.0, **kw}
+        res.append((grp, label, [metrics(rg, lg, **{**BASE, **kw, **sk}) for _, sk in sets]))
+    curves = []
+    for g in ('IEC', 'bulb cold', 'bulb hot'):
+        rg, lg = ld.GRIDS[g]; curves.append((f'best, {g}', ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, **{**BASE, 'adv': 0.3})))
+    rg, lg = ld.GRIDS['IEC']; curves.append(('best, Kp 2, Ti 20 ms, IEC', ll.loop(caps=True, rg=rg, lg=lg, delay=80e-6, **{**BASE, 'adv': 0.3, 'kp': 2.0, 'ti': 0.02})))
+    bode_pair(out, curves, grid, 'rung 4, after the blank')
+    lines = header('D-GFL-06', 'robustness of the best connection strategy', grid, *ld.GRIDS['IEC'],
+                   'Best strategy from D-GFL-04 (advance 0.3 period, synthesized feedforward and PLL frozen for 5 ms after the contact), with candidate C (Kp 1 V/A, Ti 5 ms) and with Kp 2 V/A, Ti 20 ms, against today (advance 0.5, nothing frozen). '
+                   'Rung 4 on the IEC grid at 45° unless the row says otherwise. Every row changes one condition; the advance stays at 0.3 (tuned for 80 µs) so the delay rows show the cost of a wrong delay estimate. D-GFL-05 (clamp) did not improve on D-GFL-04 and is not included.')
+    lines[0] = '# D-GFL-06: robustness of the best connection strategy'
+    lines += ['## Margins and bandwidth (linear model, relay closed, after the blank)', '', *MARGIN_HEAD] + [margin_row(lbl, ll.margins(r)) for lbl, r in curves]
+    lines += ['', '![Open loop](bode_open.png)', '', '![Closed loop](bode_closed.png)', '', '## Peak before the step and settling', '',
+              'Each cell: peak line current before the step (A) / settling within ±0.05 A (ms); ✓ meets the provisional target, ⚠ would trip at 1.5 A.', '',
+              '| Condition | ' + ' | '.join(n for n, _ in sets) + ' |', '|---|' + '---|' * len(sets)]
+    cell = lambda m: f"{f(m['peak_all'])} / {f(m['settle_ms'])}" + (' ✓' if m['meets'] else '') + (' ⚠' if m['trips'] else '')
+    for grp, label, ms in res:
+        lines.append(f'| {label} | ' + ' | '.join(cell(m) for m in ms) + ' |')
+    (out / 'report.md').write_text('\n'.join(lines) + '\n')
+    i0 = lines.index('## Peak before the step and settling'); print('\n'.join(lines[i0:]))
+
+
 def phasor(t, v, t0, t1):
     m = (t >= t0) & (t < t1); return 2 * np.mean(v[m] * np.exp(-1j * 2 * np.pi * 50 * t[m]))
 
@@ -309,9 +409,9 @@ def test07(grid, out):
 
 
 def main():
-    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04', '07'], required=True)
+    a = argparse.ArgumentParser(); a.add_argument('--test', choices=['02', '03', '04', '05', '06', '07'], required=True)
     a.add_argument('--grid', default='IEC'); a.add_argument('--out', type=Path, required=True); o = a.parse_args()
-    {'02': test02, '03': test03, '04': test04, '07': test07}[o.test](o.grid, o.out)
+    {'02': test02, '03': test03, '04': test04, '05': test05, '06': test06, '07': test07}[o.test](o.grid, o.out)
 
 
 if __name__ == '__main__':

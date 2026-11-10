@@ -121,7 +121,8 @@ def plant(caps, rg, lg, closed):
 
 def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0.005, kr_i=2000.0,
         adv=0.5, lpf_fc=None, iref=0.1, trip=TRIP, ff='measured', contact_deg=0.0,
-        synth_blank=None, adv_synth=0.3, fade=0.0, pll_freeze=None, net=None, ff_gain=1.0, ff_phase_deg=0.0, bridge_gain=1.0, bridge_phase_deg=0.0):
+        synth_blank=None, adv_synth=0.3, fade=0.0, pll_freeze=None, net=None, ff_gain=1.0, ff_phase_deg=0.0, bridge_gain=1.0, bridge_phase_deg=0.0,
+        clamp_v=None, clamp_i=None, clamp_window=0.0, clamp_pll=False, ff_off=None):
     """synth_blank (s): feedforward synthesized (pre-command period average of Vd, PLL angle, advance adv_synth)
     from the relay command to contact + synth_blank, then faded to the measured one over fade (s).
     pll_freeze (s): PLL integrator held and ω latched (pre-command period average) from the contact to
@@ -145,7 +146,7 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
     was_closed = False
     theta, w, vq_prev = 0.0, W0, 0.0; ilp = 0.0; a_lp = 1 - math.exp(-2 * math.pi * lpf_fc * TS) if lpf_fc else None
     pending = []  # (time it takes effect, bridge voltage)
-    hist_vd, hist_w = [], []; vd_lat, w_lat = VPK, W0
+    hist_vd, hist_w, hist_vq = [], [], []; vd_lat, w_lat = VPK, W0
     vb = 0.0; steps = int(T_END / TS); rec = {k: np.zeros(steps) for k in ('t', 'ig', 'idm', 'iqm', 'vd', 'vq', 'w', 'duty', 'th_err', 'vn', 'vac', 'vg')}
     trip_t = None
     for k in range(steps):
@@ -186,10 +187,21 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
         ia, ib = si.calc(imeas, w_s)
         c, s = math.cos(theta), math.sin(theta)
         vd, vq = a * c + b * s, -a * s + b * c; idm, iqm = ia * c + ib * s, -ia * s + ib * c
-        vq_prev = vq
         hist_vd.append(vd); hist_w.append(w)
         if t < t_cmd: vd_lat = float(np.mean(hist_vd[-200:])); w_lat = float(np.mean(hist_w[-200:]))
+        # D-GFL-05: park outputs clamped around their pre-command values, from the command to contact + window.
+        in_clamp = t_cmd <= t < t_contact + clamp_window
+        if in_clamp and clamp_v is not None:
+            vd = min(max(vd, vd_lat - clamp_v), vd_lat + clamp_v); vq_c = min(max(vq, -clamp_v), clamp_v)
+            vq_prev = vq_c if clamp_pll else vq; vq = vq_c
+        else:
+            vq_prev = vq
+        if in_clamp and clamp_i is not None:
+            idm = min(max(idm, -clamp_i), clamp_i); iqm = min(max(iqm, -clamp_i), clamp_i)
+        hist_vq.append(vq)
         if ff == 'exact': vd, vq = VPK, 0.0   # feedforward from the true grid voltage instead of the measured VAC
+        elif ff in ('avg', 'avg_d'):  # one-period moving average of the park outputs (library _Vdq_avg), always on
+            vd = float(np.mean(hist_vd[-200:])); vq = float(np.mean(hist_vq[-200:])) if ff == 'avg' else 0.0
         active = pi_from != 'never' and t >= (t_cmd if pi_from == 'command' else t_fb)
         if active:
             ref = iref if t >= T_STEP else 0.0
@@ -202,6 +214,10 @@ def run(rg, lg, pll=False, caps=False, delay=TS, pi_from='command', kp=1.0, ti=0
             ks = 1.0 if t < t_end_s else (max(0.0, 1.0 - (t - t_end_s) / fade) if fade > 0 else 0.0)
         tho = theta + adv * w * TS; ths = theta + adv_synth * w * TS
         thf = tho + math.radians(ff_phase_deg); g_ff = (1 - ks) * ff_gain
+        if ff_off is not None:  # (start, end, fade) relative to the contact: measured feedforward off, faded back in
+            a0, a1, fd = ff_off; tr = t - t_contact
+            if a0 <= tr < a1: g_ff = 0.0
+            elif a1 <= tr < a1 + fd: g_ff *= (tr - a1) / fd
         va = (pd_ * math.cos(tho) - pq_ * math.sin(tho) + g_ff * (vd * math.cos(thf) - vq * math.sin(thf))
               + ks * vd_lat * math.cos(ths))
         duty = min(max(va / (2 * VBUS) + 0.5, 0.05), 0.95)

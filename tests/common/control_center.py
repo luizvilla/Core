@@ -77,7 +77,7 @@ def newest_of_level(camps,level):
 def state_of(test,result,findings):
     """@brief Display state of one test from its implementation state and latest result."""
     if result is None:
-        if test['level']=='D' and test.get('report') and test['status'] in ('implemented','partial'):return 'info'  # design test: its report is the result (ADR 0004)
+        if test.get('report') and (REPO/test['report']).exists() and test['status'] in ('implemented','partial'):return 'info'  # its generated report is the result (design tests, study validations)
         return {'planned':'planned','blocked':'blocked'}.get(test['status'],'not_run')
     rows=result[1]
     fails=[r for r in rows if r['verdict']=='FAIL']

@@ -21,7 +21,9 @@ trap 'rm -rf "$work"' EXIT
 # L1_APP_INCLUDE: a directory holding app/control_step.h with study tuning, searched before src/
 includes=(${L1_APP_INCLUDE:+-I"$L1_APP_INCLUDE"} -I"$repo/tests/common/shim" -I"$repo/src" -I"$repo/tests/l1/firmware_block" -I"$inv/src" -I"$libs/control_library/src")
 flags=(-std=c++17 -O1 -g -fPIC -Wall -Wextra -fsanitize=undefined -fno-sanitize-recover=undefined)
-strict=("$repo/tests/l1/firmware_block/wrapper.cpp" "$repo/src/app/control_step.cpp" "$repo/src/boost_converter/boost.cpp" "$repo/src/grid_observer/gridObserver.cpp")
+# L1_APP_SRC: a study copy of control_step.cpp (same interface), compiled instead of src/app/control_step.cpp
+app_src="${L1_APP_SRC:-$repo/src/app/control_step.cpp}"
+strict=("$repo/tests/l1/firmware_block/wrapper.cpp" "$app_src" "$repo/src/boost_converter/boost.cpp" "$repo/src/grid_observer/gridObserver.cpp")
 third=("$inv/src/singlePhaseInverterFollowing.cpp" "$inv/src/sogi.cpp" "$libs/control_library/src/pid.cpp" "$libs/control_library/src/transform.cpp" "$libs/control_library/src/trigo.cpp")
 objects=()
 for src in "${strict[@]}" "${third[@]}"; do
