@@ -179,18 +179,8 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
      * extrapolated over the actuation delay, offset of step 1c applied), ramped in like step 0. The inverter
      * controller stays OFF, so the relay is never requested. */
     const float32_t vac = isfinite(meas.v_ac) ? meas.v_ac : state.vac_prev;
-    state.vac_window_sum += vac - state.vac_window[state.vac_window_pos];
-    state.vac_window[state.vac_window_pos] = vac;
-    if (++state.vac_window_pos >= app::vac_follow_window)
-    {
-        state.vac_window_pos = 0U;
-        state.vac_window_full = true;
-        float32_t sum = 0.0F;  /* once per period: recompute the sum so rounding errors never accumulate */
-        for (uint16_t k = 0U; k < app::vac_follow_window; ++k) sum += state.vac_window[k];
-        state.vac_window_sum = sum;
-    }
-    state.vac_dc = state.vac_window_full ? state.vac_window_sum / static_cast<float32_t>(app::vac_follow_window) : 0.0F;
-    const bool vac_follow = stage == INV_VAC_FOLLOW && !state.bench_tripped && bus_valid && state.grid_observer.canOperate() && state.vac_window_full &&
+    state.vac_dc += (vac - state.vac_dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
+    const bool vac_follow = stage == INV_VAC_FOLLOW && !state.bench_tripped && bus_valid && state.grid_observer.canOperate() &&
                             (vsi_now == VSI_OFF || vsi_now == VSI_FAULT) && !meas.relay_closed;
     if (vac_follow)
     {

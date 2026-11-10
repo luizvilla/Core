@@ -171,9 +171,9 @@ inline constexpr float32_t inverter_vac_offset_max = 0.05F;
 /** @brief Step 1d (VAC follower): VAC extrapolated this many control periods ahead, to compensate the actuation
  * delay (80 µs to the next carrier period, plus half the 100 µs hold): 1.3. */
 inline constexpr float32_t vac_follow_advance = 1.3F;
-/** @brief Step 1d: the VAC DC (bench offset about -5.7 V) is removed as the mean over one nominal grid period,
- * which rejects the fundamental and its harmonics exactly (200 samples at 10 kHz, 50 Hz). */
-inline constexpr uint16_t vac_follow_window = 200U;
+/** @brief Step 1d: time constant of the VAC DC estimate (bench offset about -5.7 V), in s. A first-order filter,
+ * two operations per period: 50 Hz ripple on the estimate about Vpk/(w·tau) = 0.5 V; 95 % settled 6 s after boot. */
+inline constexpr float32_t vac_follow_dc_tau = 2.0F;
 
 }  // namespace app
 
@@ -244,11 +244,7 @@ struct ControlState {
     bool bench_tripped = false;                 ///< Bench current protection latched (cleared in the OFF stage).
     bool open_loop_active = false;              ///< The open-loop or VAC-follower stage drove the bridge last period.
     float32_t vac_prev = 0.0F;                  ///< Previous VAC sample (V), for the VAC-follower extrapolation.
-    float32_t vac_dc = 0.0F;                    ///< VAC DC estimate (V): mean over the last period, removed by the VAC follower.
-    float32_t vac_window[app::vac_follow_window] = {};  ///< Last period of VAC samples (V).
-    float32_t vac_window_sum = 0.0F;            ///< Sum of vac_window, recomputed once per period (no float drift).
-    uint16_t vac_window_pos = 0U;               ///< Next slot of vac_window.
-    bool vac_window_full = false;               ///< vac_window holds one full period.
+    float32_t vac_dc = 0.0F;                    ///< VAC DC estimate (V), first-order filter, removed by the VAC follower.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
 };
 

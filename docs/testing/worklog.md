@@ -380,3 +380,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | New stage `INV_VAC_FOLLOW` (key `a`): once the observer qualifies the grid, duty = 0.5 + k·(1 + offset)·(VAC extrapolated 1.3 periods − one-period VAC mean)/(2·VDCBus), k ramped 0 → 1 in 1 s; the inverter controller stays OFF (no relay request); bench trip active. The one-period VAC mean (200 floats, about 0.8 kB of RAM) runs in every stage. Other stages unchanged |
 | Evidence | Firmware builds (RAM 30.1 %, flash 79.0 %). L0-APP-11.a–b pass; other L0 results unchanged (L0-APP-03.c fails as before, finding #2) |
 | Hardware check | Not done (L2-INV-06 is the check) |
+
+## 2026-11-10 — Step 1d: DC removal simplified (critical task overload reported)
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(app): step 1d DC removal …` commit that adds this entry |
+| Files | `src/app/control_step.{h,cpp}`, `tests/l0/app/test_app.cpp`, `docs/testing/bench/inverter-session.md` |
+| Reason | Luiz Villa lost control of the board with the critical task overloaded after flashing step 1d. The one-period VAC mean recomputed a 200-sample sum once per grid period (a few µs on that period, in every stage); it is the only addition of this change that could lengthen a period noticeably |
+| Behaviour change | The VAC DC estimate is now a first-order filter (τ 2 s, two operations per period, no array, no loop); about 0.5 V of 50 Hz ripple left on the estimate; settled about 6 s after boot. RAM −0.8 kB |
+| Evidence | Firmware builds (RAM 29.5 %). L0-APP-11.a–b pass. Cause of the overload not confirmed on the board yet: check the `load us` telemetry line |
+| Hardware check | Pending |

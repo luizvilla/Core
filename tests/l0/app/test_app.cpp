@@ -750,12 +750,11 @@ int main() {
         double worst = 0.0, amp = 0.0;
         for (int k = 0; k < 2 * ticks_per_s; ++k) {  // 1 s ramp, then 1 s copying
             const float v_now = grid.v(), v_prev = static_cast<float>(state.vac_prev);
-            const float oldest = state.vac_window[state.vac_window_pos];
-            const float sum = state.vac_window_sum; const bool wrap = state.vac_window_pos + 1U >= app::vac_follow_window;
+            const float dc = state.vac_dc;
             const ControlOutputs out = gridStep(state, grid, cmd, true, held);
             relay |= out.relay_close;
             if (k >= ticks_per_s) {
-                const double dc_next = wrap ? state.vac_dc : (sum + v_now - oldest) / app::vac_follow_window;  // after a wrap the sum is recomputed
+                const double dc_next = dc + (v_now - dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
                 const double expect = 0.5 + (v_now + app::vac_follow_advance * (v_now - v_prev) - dc_next) / (2.0 * v_bus);
                 worst = std::max(worst, std::fabs(out.bridge_duty - expect));
                 amp = std::max(amp, std::fabs(2.0 * v_bus * (out.bridge_duty - 0.5)));
@@ -763,8 +762,8 @@ int main() {
             }
         }
         c.near("duty = 0.5 + (VAC extrapolated 1.3 periods − DC) / (2 Vbus)", worst, 0.0, 1e-5);
-        c.near("copied amplitude ≈ 325 V peak, offset removed (V)", amp, 230.0 * std::sqrt(2.0), 3.0);
-        c.near("DC estimate = the VAC offset (V)", state.vac_dc, -5.7, 0.05);
+        c.near("copied amplitude ≈ 325 V peak, offset partly removed after 3 s (V)", amp, 230.0 * std::sqrt(2.0), 4.0);
+        c.check("DC estimate moving towards the VAC offset (between -5.7 and 0 V, 3 s after boot)", state.vac_dc < -2.0F && state.vac_dc > -6.5F);
         c.check("relay never commanded", !relay);
         c.check("inverter controller stays OFF", state.inverter.getMode() == VSI_OFF);
     }

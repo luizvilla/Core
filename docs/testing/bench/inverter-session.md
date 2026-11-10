@@ -177,9 +177,9 @@ Step 2 run with nothing behind the relay: the firmware goes through the whole co
 
 **Why.** In steps 1 and 1c the inverter-side wave is rebuilt by the controller (SOGI, PLL, feedforward). Here the bridge copies the measured grid voltage directly, so the voltage left across the open relay is what the hardware and the actuation delay alone produce. Comparing it with step 1 separates the controller's share of the mismatch from the hardware's. **The relay is never closed in this stage** (the inverter controller stays OFF and never requests the connection).
 
-**Firmware.** Key `a` (`INV_VAC_FOLLOW`). Once the grid observer has qualified the grid (`grid_ok` 1), the duty is 0.5 + k · (1 + offset) · (VAC extrapolated 1.3 periods ahead − VAC mean over the last period) / (2 · VDCBus):
+**Firmware.** Key `a` (`INV_VAC_FOLLOW`). Once the grid observer has qualified the grid (`grid_ok` 1), the duty is 0.5 + k · (1 + offset) · (VAC extrapolated 1.3 periods ahead − VAC DC estimate) / (2 · VDCBus):
 - the extrapolation (`app::vac_follow_advance`) compensates the actuation delay (80 µs to the next carrier period, plus half the 100 µs hold);
-- the one-period mean (`app::vac_follow_window`) removes the VAC offset (about −5.7 V on the bench) exactly;
+- a slow first-order filter (`app::vac_follow_dc_tau`, 2 s) removes the VAC offset (about −5.7 V on the bench); it runs from boot and is settled about 6 s after it (0.5 V of 50 Hz ripple left);
 - k ramps from 0 to 1 in 1 s, as in step 0; the offset of step 1c (`+` / `-`) applies;
 - the bench current trip stays active. `x` stops it. Tested at L0 (`L0-APP-11`).
 
