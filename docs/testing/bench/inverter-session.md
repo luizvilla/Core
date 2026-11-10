@@ -1,6 +1,6 @@
 # Inverter bench session
 
-The first hardware tests of the inverter: generate 230 V RMS, synchronize with the grid, close the relay, inject a small current. Each step has its own firmware stage, selected from the serial menu, and its own record. The catalogue IDs are `L2-INV-00…05` (Inverter tab, level L2: on the board); the pre-checks are `L2-INV-10`.
+The first hardware tests of the inverter: generate 230 V RMS, synchronize with the grid, close the relay, inject a small current. Each step has its own firmware stage, selected from the serial menu, and its own record. The catalogue IDs are `L2-INV-00…06` (Inverter tab, level L2: on the board); the pre-checks are `L2-INV-10`.
 
 | Step | Menu | Firmware stage | Inverter controller state | What it shows |
 |---|---|---|---|---|
@@ -8,6 +8,7 @@ The first hardware tests of the inverter: generate 230 V RMS, synchronize with t
 | 1 | `c` | `INV_SETTLE` | PWM_SETTLE, held | The inverter-side voltage matches the grid before the relay |
 | 1b | `g` | `INV_CONNECT`, relay power contacts unwired | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | Dry run of step 2: the sequence and the relay timing, with nothing connected (L2-INV-04) |
 | 1c | `c`, then `+`/`-` | `INV_SETTLE`, grid on the other side of the relay | PWM_SETTLE, held | The inverter-side voltage raised a little above the grid, so current flows out of the inverter at the contact (L2-INV-05) |
+| 1d | `a` | `INV_VAC_FOLLOW`, grid on the other side of the relay | OFF (PLL running); the bridge copies VAC | The inverter-side wave copies the measured grid voltage sample by sample: the smallest difference the hardware allows, relay never closed (L2-INV-06) |
 | 2 | `g` | `INV_CONNECT`, grid on the other side, offset from step 1c | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
@@ -171,6 +172,34 @@ Step 2 run with nothing behind the relay: the firmware goes through the whole co
 | .b Inverter-side amplitude follows the offset | rises by offset × VAC within ±0.5 % of VAC, phase unchanged within ±1° | the gain scales the feedforward only | |
 | .c INFO: voltage across the open relay at each offset (peak, RMS, phase), including offset 0 | record | the voltage that drives the contact current; compare offset 0 with the simulation (+1.1 %, +0.3°) | |
 | .d INFO: offset chosen for step 2 | record | — | |
+
+## L2-INV-06 · Step 1d: the bridge copies VAC, relay open (test only)
+
+**Why.** In steps 1 and 1c the inverter-side wave is rebuilt by the controller (SOGI, PLL, feedforward). Here the bridge copies the measured grid voltage directly, so the voltage left across the open relay is what the hardware and the actuation delay alone produce. Comparing it with step 1 separates the controller's share of the mismatch from the hardware's. **The relay is never closed in this stage** (the inverter controller stays OFF and never requests the connection).
+
+**Firmware.** Key `a` (`INV_VAC_FOLLOW`). Once the grid observer has qualified the grid (`grid_ok` 1), the duty is 0.5 + k · (1 + offset) · (VAC extrapolated 1.3 periods ahead − VAC mean over the last period) / (2 · VDCBus):
+- the extrapolation (`app::vac_follow_advance`) compensates the actuation delay (80 µs to the next carrier period, plus half the 100 µs hold);
+- the one-period mean (`app::vac_follow_window`) removes the VAC offset (about −5.7 V on the bench) exactly;
+- k ramps from 0 to 1 in 1 s, as in step 0; the offset of step 1c (`+` / `-`) applies;
+- the bench current trip stays active. `x` stops it. Tested at L0 (`L0-APP-11`).
+
+**Conditions.** As step 1c: grid wired on the other side of the relay through the bulb, relay open. Same scope setup (CH1 inverter side, CH2 grid side, or a differential probe across the open relay contacts).
+
+**Sequence.**
+1. From OFF (`x`), press `a`. Wait for `grid_ok` 1 and one second of ramp.
+2. Record the inverter-side and grid RMS, the phase between them and the voltage across the relay (peak, RMS), at offset 0.
+3. Optionally, `+` / `-` as in step 1c and record again.
+4. Press `c` (step 1) and record the same, to compare with the controller-built wave.
+5. Press `x`.
+
+**Acceptance.**
+
+| Criterion | Limit | Why | Result |
+|---|---|---|---|
+| .a No bridge before `grid_ok` 1; relay never commanded (`relay` 00 throughout) | yes | test-only stage | |
+| .b Inverter-side amplitude | within ±2 % of the grid amplitude | the bridge copies VAC | |
+| .c Phase between the two sides | within ±1° | the extrapolation compensates the delay | |
+| .d INFO: voltage across the open relay (peak, RMS, phase), step 1d against step 1 | record | the controller's share of the mismatch | |
 
 ## L2-INV-02 · Step 2: close the relay, then zero current (GRID_CONNECT → GRID_CONNECTED)
 

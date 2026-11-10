@@ -1081,6 +1081,17 @@
    "status_note": "Defined 2026-11-10 with Luiz Villa"
   },
   {
+   "id": "L2-INV-06",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Step 1d: the bridge copies VAC with the relay open (test only)",
+   "criterion": ".a no bridge before the grid is qualified, relay never commanded; .b inverter-side amplitude within ±2 % of the grid; .c phase within ±1°; INFO .d voltage across the open relay, step 1d against step 1",
+   "conditions": "Bench session, stage INV_VAC_FOLLOW (a), grid wired through the bulb on the other side of the relay, relay open",
+   "source": "`controlStep` INV_VAC_FOLLOW, `app::vac_follow_advance`, `app::vac_follow_window`",
+   "status": "planned",
+   "status_note": "Defined 2026-11-10 with Luiz Villa"
+  },
+  {
    "id": "L2-INV-02",
    "tab": "inverter",
    "level": "L2",
@@ -1213,6 +1224,16 @@
    "title": "Inverter voltage offset from the operator command",
    "criterion": ".a the feedforward gain is 1 + offset, the offset clamped to [0, app::inverter_vac_offset_max]: a negative offset gives 1 (never below the grid)",
    "source": "`OperatorCommands::vac_offset`, `app::inverter_vac_offset_max`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-10"
+  },
+  {
+   "id": "L0-APP-11",
+   "tab": "app",
+   "level": "L0",
+   "title": "Step 1d: the bridge copies VAC once the grid is qualified, relay never commanded",
+   "criterion": ".a no bridge before qualification; then duty = 0.5 + (VAC extrapolated 1.3 periods − one-period mean) / (2 Vbus), amplitude 325 V peak with a −5.7 V VAC offset removed, relay never commanded, inverter controller OFF; .b the offset of step 1c scales the copy; a bench trip stops the bridge on its tick",
+   "source": "`controlStep` INV_VAC_FOLLOW",
    "status": "implemented",
    "status_note": "Implemented 2026-11-10"
   },

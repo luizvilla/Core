@@ -175,7 +175,34 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
         out.bridge_duty = 0.5F + 0.5F * state.open_loop_m * sinf(state.open_loop_theta);
         out.bridge_enable = true;
     }
-    else
+    /* Step 1d: VAC follower. Once the grid is qualified, the bridge copies the measured VAC (DC removed,
+     * extrapolated over the actuation delay, offset of step 1c applied), ramped in like step 0. The inverter
+     * controller stays OFF, so the relay is never requested. */
+    const float32_t vac = isfinite(meas.v_ac) ? meas.v_ac : state.vac_prev;
+    state.vac_window_sum += vac - state.vac_window[state.vac_window_pos];
+    state.vac_window[state.vac_window_pos] = vac;
+    if (++state.vac_window_pos >= app::vac_follow_window)
+    {
+        state.vac_window_pos = 0U;
+        state.vac_window_full = true;
+        float32_t sum = 0.0F;  /* once per period: recompute the sum so rounding errors never accumulate */
+        for (uint16_t k = 0U; k < app::vac_follow_window; ++k) sum += state.vac_window[k];
+        state.vac_window_sum = sum;
+    }
+    state.vac_dc = state.vac_window_full ? state.vac_window_sum / static_cast<float32_t>(app::vac_follow_window) : 0.0F;
+    const bool vac_follow = stage == INV_VAC_FOLLOW && !state.bench_tripped && bus_valid && state.grid_observer.canOperate() && state.vac_window_full &&
+                            (vsi_now == VSI_OFF || vsi_now == VSI_FAULT) && !meas.relay_closed;
+    if (vac_follow)
+    {
+        const float32_t step = app::open_loop_m_rate * app::hot_loop_period;
+        state.open_loop_m += fminf(fmaxf(1.0F - state.open_loop_m, -step), step);
+        const float32_t predicted = vac + app::vac_follow_advance * (vac - state.vac_prev) - state.vac_dc;
+        const float32_t gain = 1.0F + fminf(fmaxf(cmd.vac_offset, 0.0F), app::inverter_vac_offset_max);
+        out.bridge_duty = 0.5F + state.open_loop_m * gain * predicted / (2.0F * meas.v_dc_bus);
+        out.bridge_enable = true;
+    }
+    state.vac_prev = vac;
+    if (!open_loop && !vac_follow)
     {
         state.open_loop_m = 0.0F;
         state.open_loop_theta = 0.0F;
@@ -192,7 +219,7 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
         out.bridge_enable = false;
         state.open_loop_m = 0.0F;
     }
-    state.open_loop_active = open_loop && out.bridge_enable;
+    state.open_loop_active = (open_loop || vac_follow) && out.bridge_enable;
     /* Relay: once the inverter requests the connection, issue the command app::relay_close_delay before a
      * grid-voltage zero crossing, so the contact closes near zero voltage. Locked, v = Vd·cos(theta): zero
      * crossings at theta = pi/2 (mod pi). The averaged frequency projects the angle over the closing time. */

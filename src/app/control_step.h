@@ -168,6 +168,12 @@ inline constexpr float32_t inverter_vac_offset_step = 0.01F;
 /** @brief Largest inverter voltage offset (fraction of VAC). 5 % is 16 V peak: 0.4 A peak through the cold bulb
  * (40 Ω) at the contact, below the 1.5 A bench trip. The offset is never negative (never below the grid). */
 inline constexpr float32_t inverter_vac_offset_max = 0.05F;
+/** @brief Step 1d (VAC follower): VAC extrapolated this many control periods ahead, to compensate the actuation
+ * delay (80 µs to the next carrier period, plus half the 100 µs hold): 1.3. */
+inline constexpr float32_t vac_follow_advance = 1.3F;
+/** @brief Step 1d: the VAC DC (bench offset about -5.7 V) is removed as the mean over one nominal grid period,
+ * which rejects the fundamental and its harmonics exactly (200 samples at 10 kHz, 50 Hz). */
+inline constexpr uint16_t vac_follow_window = 200U;
 
 }  // namespace app
 
@@ -193,7 +199,8 @@ enum InverterStage : uint8_t {
     INV_SETTLE = 1,     ///< Step 1: synchronized PWM held in PWM_SETTLE, relay open (menu 'c').
     INV_OPEN_LOOP = 2,  ///< Step 0: fixed 50 Hz modulation to 230 V RMS, no grid controller, relay open (menu 'o').
     INV_CONNECT = 3,    ///< Step 2: settle, close the relay, regulate zero current (GRID_CONNECTED) (menu 'g').
-    INV_INJECT = 4      ///< Step 3: as CONNECT, then inject a fixed d-axis current (RUN) (menu 'n').
+    INV_INJECT = 4,     ///< Step 3: as CONNECT, then inject a fixed d-axis current (RUN) (menu 'n').
+    INV_VAC_FOLLOW = 5  ///< Step 1d: once the grid is qualified, the bridge copies the measured VAC; relay never closed (menu 'a').
 };
 
 /** @brief Operator requests from the serial menu. */
@@ -235,7 +242,13 @@ struct ControlState {
     float32_t open_loop_m = 0.0F;               ///< Open-loop stage: current modulation index (ramped).
     float32_t open_loop_theta = 0.0F;           ///< Open-loop stage: oscillator angle (rad).
     bool bench_tripped = false;                 ///< Bench current protection latched (cleared in the OFF stage).
-    bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
+    bool open_loop_active = false;              ///< The open-loop or VAC-follower stage drove the bridge last period.
+    float32_t vac_prev = 0.0F;                  ///< Previous VAC sample (V), for the VAC-follower extrapolation.
+    float32_t vac_dc = 0.0F;                    ///< VAC DC estimate (V): mean over the last period, removed by the VAC follower.
+    float32_t vac_window[app::vac_follow_window] = {};  ///< Last period of VAC samples (V).
+    float32_t vac_window_sum = 0.0F;            ///< Sum of vac_window, recomputed once per period (no float drift).
+    uint16_t vac_window_pos = 0U;               ///< Next slot of vac_window.
+    bool vac_window_full = false;               ///< vac_window holds one full period.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
 };
 

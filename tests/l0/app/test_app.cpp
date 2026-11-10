@@ -732,5 +732,63 @@ int main() {
         c.near("offset above the limit: gain 1 + 5 %", state.inverter.getFeedforwardGain(), 1.0 + app::inverter_vac_offset_max, 1e-6);
     }
 
+    // ---------------------------------------------------------------- L0-APP-11
+    {
+        /** @test L0-APP-11.a: Step 1d: no bridge until the grid is qualified; then the bridge copies VAC, the relay is never commanded */
+        tc::Criterion c("L0-APP-11.a", "Step 1d: no bridge until the grid is qualified; then the bridge copies VAC, the relay is never commanded");
+        ControlState state;
+        Grid grid; grid.offset = -5.7;  // bench VAC offset
+        float held = 0.0F;
+        OperatorCommands cmd; cmd.inverter_stage = INV_VAC_FOLLOW;
+        c.check("controlInit", controlInit(state) == 0);
+        bool early = false, relay = false; int n = 0;
+        for (; n < 3 * ticks_per_s && !state.grid_observer.canOperate(); ++n) {
+            const ControlOutputs out = gridStep(state, grid, cmd, true, held);
+            early |= out.bridge_enable && !state.grid_observer.canOperate(); relay |= out.relay_close;
+        }
+        c.check("no bridge before the grid is qualified", !early);
+        double worst = 0.0, amp = 0.0;
+        for (int k = 0; k < 2 * ticks_per_s; ++k) {  // 1 s ramp, then 1 s copying
+            const float v_now = grid.v(), v_prev = static_cast<float>(state.vac_prev);
+            const float oldest = state.vac_window[state.vac_window_pos];
+            const float sum = state.vac_window_sum; const bool wrap = state.vac_window_pos + 1U >= app::vac_follow_window;
+            const ControlOutputs out = gridStep(state, grid, cmd, true, held);
+            relay |= out.relay_close;
+            if (k >= ticks_per_s) {
+                const double dc_next = wrap ? state.vac_dc : (sum + v_now - oldest) / app::vac_follow_window;  // after a wrap the sum is recomputed
+                const double expect = 0.5 + (v_now + app::vac_follow_advance * (v_now - v_prev) - dc_next) / (2.0 * v_bus);
+                worst = std::max(worst, std::fabs(out.bridge_duty - expect));
+                amp = std::max(amp, std::fabs(2.0 * v_bus * (out.bridge_duty - 0.5)));
+                c.check("bridge enabled", out.bridge_enable);
+            }
+        }
+        c.near("duty = 0.5 + (VAC extrapolated 1.3 periods − DC) / (2 Vbus)", worst, 0.0, 1e-5);
+        c.near("copied amplitude ≈ 325 V peak, offset removed (V)", amp, 230.0 * std::sqrt(2.0), 3.0);
+        c.near("DC estimate = the VAC offset (V)", state.vac_dc, -5.7, 0.05);
+        c.check("relay never commanded", !relay);
+        c.check("inverter controller stays OFF", state.inverter.getMode() == VSI_OFF);
+    }
+    {
+        /** @test L0-APP-11.b: Step 1d: the offset of step 1c scales the copy; a bench trip stops the bridge */
+        tc::Criterion c("L0-APP-11.b", "Step 1d: the offset of step 1c scales the copy; a bench trip stops the bridge");
+        ControlState state;
+        Grid grid;
+        float held = 0.0F;
+        OperatorCommands cmd; cmd.inverter_stage = INV_VAC_FOLLOW;
+        c.check("controlInit", controlInit(state) == 0);
+        c.check("qualified", qualifyGrid(c, state, grid, cmd, held));
+        for (int k = 0; k < ticks_per_s + 200; ++k) gridStep(state, grid, cmd, true, held);
+        double a0 = 0.0, a3 = 0.0;
+        for (int k = 0; k < 400; ++k) a0 = std::max(a0, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
+        cmd.vac_offset = 0.03F;
+        for (int k = 0; k < 400; ++k) a3 = std::max(a3, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
+        c.near("amplitude ratio with a 3 % offset", a3 / a0, 1.03, 2e-3);
+        Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.i_ac = 3.0F;
+        state.bridge_pwm_applied = true;
+        const ControlOutputs out = controlStep(state, m, cmd);
+        c.check("3 A trips the bench protection", state.bench_tripped);
+        c.check("bridge stopped on the trip tick", !out.bridge_enable);
+    }
+
     return tc::finish();
 }

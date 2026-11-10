@@ -332,6 +332,7 @@ void loop_communication_task()
                "|  inverter bench session (DC source):  |\n"
                "|     press o : step 0 open loop 230 V   |\n"
                "|     press c : step 1 PWM_SETTLE hold   |\n"
+               "|     press a : step 1d copy VAC, no relay|\n"
                "|     press g : step 2 connect (relay)   |\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
@@ -380,6 +381,12 @@ void loop_communication_task()
     case 'c':
         printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
         inverter_stage = INV_SETTLE;
+        scope_trigger_on_trip = false;
+        relay_test = false;
+        break;
+    case 'a':
+        printk("inverter step 1d: bridge copies VAC once the grid is qualified (relay never closed)\n");
+        inverter_stage = INV_VAC_FOLLOW;
         scope_trigger_on_trip = false;
         relay_test = false;
         break;

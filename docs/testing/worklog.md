@@ -369,3 +369,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Yes. Library: `setFeedforwardGain()` (0.5–1.5, default 1) scales the grid-voltage feedforward. Application: `OperatorCommands::vac_offset`, clamped to [0, 5 %], sets the gain 1 + offset every control step; default 0, so behaviour is unchanged until `+` is pressed. `main.cpp`: keys `+` / `-` (1 % of VAC per press), the offset in the `sync:` telemetry line |
 | Evidence | Firmware builds. L0-GFL-18.a–c and L0-APP-10.a pass; other L0 results unchanged (L0-APP-03.c fails as before, finding #2). The L1-GFL-14 study patch follows the new library lines and still builds |
 | Hardware check | Not done (L2-INV-05 is the check) |
+
+## 2026-11-10 — Bench step 1d: the bridge copies VAC (test only, relay never closed)
+
+| Field | Value |
+|---|---|
+| Commit | the `feat(app): bench step 1d …` commit that adds this entry |
+| Files | `src/app/control_step.{h,cpp}`, `src/main.cpp` |
+| Reason | Luiz Villa asked for a stage that synchronizes and drives the bridge from the measured VAC, so the inverter-side wave copies the grid with the smallest possible difference, without closing the relay (L2-INV-06) |
+| Behaviour change | New stage `INV_VAC_FOLLOW` (key `a`): once the observer qualifies the grid, duty = 0.5 + k·(1 + offset)·(VAC extrapolated 1.3 periods − one-period VAC mean)/(2·VDCBus), k ramped 0 → 1 in 1 s; the inverter controller stays OFF (no relay request); bench trip active. The one-period VAC mean (200 floats, about 0.8 kB of RAM) runs in every stage. Other stages unchanged |
+| Evidence | Firmware builds (RAM 30.1 %, flash 79.0 %). L0-APP-11.a–b pass; other L0 results unchanged (L0-APP-03.c fails as before, finding #2) |
+| Hardware check | Not done (L2-INV-06 is the check) |
