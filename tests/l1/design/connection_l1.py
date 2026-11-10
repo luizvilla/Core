@@ -94,7 +94,18 @@ def patch_app(dst, hold, adv, kp, ti):
     (dst / 'control_step.cpp').write_text(src)
 
 
+def check_library():
+    """The study copies start from the local checkout: it must be the commit pinned for L1."""
+    want = json.loads((REPO / 'tests/l1/dependencies.lock.json').read_text())['single_phase_inverter']['commit']
+    have = subprocess.run(['git', '-C', str(LIB), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(['git', '-C', str(LIB), 'status', '--porcelain', 'src'], capture_output=True, text=True).stdout.strip()
+    if have != want or dirty:
+        raise SystemExit(f'{LIB} is at {have[:7] or "?"}{" with local changes" if dirty else ""}; L1 pins {want[:7]} '
+                         f'(git -C {LIB} fetch luizvilla && git -C {LIB} checkout {want[:7]})')
+
+
 def build():
+    check_library()
     for name, (hold, adv, kp, ti) in VARIANTS.items():
         d = OUT / 'variants' / name; d.mkdir(parents=True, exist_ok=True)
         patch_library(d / 'single_phase_inverter', hold); patch_app(d / 'include', hold, adv, kp, ti)
