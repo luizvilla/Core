@@ -67,7 +67,11 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
 
     /* Bench step 1c: the inverter aims vac_offset above the measured grid voltage, never below it. */
     const float32_t vac_offset = fminf(fmaxf(cmd.vac_offset, 0.0F), app::inverter_vac_offset_max);
-    state.inverter.setFeedforwardGain(1.0F + vac_offset);
+    if (vac_offset != state.applied_vac_offset)  /* only on change: the critical task has little margin */
+    {
+        state.inverter.setFeedforwardGain(1.0F + vac_offset);
+        state.applied_vac_offset = vac_offset;
+    }
 
     if (state.grid_voltage_age_ticks < app::grid_voltage_stale_ticks) ++state.grid_voltage_age_ticks;
     if (meas.v_ac_updated) state.grid_voltage_age_ticks = 0U;
@@ -137,17 +141,24 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     /* PWM start-up acknowledgement (single_phase_inverter PWM_WAIT/PWM_SETTLE): report
      * whether the hardware loop actually applied the inverter's own bridge PWM last period. */
     state.inverter.setPwmEnabled(state.bridge_pwm_applied && !state.open_loop_active);
-    /* VAC copy (steps 1d and 2b): DC removed, extrapolated over the actuation delay. */
+    /* VAC copy (steps 1d and 2b): DC removed (filter always running, two operations), extrapolated over the delay. */
     const float32_t vac = isfinite(meas.v_ac) ? meas.v_ac : state.vac_prev;
     state.vac_dc += (vac - state.vac_dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
-    const float32_t vac_copy = vac + app::vac_follow_advance * (vac - state.vac_prev) - state.vac_dc;
-    /* Step 2b: current PI from the relay request, D-GFL-04 advance, VAC copy as feedforward until the predicted
-     * contact (the PLL freeze and the feedforward hold are started by the relay logic below). */
-    state.inverter.setCurrentLoopFromConnect(follow_connect);
-    state.inverter.setOutputPhaseAdvance(follow_connect ? app::follow_connect_advance : app::inverter_output_phase_advance);
-    state.inverter.setConnectionBlanking(follow_connect ? app::follow_connect_blanking : 0.0F);
-    state.inverter.setConnectWindow(follow_connect ? app::follow_connect_window : 0.0F);
-    state.inverter.setExternalFeedforward(vac_copy, follow_connect && !state.bench_tripped);  /* stops at the predicted contact */
+    const bool copy_stage = follow_connect || stage == INV_VAC_FOLLOW;
+    const float32_t vac_copy = copy_stage ? vac + app::vac_follow_advance * (vac - state.vac_prev) - state.vac_dc : 0.0F;
+    /* Step 2b settings, applied only when entering or leaving the stage (the critical task has little margin):
+     * current PI from the relay request, D-GFL-04 advance, blanking and connect window. */
+    if (follow_connect != state.follow_connect_applied)
+    {
+        state.inverter.setCurrentLoopFromConnect(follow_connect);
+        state.inverter.setOutputPhaseAdvance(follow_connect ? app::follow_connect_advance : app::inverter_output_phase_advance);
+        state.inverter.setConnectionBlanking(follow_connect ? app::follow_connect_blanking : 0.0F);
+        state.inverter.setConnectWindow(follow_connect ? app::follow_connect_window : 0.0F);
+        if (!follow_connect) state.inverter.setExternalFeedforward(0.0F, false);
+        state.follow_connect_applied = follow_connect;
+    }
+    if (follow_connect)  /* the VAC copy as feedforward; the inverter stops using it at the predicted contact */
+        state.inverter.setExternalFeedforward(vac_copy, !state.bench_tripped);
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
     const clarke_t grid_voltage_ab = state.inverter.getVab();
     /* The observer judges one-period averages once the inverter's window is full (as its

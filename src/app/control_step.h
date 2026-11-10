@@ -259,6 +259,8 @@ struct ControlState {
     bool open_loop_active = false;              ///< The open-loop or VAC-follower stage drove the bridge last period.
     float32_t vac_prev = 0.0F;                  ///< Previous VAC sample (V), for the VAC-follower extrapolation.
     float32_t vac_dc = 0.0F;                    ///< VAC DC estimate (V), first-order filter, removed by the VAC follower.
+    bool follow_connect_applied = false;        ///< Step 2b settings currently applied to the inverter.
+    float32_t applied_vac_offset = 0.0F;        ///< Offset currently applied as the feedforward gain.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
 };
 

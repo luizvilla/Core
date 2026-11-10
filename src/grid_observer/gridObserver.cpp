@@ -21,6 +21,14 @@ bool GridObserver::init(const GridObserverConfig &config) {
         config.voltage_trip_delay_s < 0.0F || config.frequency_trip_delay_s < 0.0F ||
         config.qualification_time_s < 0.0F) return false;
     _config = config;
+    /* Durations to sample counts once (double here only, at init): elapsed >= delay after n samples of
+     * sample_period, as the former double accumulation, rounded against float noise. */
+    const auto ticks = [&](float duration) {
+        return static_cast<uint32_t>(ceil(static_cast<double>(duration) / static_cast<double>(config.sample_period_s) - 1e-6));
+    };
+    _qualification_ticks = ticks(config.qualification_time_s);
+    _trip_ticks[0] = ticks(config.voltage_trip_delay_s);
+    _trip_ticks[1] = ticks(config.frequency_trip_delay_s);
     _configured = true;
     return true;
 }
@@ -41,9 +49,9 @@ bool GridObserver::updateEstimates(float voltage_rms, float frequency_hz, bool m
     _frequency_hz = frequency_hz;
     if (!measurements_valid || !isfinite(_voltage_rms) || !isfinite(_frequency_hz)) {
         _voltage_rms = _frequency_hz = NAN;
-        _healthy_elapsed = 0.0;
+        _healthy_ticks = 0U;
         _qualified = false;
-        for (double &elapsed : _violation_elapsed) elapsed = 0.0;
+        for (uint32_t &n : _violation_ticks) n = 0U;
         trip(GridTripReason::InvalidMeasurement);
         return false;
     }
@@ -60,32 +68,26 @@ bool GridObserver::updateEstimates(float voltage_rms, float frequency_hz, bool m
     };
     const bool healthy = !violations[0] && !violations[1] &&
                          !violations[2] && !violations[3];
-    const double sample_period = static_cast<double>(_config.sample_period_s);
-    const double qualification_time = static_cast<double>(_config.qualification_time_s);
-    // Keep elapsed times bounded and use double accumulation to avoid float
-    // accumulation drift at the 10 kHz control rate.
+    // Elapsed times are bounded sample counts (exact, cheap at the 10 kHz control rate).
     if (healthy) {
-        if (_healthy_elapsed < qualification_time)
-            _healthy_elapsed += sample_period;
-        if (_healthy_elapsed >= qualification_time) _qualified = true;
+        if (_healthy_ticks < _qualification_ticks) ++_healthy_ticks;
+        if (_healthy_ticks >= _qualification_ticks) _qualified = true;
     } else {
-        _healthy_elapsed = 0.0;
+        _healthy_ticks = 0U;
         // While tripped, recovery must be consecutive; during normal operation
         // preserve qualification until the configured violation delay expires.
         if (isTripped()) _qualified = false;
     }
     for (unsigned int i = 0; i < 4; ++i) {
         if (!violations[i]) {
-            _violation_elapsed[i] = 0.0;
+            _violation_ticks[i] = 0U;
             continue;
         }
-        const double delay = static_cast<double>(i < 2 ? _config.voltage_trip_delay_s
-                                                      : _config.frequency_trip_delay_s);
-        if (_violation_elapsed[i] < delay)
-            _violation_elapsed[i] += sample_period;
+        const uint32_t delay = _trip_ticks[i < 2 ? 0 : 1];
+        if (_violation_ticks[i] < delay) ++_violation_ticks[i];
         // An unacceptable grid at startup inhibits connection without latching
         // a trip. Protection becomes armed after the first healthy qualification.
-        if (_qualified && _violation_elapsed[i] >= delay) trip(reasons[i]);
+        if (_qualified && _violation_ticks[i] >= delay) trip(reasons[i]);
     }
     return canOperate();
 }
@@ -94,7 +96,7 @@ void GridObserver::trip(GridTripReason reason) {
     if (isTripped()) return;
     _trip_reason = reason;
     _qualified = false;
-    _healthy_elapsed = 0.0;
+    _healthy_ticks = 0U;
 }
 
 bool GridObserver::clearTrip(bool grid_connected) {

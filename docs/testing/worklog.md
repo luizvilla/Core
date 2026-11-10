@@ -424,3 +424,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | `app::bench_inverter_current_trip` 1.5 → 3.0 A (every grid and open-loop stage); `app::follow_connect_window` 60 → 20 ms (step 2b); the `z` protection test injects 4 A instead of 3 A so it still crosses the trip |
 | Evidence | Firmware builds. L0-APP-08.a (2.9 A no trip, 3.1 A trip), L0-APP-11.b and L0-APP-12.a (CONNECTED 200 periods after the command) pass; other L0 results unchanged |
 | Hardware check | Not done |
+
+## 2026-11-10 — Critical task load back below the bench limit
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(load): …` commit that adds this entry; library `luizvilla/single_phase_inverter` (the commit it pins) |
+| Files | `src/app/control_step.{h,cpp}`, `src/grid_observer/gridObserver.{h,cpp}`, `owntech/lib/USB/single_phase_inverter/src/singlePhaseInverterFollowing.cpp` |
+| Reason | Bench (Luiz Villa): after today's changes `c` faulted SYNC_LOST and `a` tripped the grid observer (over-frequency) as soon as the bridge started. Full telemetry: critical task 76 µs at idle (control 55 µs) and up to 98 µs at the bridge start, call rate 9916 Hz (periods skipped): the PLL, which assumes 100 µs per period, loses step. Compared with yesterday's bench firmware (`acf1ad6`) the control path had grown by about 300 instructions per period (`calculateDuty` 311 → 466, `controlStep` 489 → 635): the per-period setters of steps 1c/2b and the connection features |
+| Behaviour change | None intended. The step 2b settings and the feedforward gain are applied only when the stage or the offset changes; the VAC copy is computed only in steps 1d/2b; the library skips the connection bookkeeping when no relay command was notified; the grid observer counts its qualification and trip delays in integer samples instead of software `double` accumulation (same thresholds, computed once at init) |
+| Evidence | Firmware builds; `GridObserver::updateEstimates` no longer calls software double routines (9 calls before). L0: grid observer, application and inverter suites pass as before (L0-APP-03.c, L0-BST-09 known) |
+| Hardware check | Pending: the `load` field at idle and when the bridge starts |

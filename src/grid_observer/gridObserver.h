@@ -2,6 +2,8 @@
 #ifndef GRID_OBSERVER_H
 #define GRID_OBSERVER_H
 
+#include <stdint.h>
+
 /** @brief Application-supplied protection settings; voltages are RMS, times seconds.
  * No grid-code settings are assumed. Validate these settings for the installation.
  */
@@ -82,8 +84,11 @@ private:
     GridObserverConfig _config{};
     bool _configured = false;
     bool _qualified = false;
-    double _healthy_elapsed = 0.0;
-    double _violation_elapsed[4]{};
+    /* Elapsed times as integer sample counts (exact; no software double arithmetic in the 10 kHz task). */
+    uint32_t _healthy_ticks = 0U;
+    uint32_t _violation_ticks[4]{};
+    uint32_t _qualification_ticks = 0U;   ///< Samples of healthy grid needed to qualify (set by init).
+    uint32_t _trip_ticks[2]{};            ///< Samples of violation before a voltage (0) or frequency (1) trip.
     GridTripReason _trip_reason = GridTripReason::None;
     float _voltage_rms = 0.0F;
     float _frequency_hz = 0.0F;
