@@ -77,6 +77,7 @@ def newest_of_level(camps,level):
 def state_of(test,result,findings):
     """@brief Display state of one test from its implementation state and latest result."""
     if result is None:
+        if test['level']=='D' and test.get('report') and test['status'] in ('implemented','partial'):return 'info'  # design test: its report is the result (ADR 0004)
         return {'planned':'planned','blocked':'blocked'}.get(test['status'],'not_run')
     rows=result[1]
     fails=[r for r in rows if r['verdict']=='FAIL']
@@ -136,6 +137,7 @@ def test_row(t,result,state,studs,findings,hardware):
     if t.get('conditions'):det.append(f'<p><b>Conditions.</b> {md(t["conditions"])}</p>')
     if t.get('harness'):det.append(f'<p><b>Harness.</b> {md(t["harness"])}</p>')
     if t.get('source'):det.append(f'<p><b>Source.</b> <code>{e(t["source"])}</code></p>')
+    if t.get('report'):det.append(f'<p><b>Report.</b> <a href="{e(os.path.relpath(REPO/t["report"],REPO/"tests/out"))}">{e(t["report"])}</a></p>')
     det.append(f'<p><b>Implementation.</b> {e(catalogue.STATUS_TEXT[t["status"]])}'+(f' — {md(t["status_note"])}' if t.get('status_note') else '')+'</p>')
     if result:
         det.append('<table class="crit"><tr><th>Criterion</th><th>Verdict</th><th>Limit</th><th>Measured</th></tr>'+''.join(
@@ -228,7 +230,7 @@ regenerate: <code>python3 tests/common/control_center.py</code></div>
                  f'{bar(counts,len(tests))}<div class="sub">{len(tests)} tests: {e(summary_text(counts))}</div>')
         for note in tab.get('notes',[]):
             p.append(f'<div class="note">{e(re.sub(r"\[([^]]+)\]\([^)]+\)",r"\1",note).replace("**","").replace("`",""))}</div>')
-        for lv,name in (('L0','L0 · logic, no model'),('L1','L1 · on the switched model'),('L2','L2 · on the board (bench)')):
+        for lv,name in (('L0','L0 · logic, no model'),('D','D · averaged model, design: fast evaluation of ideas, INFO only, never a verdict (ADR 0004)'),('L1','L1 · on the switched model'),('L2','L2 · on the board (bench)')):
             rows=[t for t in tests if t['level']==lv]
             if not rows:continue
             hw=tab['id']=='model'

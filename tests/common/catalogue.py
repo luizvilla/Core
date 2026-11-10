@@ -7,7 +7,7 @@
 ##   python3 tests/common/catalogue.py --procedure  # rewrite §6 of docs/testing/test-procedure.md
 ## @par Catalogue
 ##   tabs: one per validation stage (Test bench, Model, Boost, Grid observer, Inverter, Application).
-##   tests: id, tab, level (L0/L1), title, criterion, conditions, source, status, status_note, and
+##   tests: id, tab, level (L0/L1/L2/D), title, criterion, conditions, source, status, status_note, and
 ##   optional harness, verdict_type, studies (study case folders, glob), hardware (Model tab).
 ##   status is the implementation state (implemented | partial | planned | blocked); verdicts come
 ##   only from campaign results (tests/common/control_center.py).
@@ -21,7 +21,7 @@ CATALOGUE=REPO/'tests/catalogue.json'
 PROCEDURE=REPO/'docs/testing/test-procedure.md'
 STATUSES=('implemented','partial','planned','blocked')
 STATUS_TEXT={'implemented':'Implemented','partial':'Partly implemented','planned':'Planned','blocked':'Blocked'}
-ID=re.compile(r'^L[012]-[A-Z]{3}-\d\d$')  # L2: on the board (bench)
+ID=re.compile(r'^(L[012]|D)-[A-Z]{3}-\d\d$')  # L2: on the board (bench); D: averaged-model design tests (ADR 0004)
 
 
 def load():
@@ -36,7 +36,7 @@ def load():
         seen.add(i)
         if t.get('tab') not in tabs:errors.append(f'{i}: unknown tab {t.get("tab")}')
         if t.get('status') not in STATUSES:errors.append(f'{i}: status must be one of {STATUSES}')
-        if t.get('level')!=i[:2]:errors.append(f'{i}: level does not match the ID')
+        if t.get('level')!=i.split('-')[0]:errors.append(f'{i}: level does not match the ID')
         if not t.get('title'):errors.append(f'{i}: no title')
     if errors:raise ValueError('\n'.join(errors))
     cat['by_id']={t['id']:t for t in cat['tests']}
