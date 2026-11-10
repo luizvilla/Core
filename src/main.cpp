@@ -147,6 +147,8 @@ static volatile uint32_t critical_calls = 0U;
 /* Longest interval between two critical task starts (µs, expected 100), and control periods without
  * a new VAC sample (the last value is held), since the last telemetry line. */
 static volatile uint32_t critical_gap_max_us = 0U;
+/* Critical ticks lost since boot: a start gap of 1.5 periods or more counts the periods it skipped. */
+static volatile uint32_t critical_lost_ticks = 0U;
 static uint32_t critical_prev_start = 0U;
 static volatile uint32_t vac_stale_count = 0U;
 static uint32_t rate_prev_calls = 0U;
@@ -319,6 +321,16 @@ void setup_routine()
  * This tasks implements a minimalistic USB serial interface to control
  * the boost converter and inverter.
  */
+/* A stage that starts the bridge waits until its console message has left on USB: the transfer's
+ * interrupt-locked sections delay the critical task, and at the bridge start (the heaviest ticks) the
+ * delay accumulated into lost ticks, a step in the PLL's time base and SYNC_LOST (record 2026-11-10 15:35). */
+static constexpr int32_t stage_console_flush_ms = 30;
+static void startStage(InverterStage stage)
+{
+    k_msleep(stage_console_flush_ms);
+    inverter_stage = stage;
+}
+
 void loop_communication_task()
 {
     received_serial_char = console_getchar();
@@ -380,24 +392,24 @@ void loop_communication_task()
         break;
     case 'o':
         printk("inverter step 0: open loop to 230 V RMS (relay open)\n");
-        inverter_stage = INV_OPEN_LOOP;
+        startStage(INV_OPEN_LOOP);
         relay_test = false;
         break;
     case 'c':
         printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
-        inverter_stage = INV_SETTLE;
+        startStage(INV_SETTLE);
         scope_trigger_on_trip = false;
         relay_test = false;
         break;
     case 'a':
         printk("inverter step 1d: bridge copies VAC once the grid is qualified (relay never closed)\n");
-        inverter_stage = INV_VAC_FOLLOW;
+        startStage(INV_VAC_FOLLOW);
         scope_trigger_on_trip = false;
         relay_test = false;
         break;
     case 'G':
         printk("inverter step 2b: VAC copy until the contact, PI from the relay request, PLL frozen and feedforward held (5 ms)\n");
-        inverter_stage = INV_FOLLOW_CONNECT;
+        startStage(INV_FOLLOW_CONNECT);
         scope_trigger_on_trip = false;
         relay_test = false;
         scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
@@ -405,14 +417,14 @@ void loop_communication_task()
     case 'g':
         printk("inverter step 2: settle %u periods, close the relay, zero current\n",
                static_cast<unsigned int>(app::inverter_settle_cycles));
-        inverter_stage = INV_CONNECT;
+        startStage(INV_CONNECT);
         scope_trigger_on_trip = false;
         relay_test = false;
         scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'n':
         printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
-        inverter_stage = INV_INJECT;
+        startStage(INV_INJECT);
         scope_trigger_on_trip = false;
         relay_test = false;
         scope.start();  /* re-arm: capture this stage's start (or a fault) */
@@ -558,13 +570,14 @@ void loop_application_task()
         const dqo_t idq_s = control.inverter.getIdq();
         const uint32_t load_s = critical_max_us;
         critical_max_us = 0U;
-        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u\n",
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
                (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
                static_cast<unsigned int>(control.grid_observer.canOperate()),
                static_cast<unsigned int>(control.inverter.getFaultReason()),
-               (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)), static_cast<unsigned int>(load_s));
+               (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)), static_cast<unsigned int>(load_s),
+               static_cast<unsigned int>(critical_lost_ticks));
         task.suspendBackgroundMs(100);
         return;
     }
@@ -635,6 +648,8 @@ void loop_critical_task()
     {
         const uint32_t gap_us = k_cyc_to_us_floor32(critical_start - critical_prev_start);
         if (gap_us > critical_gap_max_us) critical_gap_max_us = gap_us;
+        if (gap_us >= (3U * app::control_task_period) / 2U)
+            critical_lost_ticks += (gap_us + app::control_task_period / 2U) / app::control_task_period - 1U;
     }
     critical_prev_start = critical_start;
     ++critical_calls;
@@ -797,29 +812,30 @@ void loop_critical_task()
 
     const uint32_t t_applied = k_cycle_get_32();
     notePart(2, t_controlled, t_applied);
-    /* Snapshot after this tick's control, grid verdict and PWM application. */
-    const dqo_t grid_voltage_dq = control.inverter.getVdq();
-    {
-        const dqo_t vdq_avg = control.inverter.getVdqAverage();
-        scope_v_alpha = vdq_avg.q;
-        scope_vd_avg = vdq_avg.d;
-        scope_v_beta = control.inverter.getwAverage();
-    }
-    scope_v_d = grid_voltage_dq.d;
-    scope_v_q = grid_voltage_dq.q;
-    scope_omega = control.inverter.getw();
-    v_ac_rms_value = control.grid_observer.getVoltageRms();
-    scope_sync = control.inverter.getSync() ? 1.0F : 0.0F;
-    scope_relay_closed = relay_command ? 1.0F : 0.0F;
-    scope_inverter_mode = static_cast<float32_t>(control.inverter.getMode());
-    scope_bridge_on = control.bridge_pwm_applied ? 1.0F : 0.0F;
-    scope_bridge_duty = control.bridge_pwm_applied ? out.bridge_duty : 0.0F;
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
     const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)) ?
                              1U : scope_sample_divider;
+    /* Snapshot only on the ticks the scope samples (it also evaluates the trigger then): the other ticks
+     * keep the slack that lets a late start catch up (a lost tick shifts the PLL's time base). */
     if (++scope_sample_tick >= divider)
     {
         scope_sample_tick = 0U;
+        const dqo_t grid_voltage_dq = control.inverter.getVdq();
+        {
+            const dqo_t vdq_avg = control.inverter.getVdqAverage();
+            scope_v_alpha = vdq_avg.q;
+            scope_vd_avg = vdq_avg.d;
+            scope_v_beta = control.inverter.getwAverage();
+        }
+        scope_v_d = grid_voltage_dq.d;
+        scope_v_q = grid_voltage_dq.q;
+        scope_omega = control.inverter.getw();
+        v_ac_rms_value = control.grid_observer.getVoltageRms();
+        scope_sync = control.inverter.getSync() ? 1.0F : 0.0F;
+        scope_relay_closed = relay_command ? 1.0F : 0.0F;
+        scope_inverter_mode = static_cast<float32_t>(control.inverter.getMode());
+        scope_bridge_on = control.bridge_pwm_applied ? 1.0F : 0.0F;
+        scope_bridge_duty = control.bridge_pwm_applied ? out.bridge_duty : 0.0F;
         if (!is_scope_downloading) scope.acquire();
     }
     const uint32_t t_end = k_cycle_get_32();

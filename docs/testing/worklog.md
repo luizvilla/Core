@@ -446,3 +446,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Scope channels: `V_alpha_V` → `Vq_avg_V`, `V_beta_V` → `omega_avg_rad_s`, `VDCBus_V` → `Vd_avg_V` (the bus is in the telemetry). Same channel count. No control change |
 | Evidence | Firmware builds |
 | Hardware check | Pending: capture of the step 2b fault (`v` for 2 kHz, `G`, then `r`) |
+
+## 2026-11-10 — Step 2b SYNC_LOST traced to lost critical ticks
+
+| Field | Value |
+|---|---|
+| Commit | the `fix(timing): …` commit that adds this entry |
+| Files | `src/main.cpp` |
+| Reason | Capture `src/Data_records/2026-11-10_15-35-45-record.csv` (2 kHz, `G`): the bridge starts at sample 109, SYNC_LOST at sample 129 in PWM_SETTLE (Vq_avg 3.31 V > 3.25 V). The grid voltage's fundamental phase, fitted over full 20 ms windows, holds at 76.2–76.5° before `G`, steps to 82.1° between samples 112 and 124 (bridge on), and stays at 82.1–82.4° after the fault with the bridge off. Only lost time does this: 5.7° ≈ 3 critical ticks (1.8° each) skipped. The PLL, which assumes 100 µs per call, sees a 5.7° phase step and rings (Vq_avg ±7 V for 60 ms after the fault). The critical task runs from the HRTIM interrupt at priority 0 without the zero-latency flag, so interrupt-locked kernel and USB sections delay it (start jitter up to 127 µs in past telemetry); at ~88 µs per tick with the bridge on, the delay accumulates. `G` prints a 110-character message at the moment the bridge starts |
+| Behaviour change | Keys `o c a G g n` wait 30 ms after their console message before starting the stage. The scope snapshot (getters, RMS, trigger inputs) runs only on the ticks the scope samples (1 in 5 at 2 kHz) instead of every tick. New counter of lost critical ticks (a start gap ≥ 150 µs counts the periods it skipped), shown as `lost` at the end of the short telemetry line. No control change |
+| Evidence | Firmware builds |
+| Hardware check | Pending: `G` with the short telemetry; `lost` must stay at its value from before `G` |
