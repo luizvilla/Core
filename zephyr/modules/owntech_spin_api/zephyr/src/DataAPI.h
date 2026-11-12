@@ -216,6 +216,24 @@ public:
 	int8_t start();
 
 	/**
+	 * @brief Start the Data Acquisition for latest-value reads only
+	 *        (shield.sensors.getLatestValueFast(), peekLatestValue()): the
+	 *        DMA of each ADC fills a circular buffer and no data dispatch
+	 *        runs. Start the critical task with task.startCritical(false),
+	 *        so it does not start the acquisition and dispatch itself.
+	 *
+	 *        The buffers hold about `buffer_samples` samples per ADC, rounded
+	 *        up to a multiple of the ADC's sequence length (at most
+	 *        DATA_FAST_MAX_DMA_SIZE for the fast reads). getValues(),
+	 *        getRawValues() and getLatestValue() return no data in this mode.
+	 *
+	 * @param buffer_samples DMA buffer size per ADC, in samples.
+	 * @return `0` if everything went well, `-1` if the acquisition was
+	 *         already started or `buffer_samples` is 0.
+	 */
+	int8_t startLatestOnly(uint32_t buffer_samples);
+
+	/**
 	 * @brief Checks if the module is already started.
 	 *
 	 *        For auto-spawning threads, this allows to make sure the module

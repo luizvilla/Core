@@ -270,6 +270,19 @@ void dump_scope_datas(ScopeMimicry &scope)
 /*--------------SETUP FUNCTIONS------------------------------- */
 
 /**
+ * Starts the ADC acquisition for the critical task's sensor reads, before task.startCritical(false): the DMA fills a
+ * circular buffer per ADC and the reads take the newest sample from it (getLatestValueFast), with no data dispatch
+ * in the interrupt (timing-optimization.md, change 6). 40 samples per buffer: ADC1 (3 channels) and ADC2
+ * (2 channels) get 42, a lap of 280 µs and 420 µs at one sequence per 20 µs.
+ */
+static void startSensorAcquisition()
+{
+    static constexpr uint32_t adc_buffer_samples = 40U;
+    if (spin.data.startLatestOnly(adc_buffer_samples) != 0) printk("ADC acquisition start failed\n");
+    shield.sensors.prepareFastReads();
+}
+
+/**
  * This is the setup routine.
  * Here the setup :
  *  - Initializes the boost legs and D/E inverter
@@ -363,8 +376,8 @@ void setup_routine()
         hooks.stage_start = timingStageStart;
         timingTim02Begin(control, hooks);
         task.createCritical(timingCriticalTick, app::control_task_period);
-        task.startCritical();
-        shield.sensors.prepareFastReads();  /* the acquisition has started */
+        startSensorAcquisition();
+        task.startCritical(false);
         while (!timingTim02Done()) k_msleep(50);
 
         telemetry_verbose = true;  /* the heaviest console load the bench uses (key l) */
@@ -393,8 +406,8 @@ void setup_routine()
     /* Finally, start tasks */
     task.startBackground(app_task_number);
     task.startBackground(com_task_number);
-    task.startCritical();
-    shield.sensors.prepareFastReads();  /* the acquisition has started: the fast sensor reads can be prepared */
+    startSensorAcquisition();
+    task.startCritical(false);  /* the acquisition is started above, without data dispatch */
 }
 
 /*--------------LOOP FUNCTIONS-------------------------------- */

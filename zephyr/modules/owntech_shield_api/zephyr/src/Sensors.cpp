@@ -234,6 +234,29 @@ float32_t* SensorsAPI::getValues(sensor_t sensor_name,
 
 OWNTECH_FAST_CODE float32_t SensorsAPI::peekLatestValue(sensor_t sensor_name)
 {
+	/* Prepared fast read: the newest sample in the DMA buffer (the only
+	 * source when the acquisition runs without dispatch) */
+	const uint32_t index = (uint32_t)sensor_name - 1U;
+	if ( (index < DT_SUBSENSORS_COUNT) &&
+		 (fast_states[index] == FAST_READ_READY) )
+	{
+		const DataFastChannel& channel = fast_channels[index];
+		const uint32_t remaining = *channel.dma_remaining;
+		if ( ((*channel.adc_isr & DATA_FAST_ADC_ISR_OVR) != 0) ||
+			 (*channel.resync_pending != 0) ||
+			 (remaining > channel.dma_size) )
+		{
+			return NO_VALUE;
+		}
+		const uint16_t raw_value =
+					channel.dma_buffer[channel.newest_slot[remaining]];
+		if (raw_value == DATA_FAST_EMPTY_SAMPLE)
+		{
+			return NO_VALUE;
+		}
+		return (raw_value * channel.gain) + channel.offset;
+	}
+
 	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
 
 	return DataAPI::peekChannel(sensor_info.adc_num,

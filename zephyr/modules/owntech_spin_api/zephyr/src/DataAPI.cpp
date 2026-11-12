@@ -134,6 +134,19 @@ int8_t DataAPI::start()
 	return 0;
 }
 
+int8_t DataAPI::startLatestOnly(uint32_t buffer_samples)
+{
+	if ( (DataAPI::is_started == true) || (buffer_samples == 0) )
+		return -1;
+
+	/* Task mode without dispatch: the DMA buffer is a multiple of the
+	 * sequence length, which the fast reads require */
+	DataAPI::setDispatchMethod(DispatchMethod_t::externally_triggered);
+	DataAPI::setRepetitionsBetweenDispatches(buffer_samples);
+
+	return this->start();
+}
+
 bool DataAPI::started()
 {
 	return DataAPI::is_started;
