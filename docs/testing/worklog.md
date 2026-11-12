@@ -596,3 +596,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | L0-TIM-01/02/03 pass against the new baseline; two runs agree to 0.00 µs. ADC1 15 samples per period (12–18), ADC2 10 (8–12); dispatch about 39 cycles per sample + 150 per ADC; reads 116 + 83 + 64 cycles per read (lookup, buffer, conversion). Host L0: 125 pass, 7 known, 0 new |
 | Lead, not acted on | Proposal 6 A: latest sample read from the DMA buffer, no per-sample dispatch, about −14 µs per period (OwnTech Spin API, with Jean) |
 | Hardware check | Not needed (TIMING only); the board holds the TIMING firmware |
+
+## 2026-11-12 — Sensor reads from the DMA buffer, no data dispatch (optimization 6)
+
+| Field | Value |
+|---|---|
+| Commit | branch `perf/timing-6-adc`: `c5cc3b5` (6a, preparation in the interrupt, L0-TIM-02.d failed), `d925ba1` (6a, preparation in thread context), `c6b3b81` (6b); recap and this entry in the `docs(timing): …` commit that follows |
+| Files | `zephyr/modules/owntech_spin_api/zephyr/src/{DataAPI.h,DataAPI.cpp}`, `owntech_spin_api/zephyr/src/data/{data_dispatch,dma}.{h,cpp}`, `owntech_shield_api/zephyr/src/{Sensors.h,Sensors.cpp}`, `src/main.cpp`; `tests/l0/timing/recap.json`, `docs/testing/images/timing-recap-*.svg` |
+| Reason | Luiz Villa: implement proposal 6 option A (with the robustness checks answering Jean Alinei's concern) one step at a time. [timing-optimization.md](timing-optimization.md) section 6 |
+| Behaviour change | **Sensor reads:** the critical tick's five reads take the newest sample of each channel from the ADC's circular DMA buffer (`getLatestValueFast`). Same samples, conversion parameters and validity rule as before (`NO_VALUE` only when no sample exists). **Acquisition:** `setup_routine` starts it with `spin.data.startLatestOnly(40)` (DMA buffers of 42 samples instead of 21/22) and `task.startCritical(false)`: no data dispatch in the interrupt. **ADC overrun:** the reads report the data missing (the tick holds the last value), and the application task resynchronizes the ADC within 100 ms. The count is the new `adc ovr` field at the end of the verbose telemetry's `load us:` line. **Safety API:** `peekLatestValue` reads the DMA buffer |
+| Evidence | L0-TIM-01/02/03 pass on the bare Spin. Interrupt time per period −7.49 µs (6a) and −6.59 µs (6b), **−14.08 µs** together against `4f5ce32`. Worst task tick 29.9–37.8 µs, 0 lost periods, two runs of 6b agree to 0.00 µs. SWD: descriptors, slot tables, gains, `OVR` and DMA positions checked. Forced overrun on the USB firmware: counted once and resynchronized. Host L0: 125 pass, 7 known, 0 new. The USB ELF has no timing symbol |
+| Follow-up | Review with Jean before the change goes into the OwnTech Spin API (new calls `getLatestValueFast`, `prepareFastReads`, `serviceFastReads`, `startLatestOnly`) |
+| Hardware check | Pending: bench with the USB firmware (steps 1 and 2b); the readings (VAC, IAC, VDCBus, VLow, ILow1) should match the previous firmware's. The board now holds the USB firmware of `c6b3b81` (flashed for the overrun test) |

@@ -53,6 +53,24 @@
       "campaign": "2026-11-12_6de51b9_164042_B0kRJZ",
       "text": "5b libraries in CCM",
       "step": "5a"
+    },
+    {
+      "tag": "5'",
+      "campaign": "2026-11-12_4f5ce32_171630_nwhM3n",
+      "text": "5' 4f5ce32 (+ ADC path probes)",
+      "step": "5b"
+    },
+    {
+      "tag": "6a",
+      "campaign": "2026-11-12_d925ba1_173838_hTNQcY",
+      "text": "6a sensor reads from the DMA buffer",
+      "step": "5'"
+    },
+    {
+      "tag": "6b",
+      "campaign": "2026-11-12_c6b3b81_174504_T4Ltwu",
+      "text": "6b no data dispatch",
+      "step": "6a"
     }
   ]
 }

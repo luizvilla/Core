@@ -6,7 +6,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 
 | Item | Rule |
 |---|---|
-| Base | `a528915` (4 flash wait states, TIM-01/02/03 at TIM-03's detail), campaign `2026-11-12_6d00a25_150416_YU7So7`; from change 3 on, `23afd86` (same code plus TIMING-only probes inside the writes, +0.34 µs in the TIMING build), campaign `2026-11-12_23afd86_152108_EewYf2` |
+| Base | `a528915` (4 flash wait states, TIM-01/02/03 at TIM-03's detail), campaign `2026-11-12_6d00a25_150416_YU7So7`; from change 3 on, `23afd86` (same code plus TIMING-only probes inside the writes, +0.34 µs in the TIMING build), campaign `2026-11-12_23afd86_152108_EewYf2`; for change 6, `4f5ce32` (change 5 plus TIMING-only probes in the ADC data path), campaign `2026-11-12_4f5ce32_171630_nwhM3n` |
 | One change at a time | Branch `perf/timing-<n>-<name>` from the base; one TIMING run (`tests/l0/timing/run.sh --run`) |
 | Comparison | `python3 tests/l0/timing/compare.py <base campaign> <change campaign> --rows <parts>` |
 | Main figure | **Interrupt time per period** (mean, L0-TIM-03): the task API's safety check and ADC data dispatch plus the critical task tick, without the test harness |
@@ -37,9 +37,9 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
 | All | 1–4 together: final verdict | merge `5fcf14b` | **−10.15 µs** mean over the stages (−6.3 to −13.2 µs per stage), every test passes |
 | 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | 5a **−8.02 µs** (`2b3a893`), 5b **−6.62 µs** more (`6de51b9`); together **−14.64 µs** mean against `5fcf14b`, every test passes (branch `perf/timing-5-ccm`). [Section 5](#5--hot-path-in-ccm-sram) |
-| 6 | ADC data path: read the latest sample of each channel from the DMA buffer, skip the per-sample dispatch | OwnTech Spin API (`DataAPI`, `data_dispatch`), task API | Proposal, path measured (`4f5ce32`): dispatch 8.7 µs + reads 7.3 µs per period. [Section 6](#6--adc-data-path-proposal) |
+| 6 | ADC data path: the five sensor reads take the newest sample from the DMA buffer (6a), then no data dispatch in the interrupt (6b) | OwnTech Spin API (`DataAPI`, `data_dispatch`, `dma`), shield API (`SensorsAPI`), `src/main.cpp` | 6a **−7.49 µs** (`d925ba1`), 6b **−6.59 µs** more (`c6b3b81`); together **−14.08 µs** mean against `4f5ce32`, every test passes (branch `perf/timing-6-adc`). [Section 6](#6--adc-data-path-proposal); review with Jean before it goes into the Spin API |
 
-Then: the ADC path (data dispatch 8.7 µs + sensor reads 7.3 µs per period after change 5), proposal 6, with Jean.
+Then: review change 6 with Jean (OwnTech Spin API), and the bench with the USB firmware.
 
 ### Recap (L0-TIM-03)
 
@@ -406,3 +406,83 @@ Most deterministic alternative if the index arithmetic is not accepted: option B
 4. **`main.cpp`:** the five reads use the fast call.
 5. **Dispatch removed, in a second step and measured separately:** `task.startCritical(false)`, and `setup_routine` starts the acquisition itself (externally triggered, about 40 repetitions so a lap is about 280 µs) without `doFullDispatch()`.
 6. **Measurement:** L0-TIM-03 with the ADC rows (`3:dispatch` → about 0, `3:rd_*`); the probes move to the fast path. Then an `OVR` test (forced overrun, then resync) and the bench.
+
+#### 6a · Sensor reads from the DMA buffer (`d925ba1`, campaign `2026-11-12_d925ba1_173838_hTNQcY`, against `4f5ce32`)
+
+What was done (local OwnTech modules):
+- **`SensorsAPI::getLatestValueFast(sensor, dataValid)`** ([Sensors.cpp](../../zephyr/modules/owntech_shield_api/zephyr/src/Sensors.cpp)), next to `getLatestValue` (unchanged): same return values and validity codes. Each call reads `CNDTR`, checks the ADC's `OVR` flag, loads `buffer[newest_slot[CNDTR]]`, rejects `0xFFFF`, and returns `raw × gain + offset`. `DATA_IS_OK` if `CNDTR` moved since the previous call for this sensor, `DATA_IS_OLD` otherwise.
+- **Prepared once per sensor, in thread context** (`prepareFastReads()`, `DataAPI::prepareFastChannel`): DMA buffer, `CNDTR` and `ADC_ISR` addresses, gain and offset, and a 43-byte table `CNDTR → newest slot of the rank`. Conditions: buffer size `S ≤ 64` and `S % n == 0`, linear conversion. Otherwise the call falls back to `getLatestValue`. A new linear gain or offset (`setConversionParametersLinear`, `retrieveParametersFromMemory`) updates the prepared read.
+- **Overrun:** the read returns `NO_VALUE` / `DATA_IS_MISSING` and marks the ADC. `serviceFastReads()`, called by the application task every 100 ms, resynchronizes it: ADC stopped, DMA channel restarted at slot 0, buffer refilled with `0xFFFF`, `OVR` cleared, ADC restarted. Overruns are counted in the telemetry (`adc ovr`, end of the `load us:` line).
+- **DMA buffers** start filled with `0xFFFF` (`data_dispatch_init`).
+- **`main.cpp`:** the five reads use `getLatestValueFast`; the dispatch still runs.
+
+A first try (`c5cc3b5`, campaign `2026-11-12_c5cc3b5_173611_kGHpF6`) prepared the reads at the first call, in the interrupt. L0-TIM-02.d failed: the first tick's sensor part took 37.8 µs, against 11.1 µs in the baseline. Hence the preparation in thread context (`d925ba1`).
+
+| Stage | Interrupt / period (mean) | Task tick worst | Lost | Sensors | Dispatch | Reads: lookup | Reads: buffer | Reads: conversion |
+|---|---|---|---|---|---|---|---|---|
+| OFF_IDLE | 41.1 → 33.7 (−7.5) | 35.2 → 29.9 | 0 → 0 | 9.84 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| OFF_BUSREG | 43.1 → 35.7 (−7.4) | 38.1 → 32.8 | 0 → 0 | 9.85 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| OFF_MPPT | 43.8 → 36.3 (−7.4) | 37.2 → 32.5 | 0 → 0 | 9.85 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| SETTLE_c | 45.3 → 37.8 (−7.5) | 39.0 → 34.2 | 0 → 0 | 9.85 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| CONNECT_g | 45.7 → 38.2 (−7.5) | 40.0 → 35.2 | 0 → 0 | 9.85 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| INJECT_n | 46.7 → 39.2 (−7.5) | 40.2 → 35.5 | 0 → 0 | 9.84 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| VAC_FOLLOW_a | 47.5 → 40.0 (−7.4) | 40.6 → 35.9 | 0 → 0 | 9.85 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| FOLLOW_CONN_G | 46.1 → 38.5 (−7.5) | 42.1 → 37.2 | 0 → 0 | 9.85 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+| OPEN_LOOP_o | 48.5 → 41.0 (−7.5) | 42.6 → 37.8 | 0 → 0 | 9.84 → 4.49 | 8.84 → 6.64 | 3.42 → 0.92 | 2.44 → 1.39 | 1.89 → 0.03 |
+
+Parts in µs (mean, L0-TIM-03, TIMING build with the probes): tick sensors; task API dispatch; the reads' three probe layers, summed over the five reads. In the fast read the layers are entry to `CNDTR` read, then overrun check, slot load and validity, then `raw × gain + offset`.
+
+**Reading.**
+- **Reads:** 7.75 → 2.34 µs for the five calls, probes included (about 80 cycles per read, of which the probes take a share). The conversion is now one multiply-add (0.03 µs). Most of what is left is the two peripheral reads (`CNDTR` on the AHB, `ADC_ISR` on AHB2).
+- **Dispatch, −2.2 µs as a side effect:** nothing swaps the 32-deep channel buffers any more. They fill once, and the dispatch then skips the copy ("only if the channel buffer has room"). Change 6b removes the dispatch itself.
+- Worst task tick −4.7 to −5.3 µs. L0-TIM-01/02/03 pass.
+
+#### 6b · No data dispatch (`c6b3b81`, campaign `2026-11-12_c6b3b81_174504_T4Ltwu`, against `d925ba1`)
+
+What was done:
+- **`spin.data.startLatestOnly(n)`** ([DataAPI.cpp](../../zephyr/modules/owntech_spin_api/zephyr/src/DataAPI.cpp)): starts the acquisition in task mode (circular DMA buffers, a multiple of each sequence length) without a dispatch.
+- **`main.cpp`** `startSensorAcquisition()`: `startLatestOnly(40)` (ADC1 and ADC2 buffers of 42 samples: a lap is 280 µs and 420 µs), then `prepareFastReads()`, then `task.startCritical(false)`. The task API no longer calls `doFullDispatch()` before each tick, and the first tick already uses the fast reads.
+- **`peekLatestValue()`** reads the DMA buffer for a prepared sensor, so the safety API (`safety_watch`) keeps its data without the dispatch. In this mode `getValues()`, `getRawValues()` and `getLatestValue()` return no data; nothing in Core2 uses them.
+
+| Stage | Interrupt / period (mean) | Task tick worst | Gap worst | Lost | Dispatch |
+|---|---|---|---|---|---|
+| OFF_IDLE | 33.7 → 27.0 (−6.6) | 29.9 → 29.9 | 116.4 → 118.7 | 0 → 0 | 6.64 → 0.08 |
+| OFF_BUSREG | 35.7 → 29.0 (−6.6) | 32.8 → 32.7 | 113.1 → 110.5 | 0 → 0 | 6.64 → 0.08 |
+| OFF_MPPT | 36.3 → 29.7 (−6.6) | 32.5 → 32.3 | 105.6 → 112.4 | 0 → 0 | 6.64 → 0.08 |
+| SETTLE_c | 37.8 → 31.2 (−6.6) | 34.2 → 34.1 | 112.8 → 111.9 | 0 → 0 | 6.64 → 0.08 |
+| CONNECT_g | 38.2 → 31.6 (−6.6) | 35.2 → 35.1 | 113.8 → 115.5 | 0 → 0 | 6.64 → 0.08 |
+| INJECT_n | 39.2 → 32.6 (−6.6) | 35.5 → 35.4 | 115.1 → 117.3 | 0 → 0 | 6.64 → 0.08 |
+| VAC_FOLLOW_a | 40.0 → 33.4 (−6.6) | 35.9 → 35.7 | 112.5 → 112.4 | 0 → 0 | 6.64 → 0.08 |
+| FOLLOW_CONN_G | 38.5 → 32.0 (−6.5) | 37.2 → 37.1 | 112.9 → 112.6 | 0 → 0 | 6.64 → 0.08 |
+| OPEN_LOOP_o | 41.0 → 34.5 (−6.5) | 37.8 → 37.8 | 116.8 → 115.8 | 0 → 0 | 6.64 → 0.08 |
+
+**Reading.**
+- The dispatch is gone (0.08 µs is the proxy's test of `do_data_dispatch` and the probe). The worst task tick does not change: the dispatch ran before the tick, in the same interrupt.
+- Two runs agree to 0.00 µs (`c6b3b81-dirty`, dirty only through the recap files, and `c6b3b81`).
+
+#### 6 · Verdict (6a + 6b, `c6b3b81`, against `4f5ce32`)
+
+| Stage | Interrupt / period (mean) | Task tick worst | Gap worst | Lost |
+|---|---|---|---|---|
+| OFF_IDLE | 41.1 → 27.0 (−14.1) | 35.2 → 29.9 | 117.8 → 118.7 | 0 → 0 |
+| OFF_BUSREG | 43.1 → 29.0 (−14.0) | 38.1 → 32.7 | 113.3 → 110.5 | 0 → 0 |
+| OFF_MPPT | 43.8 → 29.7 (−14.0) | 37.2 → 32.3 | 105.6 → 112.4 | 0 → 0 |
+| SETTLE_c | 45.3 → 31.2 (−14.1) | 39.0 → 34.1 | 114.2 → 111.9 | 0 → 0 |
+| CONNECT_g | 45.7 → 31.6 (−14.1) | 40.0 → 35.1 | 116.1 → 115.5 | 0 → 0 |
+| INJECT_n | 46.7 → 32.6 (−14.1) | 40.2 → 35.4 | 117.6 → 117.3 | 0 → 0 |
+| VAC_FOLLOW_a | 47.5 → 33.4 (−14.0) | 40.6 → 35.7 | 109.6 → 112.4 | 0 → 0 |
+| FOLLOW_CONN_G | 46.1 → 32.0 (−14.1) | 42.1 → 37.1 | 112.9 → 112.6 | 0 → 0 |
+| OPEN_LOOP_o | 48.5 → 34.5 (−14.0) | 42.6 → 37.8 | 118.0 → 115.8 | 0 → 0 |
+
+**Verdict.**
+- **−14.08 µs** mean interrupt time per period, as estimated for option A (~14 µs). The interrupt takes 27–35 % of the period. The worst task tick is 29.9–37.8 µs, a margin of 42 µs against the 80 µs budget.
+- L0-TIM-01/02/03 pass, with no lost period. Host L0: 125 pass, 7 known, 0 new (campaign `2026-11-12_c6b3b81-dirty_174826_yaOJON`). The USB ELF builds and has no timing symbol.
+- **Checked on the Spin over SWD** (TIMING firmware, after L0-TIM-03): five sensors prepared, ADC1 and ADC2 buffers of 42 samples, every `CNDTR → slot` table equal to a brute-force search (also checked offline for every `n ≤ 7`, `S ≤ 64`), gains and offsets equal to the calibration, `OVR = 0`, no slot left at `0xFFFF`, `CNDTR` covering 1–42.
+- **Forced overrun** (USB firmware, bare Spin): DMA1 channel 1 disabled over SWD. ADC1 overran, the next read counted it (`fast_overrun_count` 0 → 1), and within one application-task cycle ADC1 was running again (DMA channel enabled, `OVR = 0`, `CNDTR` moving, nothing pending).
+- The baseline (`baseline.json`, `4f5ce32`) is kept until Jean's review; change 6 is well within its +10 % limits.
+
+| Change | Alone (mean over stages) | Where it shows |
+|---|---|---|
+| 6a Sensor reads from the DMA buffer | −7.49 µs | reads −5.4 µs; dispatch −2.2 µs (buffers no longer drained) |
+| 6b No data dispatch | −6.59 µs | dispatch 6.64 → 0.08 µs |
+| **6** | **−14.08 µs** | |
