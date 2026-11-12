@@ -254,7 +254,8 @@ FAST_CODE bool scope_trigger()
      * start; otherwise the synchronization. */
     if (scope_trigger_on_trip) return control.bench_tripped;
     if (scope_trigger_on_boost) return control.boost.getMode() != IDLE;
-    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)
+    if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT ||
+        inverter_stage == INV_BUS_LOOP)
         return scope_relay_closed > 0.5F || scope_inverter_mode == static_cast<float32_t>(VSI_FAULT);
     if (inverter_stage == INV_OPEN_LOOP || inverter_stage == INV_SETTLE) return scope_bridge_on > 0.5F;
     return scope_sync > 0.5F;
@@ -460,6 +461,7 @@ void loop_communication_task()
                "|     press G : step 2b connect, VAC copy|\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
+               "|     press y : step 4 bus loop (with m) |\n"
                "|     press + / - : inverter V offset +/-|\n"
                "|     press x : inverter OFF (relay open)|\n"
                "|     press R : relay test (dead bench)  |\n"
@@ -555,6 +557,17 @@ void loop_communication_task()
         scope_trigger_on_boost = false;
         relay_test = false;
         scope.start();  /* re-arm: capture this stage's start (or a fault) */
+        break;
+    case 'y':
+        /* Nominal operation: the boost in MPPT ('m' first) feeds the bus, the inverter holds it (app::bus_loop_*). */
+        printk("inverter step 4: connect, then the bus loop sets the d-axis current (0 to %.2f A peak, bus %.0f V)%s\n",
+               (double)app::bus_loop_current_max, (double)voltage_reference,
+               mode == MPPT ? "" : "; boost not in MPPT (press m)");
+        startStage(INV_BUS_LOOP);
+        scope_trigger_on_trip = false;
+        scope_trigger_on_boost = false;
+        relay_test = false;
+        scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case '+':
     case '-':
@@ -1064,7 +1077,8 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     const uint32_t t_applied = cpuCycles();
     notePart(2, t_controlled, t_applied);
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window) when asked with 'v'; otherwise 2 kHz. */
-    const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)) ?
+    const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT ||
+                                                     inverter_stage == INV_FOLLOW_CONNECT || inverter_stage == INV_BUS_LOOP)) ?
                              1U : scope_sample_divider;
     /* Snapshot only on the ticks the scope samples (it also evaluates the trigger then): the other ticks
      * keep the slack that lets a late start catch up (a lost tick shifts the PLL's time base). */

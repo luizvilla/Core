@@ -41,7 +41,8 @@ int8_t controlInit(ControlState &state)
         !state.inverter.setCurrentPiLimit(app::inverter_current_limit) ||
         !state.inverter.setCurrentSogiGain(app::inverter_current_sogi_gain) ||
         !state.inverter.setOutputPhaseAdvance(app::inverter_output_phase_advance) ||
-        !state.grid_observer.init(app::grid_observer_config))
+        !state.grid_observer.init(app::grid_observer_config) ||
+        state.bus_pid.init(app::bus_loop_params) != 0)
     {
         return -1;
     }
@@ -112,7 +113,8 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
     const InverterStage stage = cmd.inverter_stage;
     const bool bus_valid = isfinite(meas.v_dc_bus) && meas.v_dc_bus > 0.0F;
     const bool follow_connect = stage == INV_FOLLOW_CONNECT;
-    const bool grid_stage = stage == INV_SETTLE || stage == INV_CONNECT || stage == INV_INJECT || follow_connect;
+    const bool bus_loop = stage == INV_BUS_LOOP;
+    const bool grid_stage = stage == INV_SETTLE || stage == INV_CONNECT || stage == INV_INJECT || follow_connect || bus_loop;
     /* Keep the PLL running in idle, using a positive bus value for duty scaling; a grid
      * stage passes any bus value so the inverter faults on an invalid one. The open-loop
      * stage does not use the grid-following inverter, so it never faults it. */
@@ -122,17 +124,39 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
     const bool on_grid = vsi == VSI_GRID_CONNECT || vsi == VSI_GRID_CONNECTED || vsi == VSI_RUN ||
                          vsi == VSI_STOPPING || vsi == VSI_DISCONNECT;
     /* Relay closure only in CONNECT and INJECT; SETTLE holds PWM_SETTLE (zero dwell). */
-    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT || follow_connect) ? app::inverter_settle_cycles :
+    state.inverter.setPwmSettleCycles((stage == INV_CONNECT || stage == INV_INJECT || follow_connect || bus_loop) ? app::inverter_settle_cycles :
                                       (cmd.settle_count_test ? app::settle_count_test_cycles : 0U));
     /* Back to SETTLE from the grid: disconnect first (relay opens), then synchronize again. */
     if (grid_stage && !(stage == INV_SETTLE && on_grid) && !state.bench_tripped)
         state.inverter.requestConnect();
     else
         state.inverter.requestDisconnect();
-    if (stage == INV_INJECT && !state.bench_tripped)
+    if (bus_loop && !state.bench_tripped && vsi == VSI_RUN && bus_valid)
     {
-        float32_t i_d = isfinite(cmd.inject_current) ? cmd.inject_current : 0.0F;
-        i_d = fminf(fmaxf(i_d, -app::inject_current_max), app::inject_current_max);
+        /* Bus voltage loop, once per cold-loop cycle on its own tick (app::bus_loop_tick, never the boost's). Bus above
+         * the reference: inject more. Pid's error is reference − measurement, so the bus is passed as the reference. */
+        if (state.cold_loop_tick == app::bus_loop_tick)
+        {
+            state.bus_current_ref = state.bus_pid.calculateWithReturn(meas.v_dc_bus, cmd.v_bus_ref);
+            state.bus_pid_active = true;
+        }
+    }
+    else if (state.bus_pid_active)
+    {
+        /* Not regulating (connecting, tripped, invalid bus or another stage): start from zero next time. */
+        state.bus_pid.reset();
+        state.bus_current_ref = 0.0F;
+        state.bus_pid_active = false;
+    }
+    if ((stage == INV_INJECT || bus_loop) && !state.bench_tripped)
+    {
+        /* The bus loop's output is bounded by its PI (0 to app::bus_loop_current_max). */
+        float32_t i_d = state.bus_current_ref;
+        if (!bus_loop)
+        {
+            i_d = isfinite(cmd.inject_current) ? cmd.inject_current : 0.0F;
+            i_d = fminf(fmaxf(i_d, -app::inject_current_max), app::inject_current_max);
+        }
         state.inverter.setIdqRef({i_d, 0.0F, 0.0F});
         state.inverter.requestRun();
     }

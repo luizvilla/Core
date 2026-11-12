@@ -196,6 +196,28 @@ inline constexpr float32_t follow_connect_blanking = 0.015F;
  * same instant the application reports the relay closed (relay_contact_ticks). The current PI runs throughout. */
 inline constexpr float32_t follow_connect_window = 0.020F;
 
+/*
+ * DC bus voltage loop (stage INV_BUS_LOOP, menu 'y'): with the boost in MPPT, the inverter holds the bus by setting
+ * its d-axis grid current. Plant, bus capacitor C = 120 µF (L1 model): C·dV/dt = P_boost/V − Vg·Id/(2·V), so
+ * dV/dId = −Vg/(2·V·C) = −325/(2·400·120e-6) ≈ −3.4 kV/s per A peak, an integrator. PI: crossover 10 Hz (well below
+ * the 100 Hz bus ripple), zero a quarter of it: Kp = 2π·10/3385 ≈ 0.0186 A/V, Ti = 4/(2π·10) ≈ 64 ms. Not yet
+ * validated on the switched model (L1) or the bench.
+ */
+/** @brief Bus loop proportional gain, in A peak per V. */
+inline constexpr float32_t bus_loop_kp = 0.0186F;
+/** @brief Bus loop integral time, in s. */
+inline constexpr float32_t bus_loop_ti = 0.064F;
+/** @brief Largest d-axis current the bus loop requests, in A peak. Bench value (series bulb), as INJECT: nominal power
+ * (about 300 W, 1.85 A peak) needs it raised once the loop is validated. Never negative: no power from the grid. */
+inline constexpr float32_t bus_loop_current_max = inject_current_max;
+/** @brief Tick of the cold-loop cycle (0 to cold_loop_divider − 1) on which the bus loop runs: the boost cold loop
+ * runs on tick 0, so their costs never add on one control period. */
+inline constexpr uint8_t bus_loop_tick = cold_loop_divider / 2U;
+/** @brief Bus loop PI: Ts (one cold-loop period), Kp, Ti, Td, N, current bounds (A peak). */
+inline constexpr PidParams bus_loop_params = {
+    cold_loop_period, bus_loop_kp, bus_loop_ti, 0.0F, 0.0F, 0.0F, bus_loop_current_max
+};
+
 }  // namespace app
 
 /** @brief Latest sensor values, in physical units, held from the last valid sample. */
@@ -222,8 +244,9 @@ enum InverterStage : uint8_t {
     INV_CONNECT = 3,    ///< Step 2: settle, close the relay, regulate zero current (GRID_CONNECTED) (menu 'g').
     INV_INJECT = 4,     ///< Step 3: as CONNECT, then inject a fixed d-axis current (RUN) (menu 'n').
     INV_VAC_FOLLOW = 5, ///< Step 1d: once the grid is qualified, the bridge copies the measured VAC; relay never closed (menu 'a').
-    INV_FOLLOW_CONNECT = 6  ///< Step 2b: as CONNECT, with the VAC copy as feedforward until the contact, the current PI from the
+    INV_FOLLOW_CONNECT = 6, ///< Step 2b: as CONNECT, with the VAC copy as feedforward until the contact, the current PI from the
                             ///< relay request, the PLL frozen from the command and the feedforward held after the contact (menu 'G').
+    INV_BUS_LOOP = 7        ///< Step 4: as INJECT, the d-axis current set by the bus voltage loop (pair with the boost in MPPT) (menu 'y').
 };
 
 /** @brief Operator requests from the serial menu. */
@@ -273,6 +296,9 @@ struct ControlState {
     bool follow_connect_applied = false;        ///< Step 2b settings currently applied to the inverter.
     float32_t applied_vac_offset = 0.0F;        ///< Offset currently applied as the feedforward gain.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
+    Pid bus_pid;                                ///< DC bus voltage loop (stage INV_BUS_LOOP), d-axis current out.
+    float32_t bus_current_ref = 0.0F;           ///< Bus loop output, A peak (held between its runs; 0 outside RUN).
+    bool bus_pid_active = false;                ///< The bus loop ran since its last reset.
 };
 
 /**
