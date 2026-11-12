@@ -60,12 +60,22 @@ def studies(out):
 
 
 def latest_results(camps):
-    """@brief {case ID: (campaign, [rows])} from the newest campaign that ran each case."""
-    latest={}
+    """@brief {case ID: (campaign, [rows], blocked_after)} from the newest campaign that ran each case.
+    A campaign where a case is only BLOCKED (not run: an on-target test without --target, a missing plant) does
+    not hide the newest campaign where it did run; that newer block is kept as blocked_after (campaign, reason)
+    and shown on the row. A case that never ran keeps its newest BLOCKED result."""
+    latest,blocked={},{}
     for c in camps:  # newest first
         by={}
         for r in c['rows']:by.setdefault(r['id'].split('.')[0],[]).append(r)
-        for cid,rows in by.items():latest.setdefault(cid,(c,rows))
+        for cid,rows in by.items():
+            if cid in latest:continue
+            if all(r['verdict']=='BLOCKED' for r in rows):
+                blocked.setdefault(cid,(c,rows))
+                continue
+            b=blocked.get(cid)
+            latest[cid]=(c,rows,(b[0],b[1][0]['measured']) if b else None)
+    for cid,(c,rows) in blocked.items():latest.setdefault(cid,(c,rows,None))
     return latest
 
 
@@ -140,6 +150,8 @@ def test_row(t,result,state,studs,findings,hardware):
     if result:
         c=result[0]
         when=f'<a href="{rel(c)}">{dt.datetime.fromtimestamp(c["when"]).strftime("%Y-%m-%d %H:%M")}</a><div class="sub">{ago(c["when"])} · {e(c["commit"])}</div>'
+        if len(result)>2 and result[2]:
+            when+=f'<div class="sub">not run since: BLOCKED in <a href="{rel(result[2][0])}">{e(result[2][0]["dir"].name[:16])}</a></div>'
     issues=sorted({f['issue'] for r in (result[1] if result else []) if r['verdict']=='FAIL'
                    for f in [finding_for(r['id'],findings)] if f})
     det=[]
@@ -154,6 +166,8 @@ def test_row(t,result,state,studs,findings,hardware):
             ts=(REPO/t['report']).stat().st_mtime
             when=f'<a href="{e(page_)}">{dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")}</a><div class="sub">{ago(ts)} · report</div>'
     det.append(f'<p><b>Implementation.</b> {e(catalogue.STATUS_TEXT[t["status"]])}'+(f' — {md(t["status_note"])}' if t.get('status_note') else '')+'</p>')
+    if result and len(result)>2 and result[2]:
+        det.append(f'<p><b>Not run since.</b> BLOCKED in {e(result[2][0]["dir"].name)}: {e(result[2][1])}. The results below are the newest run.</p>')
     if result:
         det.append('<table class="crit"><tr><th>Criterion</th><th>Verdict</th><th>Limit</th><th>Measured</th></tr>'+''.join(
             f'<tr><td>{e(r["id"])}</td><td>{e(r["verdict"])}</td><td>{e(r["limit"])}</td><td>{e(r["measured"])}</td></tr>'
