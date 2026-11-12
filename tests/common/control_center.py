@@ -6,7 +6,7 @@
 ##   python3 tests/common/control_center.py [--out tests/out]
 ##   Also run at the end of every campaign (tests/run_all.sh) and study (tests/l1/study.py).
 ## @par What it shows
-##   Tabs from tests/catalogue.json (Test bench, Model, Boost, Grid observer, Inverter, Application).
+##   Tabs from tests/catalogue.json (Test bench, Model, Boost, Grid observer, Inverter, Application, Timing).
 ##   For each test: definition, implementation state, and the latest result found in tests/out
 ##   (newest campaign containing that test), with a link to that campaign's review page; study
 ##   runs listed under the tests they inform (exploratory, they never set a verdict).
@@ -248,6 +248,7 @@ regenerate: <code>python3 tests/common/control_center.py</code></div>
         for lv,name in (('L0','L0 · logic, no model'),('D','D · averaged model, design: fast evaluation of ideas, INFO only, never a verdict (ADR 0004)'),('L1','L1 · on the switched model'),('L2','L2 · on the board (bench)')):
             rows=[t for t in tests if t['level']==lv]
             if not rows:continue
+            if lv=='L0' and tab['id']=='timing':name='L0 · on the Spin through an ST-Link, open loop, synthetic inputs (ADR 0005)'
             hw=tab['id']=='model'
             p.append(f'<h2>{e(name)}</h2><div class="wrap"><table class="tests"><colgroup><col class="c1"><col><col class="c3"><col class="c4">'+('<col class="c5">' if hw else '')+'</colgroup><tr><th>ID</th><th>Test (click for definition and results)</th><th>State</th><th>Last run</th>'
                      +('<th>Hardware</th>' if hw else '')+'</tr>')

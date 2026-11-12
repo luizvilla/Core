@@ -10,7 +10,7 @@ bash tests/l0/timing/run.sh --run            # build, flash, measure, compare wi
 tests/run_all.sh --l0 --target               # the same inside an L0 campaign
 ```
 
-Without `--run` / `--target` the test reports `BLOCKED` and leaves the board alone. **After a run the board holds the TIMING firmware** (no tasks, no PWM): flash the USB env again (`pio run -e USB -t upload`) before a bench session.
+Every run is a campaign under `tests/out/<date>_<commit>_…/` like the other tests: `record.md`, the review page `report.html` (the L0-TIM-01 test case with its four parts: purpose, conditions and objectives, target snapshot, results with the section table, figure) and the run folder `l0_tim01/` (`target_manifest.json`, `timing_report.json`, `timing_tim01.md`, build log). The control center (`tests/out/control-center.html`, tab Timing) shows the newest result. Without `--run` / `--target` the test reports `BLOCKED` and leaves the board alone. **After a run the board holds the TIMING firmware** (no tasks, no PWM): flash the USB env again (`pio run -e USB -t upload`) before a bench session.
 
 ## What is needed to reproduce
 
@@ -49,7 +49,7 @@ flowchart LR
 | [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
 | [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
 | [`read_report.py`](read_report.py) | Finds `g_timing_report` in the ELF, waits for DONE, dumps it over SWD |
-| [`evaluate.py`](evaluate.py) | Verdicts and the table |
+| [`evaluate.py`](evaluate.py) | Verdicts, the table and `target_manifest.json` (conditions and target snapshot for the review page) |
 | [`baseline.json`](baseline.json) | Committed worst case per section, in cycles |
 
 Env `TIMING` (in `src/app.ini`) is the USB image plus `-DTIMING_HARNESS`, uploaded by OpenOCD into the MCUboot slot. The bootloader is left in place. The console stays on USB CDC (`pre_usb.py`), so the harness also prints its start and end there.

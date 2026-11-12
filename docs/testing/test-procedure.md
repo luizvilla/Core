@@ -480,7 +480,7 @@ Rules:
 
 ### 8.5 Reviewing a campaign
 
-**Where the validation stands: `tests/out/control-center.html`.** One tab per stage (Test bench, Model, Boost, Grid observer, Inverter, Application), built from the catalogue (§6) and every campaign under `tests/out/`. Each test shows its definition, its implementation state, and its newest result with a link to that campaign's review page; study runs are linked under the tests they inform and never set a verdict. Every campaign and study rewrites it; `python3 tests/common/control_center.py` rebuilds it by hand. A result whose criterion is not in the catalogue is listed at the bottom of the Runs tab.
+**Where the validation stands: `tests/out/control-center.html`.** One tab per stage (Test bench, Model, Boost, Grid observer, Inverter, Application, Timing), built from the catalogue (§6) and every campaign under `tests/out/`. Each test shows its definition, its implementation state, and its newest result with a link to that campaign's review page; study runs are linked under the tests they inform and never set a verdict. Every campaign and study rewrites it; `python3 tests/common/control_center.py` rebuilds it by hand. A result whose criterion is not in the catalogue is listed at the bottom of the Runs tab.
 
 Every campaign writes `tests/out/<campaign>/report.html`. It is the **one file to open** after a run, by whoever ran it or whoever is asked to check it.
 
@@ -492,6 +492,8 @@ Every campaign writes `tests/out/<campaign>/report.html`. It is the **one file t
 | **2 · Model snapshot** | Picture of the power stage as run, the full picture, the exact `model.pulsim` and the command that opens it in PulsimGUI; a table of every change from the accepted model | `tests/l1/plant/snapshot.py` |
 | **3 · Results** | Each criterion with its verdict, finding and measured value | result lines |
 | **4 · Figures** | One plot per waveform criterion (conventions below) | `tests/l1/review_plots.json` |
+
+An on-target test case (L0-TIM, [ADR 0005](../adr/0005-on-target-timing-tests.md); a campaign subfolder with `target_manifest.json`) has the same four parts, with a **target snapshot** (board, MCU, flash configuration, firmware, probe and tools) in place of the model snapshot, and its figure drawn from the run's `timing_report.json`.
 
 The same four parts apply to any written results report (for example `switched-dcdc-results.md`) and to diagnostics posted on an issue: conditions first, so no reader has to infer how the test was set up.
 
@@ -577,7 +579,7 @@ flowchart LR
 | 1.13 | 2026-11-06 | L0-BST-09 (leg 2 starts only above a demand threshold, requirement (c); fails, finding #5). L0-PWR-01 planned (PWM duty limits across 200/50 kHz timing units, finding #6). Application minimum duty 0.005 (Luiz, as Andres's code) and the leg-1 dead-time fix in `main.cpp` (worklog); the L1 contract's `duty_min` follows (0.005). |
 | 1.14 | 2026-11-09 | Level L2 (on the board, §2). Inverter bench session ([sheet](bench/inverter-session.md)): L2-INV-10 pre-checks and L2-INV-00…03 (open-loop 230 V RMS, PWM_SETTLE with the relay open, relay closing then zero current, fixed current injection). The application takes an inverter stage instead of the sync request (OFF, SETTLE, OPEN_LOOP, CONNECT, INJECT), drives the relay on GPIO 22 with contact-time feedback, and protects the bench at 1.5 A (L0-APP-06…08). Builds on Jean Alinei's PWM_SETTLE hold, PWM application and scope capture (2026-11-08). |
 | 1.15 | 2026-11-09 | Finding #7 (no synchronization on the real grid): library fix on a branch (one-period averages of Vd, Vq and ω, \|Vq\| < 1 % of the peak), the firmware temporarily fetches it; L0-GFL-10 (harmonics: bench levels, EN 50160) and L0-GFL-13 (VAC offset) implemented. Bench calibration of VDCBus and IAC. Firmware scope: VDCBus, bridge duty, forced trigger. |
-| 1.16 | 2026-11-12 | On-target timing tests L0-TIM ([ADR 0005](../adr/0005-on-target-timing-tests.md)): Timing tab, L0-TIM-01 implemented (cycle cost per `controlStep` section on the Spin, baseline regression), L0-TIM-02…04 defined; budget 80 µs. `tests/run_all.sh --target`. Production change: `TIMING_PROBE` points in `controlStep` (empty outside the TIMING env) and the scope sampling moved into `scopeSample()` (worklog). |
+| 1.16 | 2026-11-12 | On-target timing tests L0-TIM ([ADR 0005](../adr/0005-on-target-timing-tests.md)): Timing tab, L0-TIM-01 implemented (cycle cost per `controlStep` section on the Spin, baseline regression), L0-TIM-02…04 defined; budget 80 µs. `tests/run_all.sh --target`; on-target test cases in the review page (target snapshot) and the Timing tab of the control center. Production change: `TIMING_PROBE` points in `controlStep` (empty outside the TIMING env) and the scope sampling moved into `scopeSample()` (worklog). |
 
 ## 11. Findings register
 

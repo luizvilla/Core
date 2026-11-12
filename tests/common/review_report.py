@@ -10,6 +10,9 @@
 ##      objectives; model snapshot and what the fixture changed (tests/l1/plant/snapshot.py);
 ##      results; figures from tests/l1/review_plots.json (limits dashed, thresholds dash-dot,
 ##      judged window shaded, driving signals below).
+##      On-target test cases (a folder with target_manifest.json, L0-TIM, ADR 0005) have the same
+##      four parts: purpose; conditions and objectives; target snapshot (board, MCU, flash, firmware,
+##      probe) in place of the model snapshot; results; figures.
 ##   3. Criteria without a test-case folder (L0, block checks, BLOCKED cases).
 ##   4. Criteria whose verdict or measured value changed since the previous campaign.
 ## @return 0; a missing scenario folder or plot library is reported on the page, not fatal.
@@ -278,8 +281,86 @@ def test_cases(out, rows):
         cases.append({'folder': folder, 'title': scen.get('title') or scen.get('name', folder.name),
                       'purpose': scen.get('purpose'), 'rows': mine, 'conditions': cond, 'changes': changes,
                       'snapshot_error': err, 'order': scen.get('_order', folder.name)})
+    for man in sorted(out.glob('*/target_manifest.json')):
+        folder = man.parent
+        meta = json.loads(man.read_text())
+        prefixes = tuple(meta.get('criteria') or [])
+        mine = [r for r in rows if prefixes and r['id'].startswith(prefixes)]
+        cases.append({'folder': folder, 'kind': 'target', 'title': meta.get('title', folder.name),
+                      'purpose': meta.get('purpose'), 'rows': mine,
+                      'conditions': [(k, html.escape(v)) for k, v in meta.get('conditions', [])],
+                      'target': meta.get('target', []), 'report': folder / meta.get('report', 'timing_report.json'),
+                      'order': 'zz_' + folder.name})
     # A criterion judged on several runs (the PV 25/50 ns pair) is listed under each of them.
     return cases
+
+
+# L0-TIM-01 figure: section groups stacked by their mean, in fixed categorical order (dataviz palette, slots 1-5).
+TIMING_GROUPS = [('boost', ('boost_cold', 'boost_hot')), ('inverter logic', ('inv_stage', 'outputs')),
+                 ('calculateDuty', ('inv_duty',)), ('grid observer', ('observer',)), ('scope', ('scope',))]
+TIMING_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4']
+
+
+def timing_section_table(rep):
+    """@brief Table view of an L0-TIM report: worst case (mean) per section and bucket, in µs."""
+    e = html.escape
+    hz = rep['core_hz']
+    rows = {r['name']: r for r in rep['rows']}
+    buckets = [b['name'] for b in rep['buckets']]
+    secs = [n.split('/', 1)[1] for n in rows if n.startswith(buckets[0] + '/')]
+    p = ['<div class="wrap"><table><tr><th>Bucket</th>' + ''.join(f'<th>{e(x)}</th>' for x in secs) + '</tr>']
+    for b in buckets:
+        cells = []
+        for x in secs:
+            r = rows[f'{b}/{x}']
+            cells.append(f"<td>{r['max_cycles'] * 1e6 / hz:.1f} <span class=\"sub\">({r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz:.1f})</span></td>")
+        p.append(f'<tr><td>{e(b)}</td>' + ''.join(cells) + '</tr>')
+    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs. Inverter states reached: '
+             + '; '.join(f"{e(b['name'])} {e(', '.join(str(m) for m in b['vsi_seen']))}" for b in rep['buckets'])
+             + ' (vsi_mode_t: 3 GRID_CONNECTED, 4 RUN, 7 FAULT, 8 PWM_SETTLE).</p>')
+    return '\n'.join(p)
+
+
+def timing_figure(rep, budget_us=80.0, period_us=100.0):
+    """@brief Inline SVG: per bucket, the mean cost stacked by section group, the worst case marked, against the
+    budget and the period. Hover a segment for its value. @return html."""
+    e = html.escape
+    hz = rep['core_hz']
+    rows = {r['name']: r for r in rep['rows']}
+    buckets = [b['name'] for b in rep['buckets']]
+    W, left, right, top, bar, gap = 960, 130, 70, 62, 22, 10
+    H = top + len(buckets) * (bar + gap) + 34
+    xmax = period_us
+    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Mean cost per section group and worst case per bucket" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">']
+    lx = left
+    for (name, _), col in zip(TIMING_GROUPS, TIMING_COLORS):
+        svg.append(f'<rect x="{lx}" y="8" width="12" height="12" rx="2" fill="{col}"/><text x="{lx + 17}" y="18" fill="{INK2}">{e(name)}</text>')
+        lx += 30 + 7 * len(name)
+    svg.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="6" y2="22" stroke="{INK}" stroke-width="2"/><text x="{lx + 10}" y="18" fill="{INK2}">worst case (controlStep + scope)</text>')
+    for v in range(0, int(xmax) + 1, 20):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
+                   f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
+    for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 30}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+    for i, b in enumerate(buckets):
+        y = top + i * (bar + gap)
+        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
+        acc = 0.0
+        for (name, secs), col in zip(TIMING_GROUPS, TIMING_COLORS):
+            mean = sum(rows[f'{b}/{s}']['sum_cycles'] / max(rows[f'{b}/{s}']['calls'], 1) for s in secs) * 1e6 / hz
+            worst = max(rows[f'{b}/{s}']['max_cycles'] for s in secs) * 1e6 / hz
+            svg.append(f'<rect x="{x(acc):.1f}" y="{y}" width="{max(x(acc + mean) - x(acc), 1):.1f}" height="{bar}" fill="{col}" '
+                       f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(name)}: mean {mean:.1f} µs, worst section {worst:.1f} µs</title></rect>')
+            acc += mean
+        wc = (rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles']) * 1e6 / hz
+        svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2">'
+                   f'<title>{e(b)}: worst case {wc:.1f} µs</title></line>'
+                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{wc:.1f}</text>')
+    svg.append('</svg>')
+    return ''.join(svg)
 
 
 def verdict_badge(r):
@@ -518,12 +599,33 @@ def main(out):
             for r in sorted(c['rows'], key=lambda r: r['id']):
                 p.append(f'<tr><td>{e(r["id"])}</td><td>{e(r["desc"])}</td><td>{e(r["limit"])}</td></tr>')
             p.append('</table>')
-        p.append('<h3>2 · Model snapshot</h3>')
-        p.append(snapshot_html(f, c['snapshot_error'], c['changes']))
+        if c.get('kind') == 'target':
+            p.append('<h3>2 · Target snapshot</h3><p class="sub">On-target test (ADR 0005): the board and firmware it ran on, '
+                     'in place of a model.</p><div class="wrap"><table class="kv">')
+            for k, v in c['target']:
+                p.append(f'<tr><td>{e(k)}</td><td>{e(v)}</td></tr>')
+            p.append('</table></div>')
+        else:
+            p.append('<h3>2 · Model snapshot</h3>')
+            p.append(snapshot_html(f, c['snapshot_error'], c['changes']))
         p.append('<h3>3 · Results</h3><table><tr><th>Criterion</th><th>Verdict</th><th>Measured</th></tr>')
         for r in sorted(c['rows'], key=sort_key):
             p.append(f'<tr><td>{e(r["id"])}</td><td>{verdict_badge(r)}</td><td>{e(r["measured"])}</td></tr>')
         p.append('</table>')
+        if c.get('kind') == 'target':
+            rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if rep_t and rep_t.get('rows'):
+                p.append(timing_section_table(rep_t))
+            p.append('<h3>4 · Figures</h3>')
+            if rep_t and rep_t.get('rows'):
+                p.append('<figure>' + timing_figure(rep_t) + '<figcaption>Each bar: the mean cost of one tick in that '
+                         'bucket, stacked by section group (hover a segment for its mean and worst section). Black mark: the '
+                         'worst controlStep plus the worst scope sampling of the bucket. Dashed: the 80 µs budget '
+                         '(L0-TIM-02/03) and the 100 µs period. Interrupts locked, no sensors or PWM: the running task '
+                         'costs more (L0-TIM-03). The table above is the same data.</figcaption></figure>')
+            else:
+                p.append(f'<p class="sub">No report in {e(f.name)}/.</p>')
+            continue
         p.append('<h3>4 · Figures</h3>')
         figs = figures_for[f.name]
         if not figs:

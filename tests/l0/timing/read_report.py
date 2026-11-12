@@ -67,6 +67,28 @@ def dump(address, size):
             return f.read()
 
 
+def target_registers():
+    """@brief Device id/revision (DBGMCU_IDCODE) and flash configuration (FLASH_ACR) of the running target."""
+    out = openocd('mdw 0xE0042000', 'mdw 0x40022000')
+    vals = {}
+    for ln in out.splitlines():
+        if ln.startswith('0xe0042000:'):
+            vals['dbgmcu_idcode'] = int(ln.split()[1], 16)
+        elif ln.startswith('0x40022000:'):
+            vals['flash_acr'] = int(ln.split()[1], 16)
+    acr = vals.get('flash_acr')
+    if acr is not None:
+        vals['flash_wait_states'] = acr & 0xF
+        vals['flash_prefetch'] = bool(acr >> 8 & 1)
+        vals['flash_icache'] = bool(acr >> 9 & 1)
+        vals['flash_dcache'] = bool(acr >> 10 & 1)
+    idc = vals.get('dbgmcu_idcode')
+    if idc is not None:
+        vals['device_id'] = idc & 0xFFF
+        vals['revision_id'] = idc >> 16
+    return vals
+
+
 def parse(raw):
     """@brief Decodes the report. @return dict."""
     magic, version, state, core_hz, nb, nr, err, ticks = HEADER.unpack_from(raw, 0)
@@ -105,6 +127,7 @@ def main():
         if rep['state'] in ('DONE', 'ERROR') or time.monotonic() > deadline:
             break
         time.sleep(3.0)
+    rep['target'] = target_registers()
     with open(a.out, 'w') as f:
         json.dump(rep, f, indent=1)
     return 0 if rep['state'] == 'DONE' else 1

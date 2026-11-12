@@ -51,6 +51,76 @@ def git_commit(repo):
         return 'unknown'
 
 
+def tool_version(cmd):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        return (r.stdout + r.stderr).strip().splitlines()[0]
+    except (OSError, IndexError, subprocess.SubprocessError):
+        return 'unknown'
+
+
+def ini_value(repo, key):
+    """@brief First `key = value` in platformio.ini (board and shield as configured)."""
+    for path in ('src/app.ini', 'platformio.ini'):
+        for ln in open(os.path.join(repo, path)):
+            if ln.split('=')[0].strip() == key:
+                return ln.split('=', 1)[1].strip()
+    return '?'
+
+
+def manifest(repo, rep, base):
+    """@brief Test-case manifest read by tests/common/review_report.py (on-target test cases).
+    @return dict: title, purpose, criteria prefixes, conditions and target rows (label, text)."""
+    pkg = os.path.expanduser(os.environ.get('PLATFORMIO_PACKAGES_DIR', '~/.platformio/packages'))
+    lib = os.path.join(repo, 'owntech', 'lib', 'TIMING', 'single_phase_inverter')
+    probe = 'unknown'
+    try:
+        usb = subprocess.run(['lsusb'], capture_output=True, text=True).stdout
+        probe = next((ln.split(' ', 6)[-1] for ln in usb.splitlines() if 'ST-LINK' in ln.upper() or 'STLINK' in ln.upper()), 'not seen by lsusb')
+    except OSError:
+        pass
+    tgt = rep.get('target', {})
+    phases = ', '.join(f"{b['name']} {b['ticks'] / 10000:g} s" for b in rep['buckets'])
+    acr = tgt.get('flash_acr')
+    return {
+        'test': 'L0-TIM-01',
+        'title': 'L0-TIM-01 · Cycle cost of each controlStep section on the Spin',
+        'purpose': 'Locate where the 100 µs critical task spends its time, and catch a change that makes any section '
+                   'slower than the committed baseline before it reaches the bench (ADR 0005).',
+        'criteria': ['L0-TIM-01'],
+        'conditions': [
+            ['What runs', 'controlStep() on the production ControlState after controlInit(), then the critical task\'s '
+                          'scope snapshot and acquire; env TIMING runs this instead of the tasks (no PWM, no relay, no sensors)'],
+            ['Inputs (synthetic)', 'grid 230 V rms / 50 Hz sine, VAC sample every tick; DC bus 400 V; input 36 V, 2 A; '
+                                   'AC current 50 mA in phase; relay feedback 200 ticks after the command; bridge PWM '
+                                   'acknowledged one tick after the request (as the critical task)'],
+            ['Stage sequence', phases + f" ({rep['total_ticks']} ticks in all; repeated stages share a bucket)"],
+            ['Boost', 'IDLE, BUSREG and MPPT in OFF; BUSREG in every grid stage'],
+            ['Measurement', f"DWT cycle counter at {rep['core_hz'] / 1e6:.0f} MHz; each tick with interrupts locked, ticks "
+                            'back to back: a row is the code\'s own cost, without ISRs, sensor reads or PWM writes'],
+            ['Objectives', 'a: the scenario reaches PWM_SETTLE, GRID_CONNECTED and RUN without a fault; b: no section '
+                           f"exceeds the baseline by more than {int(100 * TOLERANCE)} % + {SLACK_CYCLES} cycles"
+                           + (f" (baseline {base.get('commit', '?')}, {base.get('date', '?')})" if base else ' (no baseline yet: INFO)')
+                           + f'; c: INFO, controlStep + scope against the {BUDGET_US:.0f} µs budget'],
+        ],
+        'target': [
+            ['Board', f"Spin {ini_value(repo, 'board_version')}, shield {ini_value(repo, 'board_shield')} "
+                      f"{ini_value(repo, 'board_shield_version')} (not powered or switched)"],
+            ['MCU', f"STM32G4 device 0x{tgt.get('device_id', 0):03x}, revision 0x{tgt.get('revision_id', 0):04x}, "
+                    f"{rep['core_hz'] / 1e6:.0f} MHz"],
+            ['Flash configuration', (f"FLASH_ACR 0x{acr:08x}: {tgt['flash_wait_states']} wait states, prefetch "
+                                     f"{'on' if tgt['flash_prefetch'] else 'off'}, instruction cache "
+                                     f"{'on' if tgt['flash_icache'] else 'off'}, data cache {'on' if tgt['flash_dcache'] else 'off'}")
+                                    if acr is not None else 'not read'],
+            ['Firmware', f"Core {git_commit(repo)}, env TIMING (-DTIMING_HARNESS), inverter library "
+                         f"{git_commit(lib) if os.path.isdir(lib) else '?'}"],
+            ['Probe and tools', f"{probe}; {tool_version([os.path.join(pkg, 'tool-openocd', 'bin', 'openocd'), '--version'])}; "
+                                f"{tool_version([os.path.join(pkg, 'toolchain-gccarmnoneeabi', 'bin', 'arm-none-eabi-gcc'), '--version'])}"],
+        ],
+        'report': 'timing_report.json',
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('report')
@@ -120,8 +190,10 @@ def main():
 
     if a.out:
         os.makedirs(a.out, exist_ok=True)
-        with open(os.path.join(a.out, 'timing_tim01.json'), 'w') as f:
+        with open(os.path.join(a.out, 'timing_report.json'), 'w') as f:
             json.dump(rep, f, indent=1)
+        with open(os.path.join(a.out, 'target_manifest.json'), 'w') as f:
+            json.dump(manifest(repo, rep, base), f, indent=1, ensure_ascii=False)
         md = ['# L0-TIM-01: cycle cost per section', '',
               f"Core {hz / 1e6:.0f} MHz, {rep['total_ticks']} ticks, commit {git_commit(repo)}, "
               f"{datetime.datetime.now().isoformat(timespec='seconds')}. Worst case and mean in µs; "
