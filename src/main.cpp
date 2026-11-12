@@ -364,6 +364,7 @@ void setup_routine()
         timingTim02Begin(control, hooks);
         task.createCritical(timingCriticalTick, app::control_task_period);
         task.startCritical();
+        shield.sensors.prepareFastReads();  /* the acquisition has started */
         while (!timingTim02Done()) k_msleep(50);
 
         telemetry_verbose = true;  /* the heaviest console load the bench uses (key l) */
@@ -393,6 +394,7 @@ void setup_routine()
     task.startBackground(app_task_number);
     task.startBackground(com_task_number);
     task.startCritical();
+    shield.sensors.prepareFastReads();  /* the acquisition has started: the fast sensor reads can be prepared */
 }
 
 /*--------------LOOP FUNCTIONS-------------------------------- */

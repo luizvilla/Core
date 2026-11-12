@@ -257,7 +257,8 @@ OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValueFast(sensor_t sensor_name,
 	if ( (index >= DT_SUBSENSORS_COUNT) ||
 		 (fast_states[index] != FAST_READ_READY) )
 	{
-		return prepareFastRead(sensor_name, dataValid);
+		/* Not prepared (yet) or not possible */
+		return getLatestValue(sensor_name, dataValid);
 	}
 
 	DataFastChannel& channel = fast_channels[index];
@@ -300,31 +301,38 @@ OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValueFast(sensor_t sensor_name,
 	return value;
 }
 
-float32_t SensorsAPI::prepareFastRead(sensor_t sensor_name, uint8_t* dataValid)
+void SensorsAPI::prepareFastRead(sensor_t sensor_name)
 {
 	const uint32_t index = (uint32_t)sensor_name - 1U;
-	if ( (index < DT_SUBSENSORS_COUNT) &&
-		 (fast_states[index] == FAST_READ_UNPREPARED) )
+	if ( (index >= DT_SUBSENSORS_COUNT) ||
+		 (fast_states[index] != FAST_READ_UNPREPARED) ||
+		 (enabled_sensors[index] == nullptr) ||
+		 (DataAPI::is_started == false) )
 	{
-		sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
-		if (sensor_info.adc_num != 0)
-		{
-			if (DataAPI::prepareFastChannel(sensor_info.adc_num,
-											sensor_info.channel_num,
-											fast_channels[index]) == 0)
-			{
-				fast_states[index] = FAST_READ_READY;
-				return getLatestValueFast(sensor_name, dataValid);
-			}
-			/* Not before the acquisition starts: try again next call */
-			if (DataAPI::is_started == true)
-			{
-				fast_states[index] = FAST_READ_FALLBACK;
-			}
-		}
+		return;
 	}
 
-	return getLatestValue(sensor_name, dataValid);
+	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
+	if (DataAPI::prepareFastChannel(sensor_info.adc_num,
+									sensor_info.channel_num,
+									fast_channels[index]) == 0)
+	{
+		/* The descriptor is complete before the critical task can use it */
+		__DMB();
+		fast_states[index] = FAST_READ_READY;
+	}
+	else
+	{
+		fast_states[index] = FAST_READ_FALLBACK;
+	}
+}
+
+void SensorsAPI::prepareFastReads()
+{
+	for (uint32_t index = 0 ; index < DT_SUBSENSORS_COUNT ; index++)
+	{
+		prepareFastRead((sensor_t)(index + 1));
+	}
 }
 
 void SensorsAPI::resetFastRead(sensor_t sensor_name)
@@ -357,6 +365,7 @@ void SensorsAPI::resetFastRead(sensor_t sensor_name)
 
 void SensorsAPI::serviceFastReads()
 {
+	prepareFastReads();
 	DataAPI::resyncFastChannels();
 }
 

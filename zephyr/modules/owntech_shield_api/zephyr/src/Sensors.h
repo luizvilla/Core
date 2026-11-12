@@ -309,9 +309,11 @@ public:
 	 *        dispatch is needed, and the call costs a few loads and the
 	 *        conversion (Core2 docs/testing/timing-optimization.md, section 6).
 	 *
-	 *        - The first call prepares the read (cold). If the read cannot be
-	 *          prepared (no DMA buffer in task mode, non-linear conversion),
-	 *          every call falls back to getLatestValue().
+	 *        - The read is prepared in thread context by prepareFastReads()
+	 *          (or serviceFastReads()) once the acquisition has started.
+	 *          Until then, or if it cannot be prepared (no DMA buffer in task
+	 *          mode, non-linear conversion), the call falls back to
+	 *          getLatestValue().
 	 *        - `DATA_IS_OK` when the DMA position moved since the previous
 	 *          call for this sensor, `DATA_IS_OLD` otherwise (ADC stopped).
 	 *        - `NO_VALUE` and `DATA_IS_MISSING` when no sample was written
@@ -323,9 +325,17 @@ public:
 	float32_t getLatestValueFast(sensor_t sensor_name, uint8_t* dataValid = nullptr);
 
 	/**
-	 * @brief Resynchronize the ADCs on which getLatestValueFast() saw an
-	 *        overrun. Call it regularly from a thread (not from the critical
-	 *        task); it costs a few loads when there is nothing to do.
+	 * @brief Prepare getLatestValueFast() for every enabled sensor. Call it
+	 *        from a thread once the acquisition has started (after
+	 *        task.startCritical()). Sensors already prepared are skipped.
+	 */
+	void prepareFastReads();
+
+	/**
+	 * @brief Prepare the sensors not prepared yet, and resynchronize the ADCs
+	 *        on which getLatestValueFast() saw an overrun. Call it regularly
+	 *        from a thread (not from the critical task); it costs a few loads
+	 *        when there is nothing to do.
 	 */
 	void serviceFastReads();
 
@@ -563,10 +573,10 @@ private:
 	sensor_info_t getEnabledSensorInfo(sensor_t sensor_name);
 
 	/**
-	 * @brief  Cold part of getLatestValueFast(): prepare the sensor's read,
-	 *         or mark it to fall back to getLatestValue().
+	 * @brief  Prepare one sensor's getLatestValueFast(), or mark it to fall
+	 *         back to getLatestValue(). Thread context.
 	 */
-	float32_t prepareFastRead(sensor_t sensor_name, uint8_t* dataValid);
+	void prepareFastRead(sensor_t sensor_name);
 
 	/**
 	 * @brief  The sensor's conversion parameters changed: update a prepared
