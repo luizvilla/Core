@@ -26,6 +26,12 @@ inline constexpr uint8_t probe_count = 7U;
 /** @brief DWT->CYCCNT at each probe point of the last controlStep() call. */
 extern volatile uint32_t probe_cycles[probe_count];
 
+/** @brief Probe points of one critical tick (main.cpp criticalTickBody): start, after the sensors, after
+ * controlStep, after PWM and relay, end (after the scope). */
+inline constexpr uint8_t tick_probe_count = 5U;
+/** @brief DWT->CYCCNT at each tick probe point of the last tick. */
+extern volatile uint32_t tick_cycles[tick_probe_count];
+
 /** @brief Stores the cycle counter (DWT->CYCCNT, 0xE0001004) for probe point @p i. */
 inline void probe(uint8_t i)
 {
@@ -37,8 +43,10 @@ inline void probe(uint8_t i)
 
 #ifdef TIMING_HARNESS
 #define TIMING_PROBE(i) ::timing::probe(i)
+#define TIMING_TICK_PROBE(i) (::timing::tick_cycles[(i)] = *reinterpret_cast<volatile const uint32_t *>(0xE0001004UL))
 #else
 #define TIMING_PROBE(i) ((void)0)
+#define TIMING_TICK_PROBE(i) ((void)0)
 #endif
 
 #endif  // TIMING_PROBE_H

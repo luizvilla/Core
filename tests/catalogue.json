@@ -1477,12 +1477,13 @@
    "id": "L0-TIM-02",
    "tab": "timing",
    "level": "L0",
-   "title": "`controlStep` worst case per stage and on the transition ticks within the budget",
-   "criterion": "Worst case of `controlStep` in every stage (OFF, c, o, g, n, a, G) and on the relay request, PLL freeze and CONNECTED ticks ≤ 80 µs; baseline check as L0-TIM-01",
-   "conditions": "As L0-TIM-01, with the transitions repeated",
-   "source": "ADR 0005, budget 80 µs",
-   "status": "planned",
-   "status_note": "Defined 2026-11-12"
+   "title": "Whole critical tick per stage and per event, in the critical task, within the budget",
+   "criterion": ".a the scenario runs to its end in the critical task and reaches PWM_SETTLE, GRID_CONNECTED and RUN without a fault; .b-<bucket> whole tick (sensor reads, controlStep, PWM and relay writes, scope) worst case ≤ 80 µs; .c-<bucket> every event tick (stage entry, boost mode change, inverter mode change, relay command and feedback, bridge enable) ≤ 80 µs; .d no tick part or event slower than the committed baseline by more than 10 % + 50 cycles",
+   "conditions": "The production tick body (main.cpp criticalTickBody) called from the critical task at 10 kHz on the bare Spin: ADC acquisition and PWM running, sensors read then replaced by the L0-TIM-01 synthetic signals, relay and bridge models of the task, scope as in production and re-armed at each stage; application and communication tasks not started",
+   "source": "ADR 0005, budget 80 µs; `tests/l0/timing/baseline.json`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-12 (definition agreed with Luiz the same day)",
+   "harness": "tests/l0/timing/run.sh --run"
   },
   {
    "id": "L0-TIM-03",

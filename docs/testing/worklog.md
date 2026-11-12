@@ -492,3 +492,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Host L0: 125 pass, 7 known fails, 0 new (as before); L0-GFL 52 pass. On the Spin, L0-TIM-01 PASS against the 4e4ee54 baseline (sections within 10 %), new baseline written. `calculateDuty` means (CONNECT_g): PLL 3.6 µs, SOGI V+I 3.7, Park V+I 4.9, sync window 2.7, mode + feedforward 2.6, current PI 2.3, output 5.3 |
 | Lead, not acted on | Park and output are the largest sections, and both are only rotations: `Transform::rotation_to_dqo` and `rotation_to_clarke` (control_library) each call `ot_cos` and `ot_sin`, so one tick computes the sine and cosine of the same angle three to four times. Computing them once per tick would save several µs; to be measured with L0-TIM-01 |
 | Hardware check | Not needed (no behaviour change); the board holds the TIMING firmware |
+
+## 2026-11-12 — Critical tick body extracted; L0-TIM-02
+
+| Field | Value |
+|---|---|
+| Commit | the `test(timing): …` commit that adds this entry |
+| Files | `src/main.cpp`, `src/timing/timing_harness.{h,cpp}`, `src/timing/timing_probe.h`, `src/timing/timing_report.h` (layout 3) |
+| Reason | L0-TIM-02 as agreed with Luiz: time the whole critical tick, per stage and per event, in the critical task. The harness must run the deployed tick, not a copy |
+| Behaviour change | None in the USB firmware: `loop_critical_task()` keeps its timing bookkeeping (gaps, lost ticks) and calls `criticalTickBody(start, nullptr, nullptr)`, which holds the unchanged sensors → controlStep → PWM/relay → scope code. The synthetic-input overrides and the five `TIMING_TICK_PROBE` points compile only under `TIMING_HARNESS`; the USB ELF has no timing symbol |
+| Evidence | USB and TIMING build; host L0 125 pass, 7 known, 0 new. On the bare Spin: L0-TIM-01 unchanged (all sections within the baseline); L0-TIM-02.a PASS; **.b and .c FAIL in every bucket**: whole tick mean 72 µs (OFF, boost IDLE) to 100 µs (INJECT), worst 82–110 µs. Mean parts with the bridge on: sensor reads 10.6 µs, controlStep 53–58 µs, PWM and relay writes 18 µs (4.4 µs with nothing switching, 12 µs with the boost alone), scope 5.5 µs at 2 kHz and 12 µs at 10 kHz (g, n, G) |
+| Lead, not acted on | Outside controlStep, the tick spends about 29 µs on the shield API every tick with the bridge on: 18 µs to rewrite duties, enables and burst settings that mostly did not change, and 10.6 µs for five sensor reads. Writing PWM only on change and reading the sensors through a cheaper path are the largest savings measured so far, before the flash wait states and the repeated sine/cosine |
+| Hardware check | The bench `load` (74–75 µs idle, 82–88 µs with the bridge, boost IDLE) is consistent with OFF_IDLE (72 µs mean, 82 µs worst); the grid buckets here also run the boost in BUSREG |

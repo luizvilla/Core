@@ -41,14 +41,21 @@
 #include "app/control_step.h"
 #include <math.h>
 #include "ScopeMimicry.h"
+#include "timing/timing_probe.h"
 #ifdef TIMING_HARNESS
 #include "timing/timing_harness.h"
 #endif
 
 /* Scope snapshot and acquisition of one sampled critical tick. */
 static void scopeSample(ControlState &state, const ControlOutputs &out);
+/* One critical tick (sensors, control step, PWM and relay, scope); inputs override the sensors in env TIMING. */
+static ControlOutputs criticalTickBody(uint32_t critical_start, const Measurements *meas_in,
+                                       const OperatorCommands *cmd_in);
 #ifdef TIMING_HARNESS
 static void timingScopeSample(ControlState &state, const ControlOutputs &out, const Measurements &meas);
+static ControlOutputs timingTick(const Measurements &meas, const OperatorCommands &cmd);
+static bool timingRelayClosed();
+static void timingStageStart();
 #endif
 
 /*--------------SETUP FUNCTIONS DECLARATION------------------- */
@@ -314,8 +321,27 @@ void setup_routine()
     scope.start();
 
 #ifdef TIMING_HARNESS
-    /* TIMING env (ADR 0005): run the L0-TIM-01 scenario instead of the tasks; no PWM is ever started. */
+    /* TIMING env (ADR 0005), bare Spin only: L0-TIM-01 in this thread (no tasks), then L0-TIM-02 in the critical
+     * task (ADC and PWM running on the Spin's pins; never with a powered shield), then every output stopped.
+     * The application and communication tasks are not started. */
     timingHarnessRun(control, timingScopeSample);
+    {
+        TimingTim02Hooks hooks;
+        hooks.tick = timingTick;
+        hooks.relay_closed = timingRelayClosed;
+        hooks.stage_start = timingStageStart;
+        timingTim02Begin(control, hooks);
+        task.createCritical(timingTim02Tick, app::control_task_period);
+        task.startCritical();
+        while (!timingTim02Done()) k_msleep(50);
+        task.stopCritical();
+        shield.power.stop(LEG1_LOW);
+        shield.power.stop(LEG1_HIGH);
+        shield.power.stop(LEG2_HIGH);
+        if (burst_running) shield.power.stopBurstMode();
+        spin.gpio.resetPin(relay_pin);
+        timingFinish();
+    }
     return;
 #endif
 
@@ -680,6 +706,14 @@ static void timingScopeSample(ControlState &state, const ControlOutputs &out, co
     i_ac_value = meas.i_ac;
     scopeSample(state, out);
 }
+
+/* L0-TIM-02: the critical tick body with synthetic inputs, the relay model's feedback, and a stage start. */
+static ControlOutputs timingTick(const Measurements &meas, const OperatorCommands &cmd)
+{
+    return criticalTickBody(k_cycle_get_32(), &meas, &cmd);
+}
+static bool timingRelayClosed() { return relay_closed; }
+static void timingStageStart() { scope.start(); }
 #endif
 
 /**
@@ -703,6 +737,29 @@ void loop_critical_task()
     }
     critical_prev_start = critical_start;
     ++critical_calls;
+    criticalTickBody(critical_start, nullptr, nullptr);
+}
+
+/**
+ * One critical tick: read the sensors, run controlStep(), apply PWM and relay, sample the scope. Called by
+ * loop_critical_task() and, in env TIMING, by the L0-TIM-02 harness with synthetic inputs (meas_in, cmd_in,
+ * applied after the real sensor reads so their cost stays in the tick).
+ */
+static ControlOutputs criticalTickBody(uint32_t critical_start, const Measurements *meas_in,
+                                       const OperatorCommands *cmd_in)
+{
+    TIMING_TICK_PROBE(0);
+#ifdef TIMING_HARNESS
+    if (cmd_in != nullptr)
+    {
+        mode = cmd_in->mode;
+        inverter_stage = cmd_in->inverter_stage;
+        inject_current = cmd_in->inject_current;
+    }
+#else
+    (void)meas_in;
+    (void)cmd_in;
+#endif
     /*----- Read sensors, holding the last valid value ----- */
     meas_data = shield.sensors.getLatestValue(ILow1);
     if (meas_data != NO_VALUE) i_low_1_value = meas_data;
@@ -738,6 +795,18 @@ void loop_critical_task()
         v_dc_bus_value = meas_data;
     }
 
+#ifdef TIMING_HARNESS
+    if (meas_in != nullptr)  /* L0-TIM-02: synthetic values replace the readings (the reads were still made) */
+    {
+        i_low_1_value = meas_in->i_low_1;
+        v_low_value = meas_in->v_low;
+        v_dc_bus_value = meas_in->v_dc_bus;
+        v_ac_value = meas_in->v_ac;
+        i_ac_value = meas_in->i_ac;
+        v_ac_updated = meas_in->v_ac_updated;
+    }
+#endif
+    TIMING_TICK_PROBE(1);
     const uint32_t t_sensed = k_cycle_get_32();
     notePart(0, critical_start, t_sensed);
     /*----- Control logic (hardware-free, see app/control_step.h) ----- */
@@ -760,6 +829,7 @@ void loop_critical_task()
     cmd.v_bus_ref = voltage_reference;
 
     const ControlOutputs out = controlStep(control, meas, cmd);
+    TIMING_TICK_PROBE(2);
     const uint32_t t_controlled = k_cycle_get_32();
     notePart(1, t_sensed, t_controlled);
     boost_duty = out.boost_duty;
@@ -860,6 +930,7 @@ void loop_critical_task()
         relay_closed = relay_command;
     }
 
+    TIMING_TICK_PROBE(3);
     const uint32_t t_applied = k_cycle_get_32();
     notePart(2, t_controlled, t_applied);
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
@@ -876,6 +947,8 @@ void loop_critical_task()
     notePart(3, t_applied, t_end);
     const uint32_t critical_us = k_cyc_to_us_floor32(t_end - critical_start);
     if (critical_us > critical_max_us) critical_max_us = critical_us;
+    TIMING_TICK_PROBE(4);
+    return out;
 }
 
 /**

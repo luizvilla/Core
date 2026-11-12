@@ -7,7 +7,7 @@
 ##
 ## Finds the symbol in the ELF with arm-none-eabi-nm, waits until the harness reports DONE (or ERROR), dumps the
 ## structure with OpenOCD and writes it as JSON. Standard library only. Mirrors src/timing/timing_report.h
-## (layout version 2).
+## (layout version 3).
 ##
 ## @par Usage
 ##   python3 tests/l0/timing/read_report.py --elf .pio/build/TIMING/firmware.elf --out report.json [--timeout 120]
@@ -20,15 +20,15 @@ import sys
 import tempfile
 import time
 
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 MAGIC = 0x314D4954
 MAX_BUCKETS = 16
-MAX_ROWS = 192
+MAX_ROWS = 320
 HEADER = struct.Struct('<8I')
-BUCKET = struct.Struct('<16sIIBB2x')
+BUCKET = struct.Struct('<16sIIBB2xII')
 ROW = struct.Struct('<32sIIIIQ')
 SIZE = HEADER.size + BUCKET.size * MAX_BUCKETS + ROW.size * MAX_ROWS
-STATES = {0: 'RUNNING', 1: 'DONE', 2: 'ERROR'}
+STATES = {0: 'RUNNING', 1: 'DONE', 2: 'ERROR', 3: 'RUNNING_TIM02'}
 PIO_PACKAGES = os.path.expanduser(os.environ.get('PLATFORMIO_PACKAGES_DIR', '~/.platformio/packages'))
 OPENOCD = os.path.join(PIO_PACKAGES, 'tool-openocd', 'bin', 'openocd')
 OPENOCD_SCRIPTS = os.path.join(PIO_PACKAGES, 'tool-openocd', 'openocd', 'scripts')
@@ -99,10 +99,11 @@ def parse(raw):
     rep = {'state': STATES.get(state, str(state)), 'core_hz': core_hz, 'error_code': err, 'total_ticks': ticks,
            'buckets': [], 'rows': []}
     for i in range(min(nb, MAX_BUCKETS)):
-        name, t, mask, final, mode = BUCKET.unpack_from(raw, HEADER.size + i * BUCKET.size)
+        name, t, mask, final, mode, t2, mask2 = BUCKET.unpack_from(raw, HEADER.size + i * BUCKET.size)
         rep['buckets'].append({'name': name.split(b'\0')[0].decode(), 'ticks': t,
                                'vsi_seen': [m for m in range(32) if mask >> m & 1],
-                               'final_vsi': final, 'boost_mode': mode})
+                               'final_vsi': final, 'boost_mode': mode, 'tim02_ticks': t2,
+                               'tim02_vsi_seen': [m for m in range(32) if mask2 >> m & 1]})
     base = HEADER.size + BUCKET.size * MAX_BUCKETS
     for i in range(min(nr, MAX_ROWS)):
         name, calls, mn, mx, mx_tick, total = ROW.unpack_from(raw, base + i * ROW.size)

@@ -29,7 +29,10 @@ for arg in "$@"; do
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
-blocked() { printf '@@\tL0-TIM-01\tBLOCKED\tCycle cost per controlStep section on the Spin\ton target\t%s\n' "$1"; }
+blocked() {
+    printf '@@\tL0-TIM-01\tBLOCKED\tCycle cost per controlStep section on the Spin\ton target\t%s\n' "$1"
+    printf '@@\tL0-TIM-02\tBLOCKED\tWhole critical tick per stage and per event on the Spin\ton target\t%s\n' "$1"
+}
 
 if [ "$run" != 1 ]; then
     blocked "not requested: reflashes the board; run tests/run_all.sh --l0 --target or tests/l0/timing/run.sh --run"
@@ -68,7 +71,8 @@ if [ $flash -eq 1 ]; then
 fi
 echo "== read g_timing_report over SWD"
 python3 "$here/read_report.py" --elf "$repo/.pio/build/TIMING/firmware.elf" --out "$out/timing_report.json" --timeout 120
-args=("$out/timing_report.json" --baseline "$here/baseline.json" --out "$out")
+mkdir -p "$campaign/l0_tim02"
+args=("$out/timing_report.json" --baseline "$here/baseline.json" --out "$out" --out2 "$campaign/l0_tim02")
 [ $update -eq 1 ] && args+=(--update-baseline "$here/baseline.json")
 python3 "$here/evaluate.py" "${args[@]}"
 rc=$?

@@ -44,7 +44,7 @@ flowchart LR
 | File | Role |
 |---|---|
 | [`src/timing/timing_probe.h`](../../../src/timing/timing_probe.h) | `TIMING_PROBE(i)` in `controlStep`; empty unless `TIMING_HARNESS` |
-| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 2) |
+| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 3) |
 | [`src/timing/timing_harness.cpp`](../../../src/timing/timing_harness.cpp) | Scenario and measurement on the target |
 | [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
 | [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
@@ -82,11 +82,24 @@ Criteria: `.a` the scenario reached PWM_SETTLE, GRID_CONNECTED and RUN without a
 
 **Updating the baseline.** When a change legitimately costs more (or less), run `run.sh --run --update-baseline` and commit `baseline.json` with that change, saying why in the commit message.
 
+## L0-TIM-02: whole critical tick per stage and per event
+
+After L0-TIM-01, the same firmware starts the **critical task** on `timingTim02Tick` and runs the same stage sequence again, in real time at 10 kHz: each tick calls the production tick body (`criticalTickBody` in `main.cpp`, also called by `loop_critical_task`). The ADC acquisition and the PWM run on the bare Spin; the sensors are read, then replaced by the synthetic signals, so the read cost stays in the tick. The relay feedback and the bridge acknowledgement come from the task's own models, and the scope samples as in production (2 kHz, 10 kHz around the relay), re-armed at each stage start as a bench key does. The application and communication tasks are not started (that is L0-TIM-03). At the end every output is stopped and the relay pin reset.
+
+**Only on a bare Spin** (no shield, or an unpowered one): this firmware switches the PWM outputs.
+
+| Row | What |
+|---|---|
+| `tick` | whole tick body |
+| `tick_sensors`, `tick_control`, `tick_apply`, `tick_scope` | its parts: sensor reads, `controlStep`, PWM and relay writes, scope |
+| `ev:<event>` | the whole tick on which an event happened, one row per event and bucket: `entry`, `boost mode`, `vsi a>b`, `relay cmd on/off`, `relay fb on/off`, `bridge on/off` |
+
+Criteria: `.a` the scenario ran to its end and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault; `.b-<bucket>` whole tick ≤ 80 µs, with the events of the worst tick named; `.c-<bucket>` every event tick ≤ 80 µs; `.d` no tick part or event slower than the baseline + 10 % + 50 cycles. The review page shows its own test case (`l0_tim02/`): conditions, target snapshot, the tick and event tables, a tick-composition figure and an event figure.
+
 ## Not yet implemented
 
 | ID | What |
 |---|---|
-| L0-TIM-02 | `controlStep` worst case per stage and on the transition ticks, against the 80 µs budget |
 | L0-TIM-03 | The full critical task in the running firmware with synthetic inputs, console and scope download active: worst case ≤ 80 µs, no lost ticks, gap ≤ 150 µs |
 | L0-TIM-04 | Start delay of the critical task (other threads' interrupt locks) |
 

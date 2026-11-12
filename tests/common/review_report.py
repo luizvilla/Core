@@ -290,6 +290,7 @@ def test_cases(out, rows):
                       'purpose': meta.get('purpose'), 'rows': mine,
                       'conditions': [(k, html.escape(v)) for k, v in meta.get('conditions', [])],
                       'target': meta.get('target', []), 'report': folder / meta.get('report', 'timing_report.json'),
+                      'figures': meta.get('figures', 'tim01'),
                       'order': 'zz_' + folder.name})
     # A criterion judged on several runs (the PV 25/50 ns pair) is listed under each of them.
     return cases
@@ -337,13 +338,141 @@ def timing_groups(rows, bucket):
     return [g if g[0] != 'calculateDuty' else (g[0], g[1], [('inv_duty', 'PLL, SOGI, current loop')]) for g in TIMING_GROUPS]
 
 
+VSI_NAMES = ['OFF', 'VOLTAGE_SYNC', 'GRID_CONNECT', 'GRID_CONNECTED', 'RUN', 'STOPPING', 'DISCONNECT', 'FAULT',
+             'PWM_SETTLE', 'PWM_WAIT']
+TICK_PARTS = [('tick_sensors', 'sensor reads', '#2a78d6'), ('tick_control', 'controlStep', '#1baf7a'),
+              ('tick_apply', 'PWM + relay writes', '#eda100'), ('tick_scope', 'scope', '#e87ba4')]
+
+
+def event_text(sec):
+    """@brief 'ev:vsi 8>2' -> 'vsi PWM_SETTLE → GRID_CONNECT'."""
+    t = sec[3:]
+    if t.startswith('vsi '):
+        a, b = t[4:].split('>')
+        return f'vsi {VSI_NAMES[int(a)]} → {VSI_NAMES[int(b)]}'
+    return t
+
+
+def tim02_tables(rep, budget_us=80.0):
+    """@brief L0-TIM-02 table views: tick parts per bucket, then every event row."""
+    e = html.escape
+    hz = rep['core_hz']
+    rows = {r['name']: r for r in rep['rows']}
+    u = lambda c: c * 1e6 / hz
+    mean = lambda r: u(r['sum_cycles'] / max(r['calls'], 1))
+    buckets = [b['name'] for b in rep['buckets']]
+    p = ['<div class="wrap"><table><tr><th>Bucket</th><th>whole tick</th>' + ''.join(f'<th>{e(t)}</th>' for _, t, _ in TICK_PARTS) + '</tr>']
+    for b in buckets:
+        t = rows[f'{b}/tick']
+        flag = ' <b>over</b>' if u(t['max_cycles']) > budget_us else ''
+        p.append(f'<tr><td>{e(b)}</td><td>{u(t["max_cycles"]):.1f}{flag} <span class="sub">({mean(t):.1f})</span></td>' + ''.join(
+            f'<td>{u(rows[f"{b}/{k}"]["max_cycles"]):.1f} <span class="sub">({mean(rows[f"{b}/{k}"]):.1f})</span></td>' for k, _, _ in TICK_PARTS) + '</tr>')
+    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs.</p>')
+    p.append('<div class="wrap"><table><tr><th>Bucket</th><th>Event</th><th>Ticks</th><th>Worst tick</th><th>Mean tick</th></tr>')
+    for n, r in rows.items():
+        if '/ev:' not in n:
+            continue
+        b, sec = n.split('/', 1)
+        flag = ' <b>over</b>' if u(r['max_cycles']) > budget_us else ''
+        p.append(f'<tr><td>{e(b)}</td><td>{e(event_text(sec))}</td><td>{r["calls"]}</td><td>{u(r["max_cycles"]):.1f}{flag}</td><td>{mean(r):.1f}</td></tr>')
+    p.append('</table></div>')
+    return '\n'.join(p)
+
+
+def tim02_tick_figure(rep, budget_us=80.0, period_us=100.0):
+    """@brief Inline SVG: mean whole tick per bucket stacked by part, worst tick marked, budget and period."""
+    e = html.escape
+    hz = rep['core_hz']
+    rows = {r['name']: r for r in rep['rows']}
+    u = lambda c: c * 1e6 / hz
+    buckets = [b['name'] for b in rep['buckets']]
+    W, left, right, top, bar, gap = 960, 130, 60, 56, 24, 10
+    worst_all = max(u(rows[f'{b}/tick']['max_cycles']) for b in buckets)
+    xmax = max(period_us, 10 * (int(worst_all / 10) + 2))
+    H = top + len(buckets) * (bar + gap) + 34
+    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Whole critical tick per bucket" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">']
+    lx = 0
+    for _, text, col in TICK_PARTS:
+        svg.append(f'<rect x="{lx}" y="8" width="12" height="12" rx="2" fill="{col}"/><text x="{lx + 16}" y="18" fill="{INK2}">{e(text)}</text>')
+        lx += 30 + 7 * len(text)
+    svg.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="6" y2="22" stroke="{INK}" stroke-width="2"/><text x="{lx + 10}" y="18" fill="{INK2}">worst whole tick</text>')
+    for v in range(0, int(xmax) + 1, 10):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
+                   f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
+    for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 30}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+    for i, b in enumerate(buckets):
+        y = top + i * (bar + gap)
+        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
+        acc = 0.0
+        for key, text, col in TICK_PARTS:
+            r = rows[f'{b}/{key}']
+            m = u(r['sum_cycles'] / max(r['calls'], 1))
+            x0, x1 = x(acc), x(acc + m)
+            svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{col}" stroke="{SURFACE}" stroke-width="2">'
+                       f'<title>{e(b)} · {e(text)}: mean {m:.2f} µs, worst {u(r["max_cycles"]):.2f} µs</title></rect>')
+            if x1 - x0 >= 26:
+                svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(col)}" font-size="11" text-anchor="middle" pointer-events="none">{m:.1f}</text>')
+            acc += m
+        wc = u(rows[f'{b}/tick']['max_cycles'])
+        svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2"/>'
+                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{wc:.1f}</text>')
+    svg.append('</svg>')
+    return ''.join(svg)
+
+
+def tim02_event_figure(rep, budget_us=80.0, period_us=100.0):
+    """@brief Inline SVG: one bar per (bucket, event), the worst whole tick it happened on; over-budget bars in the
+    status red with the word "over"."""
+    e = html.escape
+    hz = rep['core_hz']
+    u = lambda c: c * 1e6 / hz
+    evs = [(r['name'].split('/', 1)[0], event_text(r['name'].split('/', 1)[1]), u(r['max_cycles']), r['calls'])
+           for r in rep['rows'] if '/ev:' in r['name']]
+    if not evs:
+        return '<p class="sub">No event recorded.</p>'
+    W, left, right, top, bar, gap = 960, 330, 90, 24, 16, 4
+    xmax = max(period_us, 10 * (int(max(v for _, _, v, _ in evs) / 10) + 2))
+    order = [b['name'] for b in rep['buckets']]
+    evs.sort(key=lambda t: (order.index(t[0]), -t[2]))
+    H = top + len(evs) * (bar + gap) + 30
+    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Worst tick per event" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">']
+    for v in range(0, int(xmax) + 1, 10):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 4}" y2="{H - 26}" stroke="{GRID}"/>'
+                   f'<text x="{x(v):.1f}" y="{H - 10}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
+    for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 8}" y2="{H - 26}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="{top - 12}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+    prev = None
+    for i, (b, text, v, n) in enumerate(evs):
+        y = top + i * (bar + gap)
+        if b != prev and i:
+            svg.append(f'<line x1="0" x2="{W}" y1="{y - gap / 2:.1f}" y2="{y - gap / 2:.1f}" stroke="{GRID}"/>')
+        over = v > budget_us
+        col = CRITICAL if over else SERIES[0]
+        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">'
+                   f'<tspan fill="{INK2}">{e(b) if b != prev else ""}</tspan>  {e(text)}</text>'
+                   f'<rect x="{left}" y="{y}" width="{max(x(v) - left, 1):.1f}" height="{bar}" rx="2" fill="{col}">'
+                   f'<title>{e(b)} · {e(text)}: worst tick {v:.1f} µs over {n} occurrence(s)</title></rect>'
+                   f'<text x="{x(v) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{v:.1f}{" over" if over else ""}</text>')
+        prev = b
+    svg.append('</svg>')
+    return ''.join(svg)
+
+
 def timing_section_table(rep):
     """@brief Table view of an L0-TIM report: worst case (mean) per section and bucket, in µs."""
     e = html.escape
     hz = rep['core_hz']
     rows = {r['name']: r for r in rep['rows']}
     buckets = [b['name'] for b in rep['buckets']]
-    secs = [n.split('/', 1)[1] for n in rows if n.startswith(buckets[0] + '/')]
+    secs = [n.split('/', 1)[1] for n in rows if n.startswith(buckets[0] + '/')
+            and not n.split('/', 1)[1].startswith(('tick', 'ev:'))]
     p = ['<div class="wrap"><table><tr><th>Bucket</th>' + ''.join(f'<th>{e(x)}</th>' for x in secs) + '</tr>']
     for b in buckets:
         cells = []
@@ -755,6 +884,21 @@ def main(out):
         for r in sorted(c['rows'], key=sort_key):
             p.append(f'<tr><td>{e(r["id"])}</td><td>{verdict_badge(r)}</td><td>{e(r["measured"])}</td></tr>')
         p.append('</table>')
+        if c.get('kind') == 'target' and c.get('figures') == 'tim02':
+            rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if rep_t and rep_t.get('rows'):
+                p.append(tim02_tables(rep_t))
+                p.append('<h3>4 · Figures</h3>')
+                p.append('<figure><div><b>Tick composition</b></div>' + tim02_tick_figure(rep_t) + '<figcaption>Each bar: '
+                         'the mean whole critical tick in that bucket, split into sensor reads, controlStep, PWM and relay '
+                         'writes, and scope sampling (values in µs). Black mark: the worst whole tick. Dashed: the 80 µs '
+                         'budget and the 100 µs period; a tick past the period delays the next one.</figcaption></figure>')
+                p.append('<figure><div><b>Event ticks</b></div>' + tim02_event_figure(rep_t) + '<figcaption>The worst '
+                         'whole tick on which each event happened, per bucket (several events can share one tick). Red '
+                         'with "over": above the 80 µs budget. The event table above is the same data.</figcaption></figure>')
+            else:
+                p.append(f'<p class="sub">No report in {e(f.name)}/.</p>')
+            continue
         if c.get('kind') == 'target':
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
             if rep_t and rep_t.get('rows'):
