@@ -480,3 +480,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | USB and TIMING builds succeed. Host L0 campaign: 125 pass, 7 known fails, 0 new (as before), L0-TIM-01 BLOCKED (not requested). On the Spin (STLINK-V3): L0-TIM-01.a PASS; two runs agree to the cycle. Worst cases, interrupts locked: `controlStep` 50.8 µs (OFF, boost IDLE) to 59.6 µs (G, o); `calculateDuty` alone 26–29 µs; scope sampling 6.3–8.1 µs; controlStep + scope 58.5–66.2 µs, before sensors, PWM writes and ISRs. Baseline committed in `tests/l0/timing/baseline.json` |
 | Lead, not acted on | `FLASH_ACR` reads `0x00040708`: prefetch, instruction and data caches on, but **8 wait states**; RM0440 gives 4 at 170 MHz (range 1 boost). `calculateDuty` takes about 4 500 cycles for about 470 instructions (2026-11-10 entry), about 10 cycles per instruction, which points at flash stalls. To be confirmed with L0-TIM-01 before and after the change |
 | Hardware check | Done for the harness itself; the board was left with the TIMING firmware (reflash USB before the bench) |
+
+## 2026-11-12 — calculateDuty split into sections for L0-TIM-01
+
+| Field | Value |
+|---|---|
+| Commit | the `test(timing): …` commit that adds this entry; library `luizvilla/single_phase_inverter` `f98cfac` (branch `fix/sync-period-average`) |
+| Files | library `src/inverterTiming.h` (new), `src/singlePhaseInverterFollowing.cpp`; `src/app.ini` and `tests/l1/dependencies.lock.json` (pin 2028beb → f98cfac); `src/timing/timing_harness.cpp`, `src/timing/timing_report.h` (layout 2, 192 rows) |
+| Reason | Luiz Villa: the review figure showed `calculateDuty` (half the tick) as one block; split it into PLL, SOGI, Park, sync window, mode + feedforward, current PI and output |
+| Behaviour change | None: the eight `INV_TIMING_PROBE` points expand to nothing without `TIMING_HARNESS`. The only library change in the USB build is the include |
+| Evidence | Host L0: 125 pass, 7 known fails, 0 new (as before); L0-GFL 52 pass. On the Spin, L0-TIM-01 PASS against the 4e4ee54 baseline (sections within 10 %), new baseline written. `calculateDuty` means (CONNECT_g): PLL 3.6 µs, SOGI V+I 3.7, Park V+I 4.9, sync window 2.7, mode + feedforward 2.6, current PI 2.3, output 5.3 |
+| Lead, not acted on | Park and output are the largest sections, and both are only rotations: `Transform::rotation_to_dqo` and `rotation_to_clarke` (control_library) each call `ot_cos` and `ot_sin`, so one tick computes the sine and cosine of the same angle three to four times. Computing them once per tick would save several µs; to be measured with L0-TIM-01 |
+| Hardware check | Not needed (no behaviour change); the board holds the TIMING firmware |

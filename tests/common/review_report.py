@@ -300,16 +300,28 @@ def test_cases(out, rows):
 # stay apart. Labels: (section key, legend text).
 TIMING_GROUPS = [('boost', '#2a78d6', [('boost_cold', 'setters + cold loop'), ('boost_hot', 'hot loop')]),
                  ('inverter logic', '#eb6834', [('inv_stage', 'stage logic'), ('outputs', 'outputs, relay')]),
-                 ('calculateDuty', '#1baf7a', [('inv_duty', 'PLL, SOGI, current loop')]),
+                 ('calculateDuty', '#1baf7a', [('duty_pll', 'PLL'), ('duty_sogi', 'SOGI V+I'), ('duty_park', 'Park V+I'),
+                                               ('duty_syncwin', 'sync window'), ('duty_mode_ff', 'mode + feedforward'),
+                                               ('duty_current_pi', 'current PI'), ('duty_output', 'output + duty')]),
                  ('grid observer', '#eda100', [('observer', 'observer, quality gate')]),
                  ('scope', '#e87ba4', [('scope', 'snapshot + acquire')])]
 
 
-def shade(hex_color, k):
-    """@brief Shade k of a hue: 0 the base, 1 mixed 45 % with white, 2 mixed 70 %."""
-    mix = (0.0, 0.45, 0.7)[min(k, 2)]
+def shade(hex_color, k, n=2):
+    """@brief Shade k of n of a hue. Two shades: the base, then 45 % towards white. More: an even ramp from 35 %
+    towards black to 65 % towards white, so neighbours stay apart."""
     r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-    return '#%02x%02x%02x' % tuple(round(c + (255 - c) * mix) for c in (r, g, b))
+    m = (0.0, 0.45)[min(k, 1)] if n <= 2 else -0.35 + 1.0 * k / (n - 1)
+    f = (lambda c: c * (1 + m)) if m < 0 else (lambda c: c + (255 - c) * m)
+    return '#%02x%02x%02x' % tuple(round(f(c)) for c in (r, g, b))
+
+
+def timing_groups(rows, bucket):
+    """@brief TIMING_GROUPS as present in a report: a report without the library probes (layout 1) shows
+    calculateDuty as one section."""
+    if f'{bucket}/duty_pll' in rows:
+        return TIMING_GROUPS
+    return [g if g[0] != 'calculateDuty' else (g[0], g[1], [('inv_duty', 'PLL, SOGI, current loop')]) for g in TIMING_GROUPS]
 
 
 def timing_section_table(rep):
@@ -341,15 +353,16 @@ def timing_figure(rep, budget_us=80.0, period_us=100.0):
     buckets = [b['name'] for b in rep['buckets']]
     W, left, right, bar, gap = 960, 130, 70, 24, 10
     # Legend: one cluster per group (name, then a swatch per section), wrapped onto rows.
+    groups = timing_groups(rows, buckets[0])
     legend, lx, ly = [], 0, 16
-    for gname, hue, secs in TIMING_GROUPS:
+    for gname, hue, secs in groups:
         width = 8 + 7 * len(gname) + sum(22 + 6.3 * len(t) for _, t in secs)
         if lx and lx + width > W - 10:
             lx, ly = 0, ly + 20
         legend.append(f'<text x="{lx}" y="{ly}" fill="{INK}" font-weight="600">{e(gname)}</text>')
         sx = lx + 8 + 7 * len(gname)
         for k, (_, text) in enumerate(secs):
-            legend.append(f'<rect x="{sx:.0f}" y="{ly - 10}" width="12" height="12" rx="2" fill="{shade(hue, k)}"/>'
+            legend.append(f'<rect x="{sx:.0f}" y="{ly - 10}" width="12" height="12" rx="2" fill="{shade(hue, k, len(secs))}"/>'
                           f'<text x="{sx + 16:.0f}" y="{ly}" fill="{INK2}">{e(text)}</text>')
             sx += 22 + 6.3 * len(text)
         lx += width + 18
@@ -373,13 +386,13 @@ def timing_figure(rep, budget_us=80.0, period_us=100.0):
         y = top + i * (bar + gap)
         svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
         acc = 0.0
-        for gname, hue, secs in TIMING_GROUPS:
+        for gname, hue, secs in groups:
             for k, (key, text) in enumerate(secs):
                 r = rows[f'{b}/{key}']
                 mean = r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz
                 worst = r['max_cycles'] * 1e6 / hz
                 x0, x1 = x(acc), x(acc + mean)
-                svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k)}" '
+                svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k, len(secs))}" '
                            f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(gname)} · {e(text)} ({e(key)}): '
                            f'mean {mean:.2f} µs, worst {worst:.2f} µs</title></rect>')
                 if x1 - x0 >= 30:  # direct label on the segments wide enough to hold one
@@ -652,7 +665,9 @@ def main(out):
                 p.append('<figure>' + timing_figure(rep_t) + '<figcaption>Each bar: the mean cost of one tick in that '
                          'bucket, one segment per code section, in µs where it fits. One hue per group (blue boost, '
                          'orange inverter logic, green calculateDuty, yellow observer, pink scope), its sections in '
-                         'shades of it, base first; hover a segment for its mean and worst case. Black mark: the '
+                         'shades of it in code order, darkest first; calculateDuty is split by the library probes '
+                         '(PLL, SOGIs, Park, sync window, mode + feedforward, current PIs, output). Hover a segment for its '
+                         'mean and worst case. Black mark: the '
                          'worst controlStep plus the worst scope sampling of the bucket. Dashed: the 80 µs budget '
                          '(L0-TIM-02/03) and the 100 µs period. Interrupts locked, no sensors or PWM: the running task '
                          'costs more (L0-TIM-03). The table above is the same data.</figcaption></figure>')

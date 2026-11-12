@@ -44,7 +44,7 @@ flowchart LR
 | File | Role |
 |---|---|
 | [`src/timing/timing_probe.h`](../../../src/timing/timing_probe.h) | `TIMING_PROBE(i)` in `controlStep`; empty unless `TIMING_HARNESS` |
-| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 1) |
+| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 2) |
 | [`src/timing/timing_harness.cpp`](../../../src/timing/timing_harness.cpp) | Scenario and measurement on the target |
 | [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
 | [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
@@ -68,6 +68,15 @@ The harness runs `controlStep()` on the production `ControlState` (after `contro
 | `outputs` | outputs, open loop, VAC follower, protection, relay timing |
 | `controlStep` | the whole call |
 | `scope` | the critical task's scope snapshot and `acquire`, run on every tick (the 10 kHz case) |
+| `duty_pll` | inside `calculateDuty` (library probes, `inverterTiming.h`): PLL PI or connection freeze, angle update and wrap |
+| `duty_sogi` | voltage and current SOGIs |
+| `duty_park` | Park transforms of V and I, finite checks |
+| `duty_syncwin` | one-period sync averaging window |
+| `duty_mode_ff` | mode state machine, connection bookkeeping, feedforward |
+| `duty_current_pi` | current d/q PIs (or their reset) |
+| `duty_output` | output rotation, external feedforward, duty, power, finite checks, PWM_WAIT |
+
+The seven `duty_*` sections add up to `inv_duty`, apart from a few probe cycles. They come from probes in the `single_phase_inverter` fork (`luizvilla/single_phase_inverter` `f98cfac`, `src/inverterTiming.h`), which compile only under `TIMING_HARNESS`; the harness records them only when `calculateDuty` ran to its end (`inv_timing_seq` advanced).
 
 Criteria: `.a` the scenario reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault (otherwise the rows don't mean what their names say); `.b-<bucket>` no section exceeds the baseline by more than 10 % + 50 cycles; `.c-<bucket>` INFO, controlStep + scope against the 80 µs budget.
 

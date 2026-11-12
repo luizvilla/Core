@@ -1470,7 +1470,7 @@
    "conditions": "Interrupts locked, ticks back to back, synthetic 230 V / 50 Hz grid, 400 V bus, boost BUSREG in the grid stages; 225 000 ticks",
    "source": "ADR 0005; `tests/l0/timing/baseline.json`",
    "status": "implemented",
-   "status_note": "Implemented 2026-11-12 (baseline 2026-11-12)",
+   "status_note": "Implemented 2026-11-12; calculateDuty split by library probes (f98cfac), baseline 2026-11-12",
    "harness": "tests/l0/timing/run.sh --run"
   },
   {

@@ -27,6 +27,7 @@
 
 #include "timing/timing_probe.h"
 #include "timing/timing_report.h"
+#include "inverterTiming.h"
 
 namespace timing {
 volatile uint32_t probe_cycles[probe_count];
@@ -53,11 +54,21 @@ enum Section : uint8_t {
     SEC_OUTPUTS,          ///< Outputs, open loop, VAC follower, protection, relay timing.
     SEC_CONTROL_STEP,     ///< controlStep() as called by the critical task.
     SEC_SCOPE,            ///< Scope snapshot and acquire (on every tick, the 10 kHz worst case).
+    /* Inside calculateDuty (library probes, inverterTiming.h); together they make up SEC_INV_DUTY. */
+    SEC_DUTY_PLL,         ///< PLL PI (or connection freeze), angle update and wrap.
+    SEC_DUTY_SOGI,        ///< Voltage and current SOGIs.
+    SEC_DUTY_PARK,        ///< Park transforms of V and I, finite checks.
+    SEC_DUTY_SYNCWIN,     ///< One-period sync averaging window.
+    SEC_DUTY_MODE_FF,     ///< Mode state machine, connection bookkeeping, feedforward.
+    SEC_DUTY_CURRENT_PI,  ///< Current d/q PIs (or their reset).
+    SEC_DUTY_OUTPUT,      ///< Output rotation, external feedforward, duty, power, checks, PWM_WAIT.
     SEC_COUNT
 };
 const char *const section_names[SEC_COUNT] = {
-    "boost_cold", "boost_hot", "inv_stage", "inv_duty", "observer", "outputs", "controlStep", "scope"
+    "boost_cold", "boost_hot", "inv_stage", "inv_duty", "observer", "outputs", "controlStep", "scope",
+    "duty_pll", "duty_sogi", "duty_park", "duty_syncwin", "duty_mode_ff", "duty_current_pi", "duty_output"
 };
+static_assert(SEC_DUTY_OUTPUT - SEC_DUTY_PLL + 2U == INV_TIMING_PROBE_COUNT, "one section per library probe interval");
 
 /** @brief Scenario phases; repeated labels share a bucket. */
 struct Phase {
@@ -203,6 +214,7 @@ void timingHarnessRun(ControlState &state, TimingScopeHook scope_sample)
             cmd.inverter_stage = phase.stage;
             cmd.inject_current = app::inject_current_max;
 
+            const uint32_t seq_before = inv_timing_seq;
             const unsigned int key = irq_lock();
             const uint32_t c0 = cycles();
             const ControlOutputs out = controlStep(state, meas, cmd);
@@ -214,6 +226,13 @@ void timingHarnessRun(ControlState &state, TimingScopeHook scope_sample)
             for (uint8_t s = 0U; s < timing::probe_count - 1U; ++s)
             {
                 record(bucket, s, timing::probe_cycles[s + 1U] - timing::probe_cycles[s], tick);
+            }
+            if (inv_timing_seq != seq_before)  // calculateDuty ran to its end: every library probe is fresh
+            {
+                for (uint8_t s = 0U; s < INV_TIMING_PROBE_COUNT - 1U; ++s)
+                {
+                    record(bucket, static_cast<uint8_t>(SEC_DUTY_PLL + s), inv_timing_cycles[s + 1U] - inv_timing_cycles[s], tick);
+                }
             }
             record(bucket, SEC_CONTROL_STEP, c1 - c0, tick);
             record(bucket, SEC_SCOPE, c2 - c1, tick);

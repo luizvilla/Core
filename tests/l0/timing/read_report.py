@@ -7,7 +7,7 @@
 ##
 ## Finds the symbol in the ELF with arm-none-eabi-nm, waits until the harness reports DONE (or ERROR), dumps the
 ## structure with OpenOCD and writes it as JSON. Standard library only. Mirrors src/timing/timing_report.h
-## (layout version 1).
+## (layout version 2).
 ##
 ## @par Usage
 ##   python3 tests/l0/timing/read_report.py --elf .pio/build/TIMING/firmware.elf --out report.json [--timeout 120]
@@ -20,10 +20,10 @@ import sys
 import tempfile
 import time
 
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2
 MAGIC = 0x314D4954
 MAX_BUCKETS = 16
-MAX_ROWS = 128
+MAX_ROWS = 192
 HEADER = struct.Struct('<8I')
 BUCKET = struct.Struct('<16sIIBB2x')
 ROW = struct.Struct('<32sIIIIQ')
