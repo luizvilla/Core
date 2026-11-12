@@ -584,3 +584,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | None in the control. The library functions called every period run from CCM SRAM when the Core provides `owntech_fast_code.h`; the macros are empty otherwise (older Core, host). ITCM 16.5 KB of 31 KB |
 | Evidence | L0-TIM-01/02/03 pass; 5b alone −6.62 µs, 5a + 5b **−14.64 µs** mean interrupt time per period against `5fcf14b`; worst task tick 32.7–40.1 µs, 0 lost periods; local and pinned libraries agree to 0.00 µs. Host L0: 125 pass, 7 known, 0 new. USB build has no timing symbol. Baseline rewritten from this code |
 | Hardware check | Pending: bench with the USB firmware (boot through MCUboot, steps 1 and 2b); the board holds the TIMING firmware |
+
+## 2026-11-12 — L0-TIM-03 times the ADC data path; proposal 6
+
+| Field | Value |
+|---|---|
+| Commit | `54227d3` (probes, report layout 6), `4f5ce32` (baseline with the probes); proposal in the `docs(timing): …` commit that adds this entry |
+| Files | `zephyr/modules/owntech_spin_api/zephyr/public_api/owntech_timing_probe.h` (new), `owntech_spin_api/zephyr/src/data/data_dispatch.cpp`, `owntech_spin_api/zephyr/src/DataAPI.cpp`, `owntech_shield_api/zephyr/src/Sensors.cpp`; `src/timing/timing_harness.cpp`, `src/timing/timing_report.h`; `tests/l0/timing/{evaluate,read_report}.py`, `tests/l0/timing/README.md`, `tests/l0/timing/baseline.json`, `tests/common/review_report.py` |
+| Reason | Luiz Villa: after change 5 the ADC path is what is left (dispatch 8.7 µs + reads 7.3 µs); find where its time goes. [timing-optimization.md](timing-optimization.md) section 6 |
+| Behaviour change | None in the USB firmware (the probe macros are empty; no timing symbol). `getChannelLatest()` keeps its result in a local before returning (same code otherwise). TIMING build: +2.5 µs in the sensor reads, +0.16 µs in the dispatch, baseline rewritten with them |
+| Evidence | L0-TIM-01/02/03 pass against the new baseline; two runs agree to 0.00 µs. ADC1 15 samples per period (12–18), ADC2 10 (8–12); dispatch about 39 cycles per sample + 150 per ADC; reads 116 + 83 + 64 cycles per read (lookup, buffer, conversion). Host L0: 125 pass, 7 known, 0 new |
+| Lead, not acted on | Proposal 6 A: latest sample read from the DMA buffer, no per-sample dispatch, about −14 µs per period (OwnTech Spin API, with Jean) |
+| Hardware check | Not needed (TIMING only); the board holds the TIMING firmware |

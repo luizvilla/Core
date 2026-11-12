@@ -37,8 +37,9 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
 | All | 1–4 together: final verdict | merge `5fcf14b` | **−10.15 µs** mean over the stages (−6.3 to −13.2 µs per stage), every test passes |
 | 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | 5a **−8.02 µs** (`2b3a893`), 5b **−6.62 µs** more (`6de51b9`); together **−14.64 µs** mean against `5fcf14b`, every test passes (branch `perf/timing-5-ccm`). [Section 5](#5--hot-path-in-ccm-sram) |
+| 6 | ADC data path: read the latest sample of each channel from the DMA buffer, skip the per-sample dispatch | OwnTech Spin API (`DataAPI`, `data_dispatch`), task API | Proposal, path measured (`4f5ce32`): dispatch 8.7 µs + reads 7.3 µs per period. [Section 6](#6--adc-data-path-proposal) |
 
-Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
+Then: the ADC path (data dispatch 8.7 µs + sensor reads 7.3 µs per period after change 5), proposal 6, with Jean.
 
 ### Recap (L0-TIM-03)
 
@@ -319,4 +320,51 @@ Parts in µs (mean, L0-TIM-03): controlStep, `calculateDuty` and its sections, g
 | 5a Core2 and OwnTech modules in CCM | −8.02 µs | every part moved (writes −2.5 µs with the bridge on, controlStep −3 to −4 µs) |
 | 5b Library forks in CCM | −6.62 µs | `calculateDuty` −4.4 to −4.8 µs, observer −0.6 µs |
 | **5** | **−14.64 µs** | |
+
+### 6 · ADC data path (proposal)
+
+After change 5, the ADC path is the largest part of the interrupt left: **8.7 µs of data dispatch** (task API, before the task) **and 7.3 µs of sensor reads** (in the tick), that is 16 µs, 37 % of the 42.6 µs.
+
+**What runs.** Configuration read on the Spin over SWD (`4f5ce32`, TIMING firmware):
+
+| Item | Value |
+|---|---|
+| ADC triggers | HRTIM timer D compare 3 → ADC1, timer E compare 3 → ADC2: the two 50 kHz bridge legs, one trigger per 20 µs |
+| Sequences | ADC1: 3 channels (VLow, VAC, VDCBus); ADC2: 2 channels (ILow1, IAC) |
+| Samples per 100 µs | 15 (ADC1) + 10 (ADC2); 12–18 and 8–12 from one period to the next, with the task start against the triggers |
+| DMA | Circular, task mode, buffers of 21 and 22 samples (sized for 20 repetitions of the 200 kHz master) |
+
+Each period, the dispatch walks the DMA buffer and copies every new sample into per-channel double buffers (32 deep, on the heap, reached through four levels of pointers). Each of the five `getLatestValue()` calls then goes through four layers: `SensorsAPI` → `DataAPI` → `data_dispatch` → `data_conversion`. The calls do bounds checks and a rank lookup, swap the double buffer, save a peek copy, and convert `raw × gain + offset`.
+
+**Measured** (L0-TIM-03, new `3:` rows, campaign `2026-11-12_4f5ce32_171630_nwhM3n`; the same in every stage):
+
+| Part | Mean per period | Detail |
+|---|---|---|
+| Dispatch ADC1 | 4.33 µs | 15 samples; 619–850 cycles for 12–18 samples |
+| Dispatch ADC2 | 3.19 µs | 10 samples; 463–621 cycles for 8–12 samples |
+| Dispatch: empty ADCs 3–5 and loop | 1.33 µs | 225 cycles |
+| Reads: lookup and DataAPI checks | 3.42 µs | 116 cycles per read |
+| Reads: buffer layer | 2.44 µs | 83 cycles per read |
+| Reads: conversion | 1.89 µs | 64 cycles per read |
+| Around the reads | 2.09 µs | main.cpp's hold-last-value logic and the probes' own sums |
+
+- **Probe cost:** the probes cost 0.16 µs in the dispatch and 2.5 µs in the reads (about 86 cycles per read, spread over the layers), TIMING build only. Without them: dispatch 8.7 µs, reads 7.3 µs.
+- **Dispatch cost:** about **39 cycles per sample plus 150 cycles per ADC**, from the spread of the sample counts.
+- **Cycles per instruction:** the copy loop is about 25 instructions per sample, and the lookup layer about 35 instructions per read, so both run at about 1.5–3 cycles per instruction even from CCM. These are chains of dependent loads through heap pointers, and literal-pool loads share the single-ported CCM with instruction fetch (not verified).
+
+**The waste.** The firmware calls only `getLatestValue()` (five calls, [main.cpp](../../src/main.cpp) `criticalTickBody`): nothing reads `getValues()`, the 32-deep buffers or the peek copy. So 20 of the 25 samples copied each period are never used. The 5 that are used could be read where the DMA already put them.
+
+**Options** (estimates, to measure):
+
+| Option | Idea | Expected gain | Cost and risk |
+|---|---|---|---|
+| **A. Latest sample from the DMA buffer** | A "latest only" data mode: the task API skips the dispatch; `getLatestValue()` takes the DMA write position (`CNDTR`), finds the newest sample of the channel's rank in the circular buffer (its size is a multiple of the sequence length), and converts it with the gain and offset resolved once at `enableSensor` | ~8.5 µs (dispatch) + ~5.5 µs (reads ≈ 30–50 cycles each): **~14 µs** | OwnTech Spin API and task API (Jean). Same samples as today; "new sample" (`DATA_IS_OK` / `DATA_IS_OLD`) from the DMA position moving between two reads |
+| B. Injected channels | The HRTIM trigger fills the 4 injected result registers per ADC, no DMA; a read is one register load | ~15 µs | Bigger change in the OwnTech ADC driver; injected sequences are limited to 4 channels per ADC (enough here: 3 and 2) |
+| C. ADC decimation 5 (`setAdcDecim`) | One sequence per period instead of five | ~5–6 µs (dispatch only) | The sample gets up to 100 µs old instead of 20 µs: it changes the control. Rejected |
+| D. Lighter dispatch | Flatten the pointer chains, skip ADCs without channels, keep only the newest sample per channel | ~5 µs | Keeps the API; smaller gain than A |
+
+**Recommendation: A.**
+- **Same data:** it keeps the same samples, conversion parameters and API calls in `main.cpp`. A sample being written by the DMA is a single 16-bit store, so a read never sees half a value.
+- **Same timing:** a sequence half converted at the task start gives each channel its newest sample, exactly as today's dispatch does.
+- **Plan:** branch `perf/timing-6-adc`, measured with the new rows (`3:dispatch` → about 0; `3:rd_*` per layer), then reviewed with Jean before it goes into the Spin API.
 
