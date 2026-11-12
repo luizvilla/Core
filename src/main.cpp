@@ -162,13 +162,19 @@ static bool relay_test = false;
 static constexpr float32_t relay_test_vac_max = 20.0F;  /* V RMS: above this, a grid is present */
 static bool relay_closed = false;
 static uint16_t relay_hold_ticks = 0U;
-/* Critical task load: longest run since the last telemetry line, in µs (period 100 µs). */
-static volatile uint32_t critical_max_us = 0U;
+/* Load bookkeeping in the critical task: the Cortex-M4 cycle counter (DWT->CYCCNT, one load, enabled in
+ * setup_routine) and raw cycle counts; the telemetry thread converts them to µs (docs/testing/timing-optimization.md,
+ * change 1: k_cycle_get_32() and k_cyc_to_us_floor32() cost about 4 µs per tick). */
+static constexpr uint32_t cycles_per_us = CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 1000000U;
+static constexpr uint32_t period_cycles = app::control_task_period * cycles_per_us;
+static inline uint32_t cpuCycles() { return *reinterpret_cast<volatile const uint32_t *>(0xE0001004UL); }
+/* Critical task load: longest run since the last telemetry line, in cycles (period 100 µs). */
+static volatile uint32_t critical_max_cycles = 0U;
 /* Critical task calls, to check the real call rate against the 10 kHz the controllers assume. */
 static volatile uint32_t critical_calls = 0U;
 /* Longest interval between two critical task starts (µs, expected 100), and control periods without
  * a new VAC sample (the last value is held), since the last telemetry line. */
-static volatile uint32_t critical_gap_max_us = 0U;
+static volatile uint32_t critical_gap_max_cycles = 0U;
 /* Critical ticks lost since boot: a start gap of 1.5 periods or more counts the periods it skipped. */
 static volatile uint32_t critical_lost_ticks = 0U;
 static uint32_t critical_prev_start = 0U;
@@ -185,12 +191,12 @@ static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the a
 static constexpr uint16_t trip_test_delay_ticks = 1000U;  /* 100 ms: fills the scope's pre-trigger half at 2 or 10 kHz */
 static bool scope_trigger_on_trip = false;  /* the capture waits for the bench trip (armed by 'z') */
 static constexpr float32_t trip_test_current = 4.0F;  /* A, above the 3 A bench trip */
-/* Same, per part of the task: sensors, control step, PWM and relay application, scope. */
-static volatile uint32_t part_max_us[4] = {0U, 0U, 0U, 0U};
+/* Same, per part of the task: sensors, control step, PWM and relay application, scope (cycles). */
+static volatile uint32_t part_max_cycles[4] = {0U, 0U, 0U, 0U};
 static inline void notePart(int part, uint32_t from, uint32_t to)
 {
-    const uint32_t us = k_cyc_to_us_floor32(to - from);
-    if (us > part_max_us[part]) part_max_us[part] = us;
+    const uint32_t c = to - from;
+    if (c > part_max_cycles[part]) part_max_cycles[part] = c;
 }
 
 /* The burst generator is running on leg 1. */
@@ -264,6 +270,9 @@ void dump_scope_datas(ScopeMimicry &scope)
  */
 void setup_routine()
 {
+    /* Cycle counter for the critical task's load bookkeeping (DEMCR.TRCENA, DWT_CTRL.CYCCNTENA). */
+    *reinterpret_cast<volatile uint32_t *>(0xE000EDFCUL) |= (1UL << 24);
+    *reinterpret_cast<volatile uint32_t *>(0xE0001000UL) |= 1UL;
     /* Only boost leg 1 is enabled; boost leg 2 is disabled. */
     shield.power.initBoost(LEG1_LOW);
     // shield.power.initBoost(LEG2_LOW);
@@ -631,8 +640,8 @@ void loop_application_task()
         if (++telemetry_tick < 5U) { task.suspendBackgroundMs(100); return; }
         telemetry_tick = 0U;
         const dqo_t idq_s = control.inverter.getIdq();
-        const uint32_t load_s = critical_max_us;
-        critical_max_us = 0U;
+        const uint32_t load_s = critical_max_cycles / cycles_per_us;
+        critical_max_cycles = 0U;
         printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
@@ -660,25 +669,25 @@ void loop_application_task()
     /* Inverter: stage, library mode, relay command/feedback, Id, Iq (A), P (W), Q (var), Id ref. */
     const dqo_t idq = control.inverter.getIdq();
     const dqo_t pq = control.inverter.getPower();
-    const uint32_t load_us = critical_max_us;
-    critical_max_us = 0U;
+    const uint32_t load_us = critical_max_cycles / cycles_per_us;
+    critical_max_cycles = 0U;
     const uint32_t calls = critical_calls;
     const int64_t now_ms = k_uptime_get();
     const uint32_t rate_hz = now_ms > rate_prev_ms ?
         static_cast<uint32_t>((static_cast<int64_t>(calls - rate_prev_calls) * 1000) / (now_ms - rate_prev_ms)) : 0U;
     rate_prev_calls = calls;
     rate_prev_ms = now_ms;
-    const uint32_t gap_max = critical_gap_max_us;
-    critical_gap_max_us = 0U;
+    const uint32_t gap_max = critical_gap_max_cycles / cycles_per_us;
+    critical_gap_max_cycles = 0U;
     const uint32_t vac_stale = vac_stale_count;
     vac_stale_count = 0U;
     printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u, rate %u Hz, gap max %u us, vac stale %u\n",
            static_cast<unsigned int>(load_us),
-           static_cast<unsigned int>(part_max_us[0]), static_cast<unsigned int>(part_max_us[1]),
-           static_cast<unsigned int>(part_max_us[2]), static_cast<unsigned int>(part_max_us[3]),
+           static_cast<unsigned int>(part_max_cycles[0] / cycles_per_us), static_cast<unsigned int>(part_max_cycles[1] / cycles_per_us),
+           static_cast<unsigned int>(part_max_cycles[2] / cycles_per_us), static_cast<unsigned int>(part_max_cycles[3] / cycles_per_us),
            static_cast<unsigned int>(rate_hz), static_cast<unsigned int>(gap_max),
            static_cast<unsigned int>(vac_stale));
-    for (int k = 0; k < 4; ++k) part_max_us[k] = 0U;
+    for (int k = 0; k < 4; ++k) part_max_cycles[k] = 0U;
     /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
     const dqo_t vdq_avg = control.inverter.getVdqAverage();
     printk("sync: Vd_avg %.1f (293-358) Vq_avg %.2f (|.|<3.25) w_avg %.2f (298.5-329.9) window %u grid_ok %u trip %u fault %u offset %.1f %%\n",
@@ -731,7 +740,7 @@ static void timingScopeSample(ControlState &state, const ControlOutputs &out, co
 /* L0-TIM-02: the critical tick body with synthetic inputs, the relay model's feedback, and a stage start. */
 static ControlOutputs timingTick(const Measurements &meas, const OperatorCommands &cmd)
 {
-    return criticalTickBody(k_cycle_get_32(), &meas, &cmd);
+    return criticalTickBody(cpuCycles(), &meas, &cmd);
 }
 static ControlOutputs timingTaskTick(const Measurements &meas, const OperatorCommands &cmd)
 {
@@ -761,13 +770,13 @@ void loop_critical_task()
  */
 static ControlOutputs criticalTaskTick(const Measurements *meas_in, const OperatorCommands *cmd_in)
 {
-    const uint32_t critical_start = k_cycle_get_32();
+    const uint32_t critical_start = cpuCycles();
     if (critical_calls != 0U)
     {
-        const uint32_t gap_us = k_cyc_to_us_floor32(critical_start - critical_prev_start);
-        if (gap_us > critical_gap_max_us) critical_gap_max_us = gap_us;
-        if (gap_us >= (3U * app::control_task_period) / 2U)
-            critical_lost_ticks += (gap_us + app::control_task_period / 2U) / app::control_task_period - 1U;
+        const uint32_t gap = critical_start - critical_prev_start;
+        if (gap > critical_gap_max_cycles) critical_gap_max_cycles = gap;
+        if (gap >= period_cycles + period_cycles / 2U)
+            critical_lost_ticks += (gap + period_cycles / 2U) / period_cycles - 1U;
     }
     critical_prev_start = critical_start;
     ++critical_calls;
@@ -841,7 +850,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
     }
 #endif
     TIMING_TICK_PROBE(1);
-    const uint32_t t_sensed = k_cycle_get_32();
+    const uint32_t t_sensed = cpuCycles();
     notePart(0, critical_start, t_sensed);
     /*----- Control logic (hardware-free, see app/control_step.h) ----- */
     Measurements meas{};
@@ -864,7 +873,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
 
     const ControlOutputs out = controlStep(control, meas, cmd);
     TIMING_TICK_PROBE(2);
-    const uint32_t t_controlled = k_cycle_get_32();
+    const uint32_t t_controlled = cpuCycles();
     notePart(1, t_sensed, t_controlled);
     boost_duty = out.boost_duty;
     grid_angle = out.grid_angle;
@@ -980,7 +989,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
 
     TIMING_APPLY_PROBE(7);
     TIMING_TICK_PROBE(3);
-    const uint32_t t_applied = k_cycle_get_32();
+    const uint32_t t_applied = cpuCycles();
     notePart(2, t_controlled, t_applied);
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
     const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)) ?
@@ -992,10 +1001,10 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
         scope_sample_tick = 0U;
         scopeSample(control, out);
     }
-    const uint32_t t_end = k_cycle_get_32();
+    const uint32_t t_end = cpuCycles();
     notePart(3, t_applied, t_end);
-    const uint32_t critical_us = k_cyc_to_us_floor32(t_end - critical_start);
-    if (critical_us > critical_max_us) critical_max_us = critical_us;
+    const uint32_t critical_cycles = t_end - critical_start;
+    if (critical_cycles > critical_max_cycles) critical_max_cycles = critical_cycles;
     TIMING_TICK_PROBE(4);
     return out;
 }
