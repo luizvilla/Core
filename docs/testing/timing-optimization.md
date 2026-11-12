@@ -34,7 +34,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 1 | `load` bookkeeping: cycle counter read directly, raw cycles in the task, µs conversion in the telemetry thread | `src/main.cpp` | Measured alone: **−6.97 µs** (branch `perf/timing-1-bookkeeping`, `527e36d`) |
 | 2 | Scope: 10 kHz around the relay only on request (2 kHz by default) | `src/main.cpp` | Measured alone: **−3.7 µs in g and G, −2.9 µs in n**, 0 elsewhere (branch `perf/timing-2-scope`, `c96d94f`) |
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` | Measured alone: **−2.1 to −2.3 µs with the boost running**, 0 in OFF_IDLE (branch `perf/timing-3-writes`, `fb07a70`); bridge duty API: proposal 3b below |
-| 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork | Planned |
+| 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
 | All | 1–4 together: final verdict | | Planned |
 
 Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
@@ -105,3 +105,16 @@ Change: boost leg 1 `start`/`stop` and `setBurstMode` are sent when the command 
 On the bench the boost is idle, so this change shows only when the boost runs. The burst check saves 0.13 µs (`setBurstMode` was cheap).
 
 **Proposal 3b (not done, shield API):** `setInverterDutyCycle()` re-validates the whole pair on every call (periods, prescalers, frequencies, modulation, mode, phase shifts, switch conventions) and recomputes the duty limits before two register writes. Caching the validated pair and its raw limits when the configuration changes (`initInverter`, duty min/max, frequency, convention) would leave clamp, convert and write: most of 3.4 µs per tick in every bridge stage. It changes the OwnTech shield API (cache invalidation), so it needs Jean's and Clément's agreement.
+
+### 4 · Modulos (library `ac3dbc6`, Core2 `c664d8d`, campaign `2026-11-12_c664d8d_152708_cxhv2o`, against `23afd86`)
+
+Audit of the critical path: the inverter library wrapped θ with `fmodf` every tick and indexed the sync window with two integer `%` per tick; the relay-timing `fmodf` in `control_step.cpp` runs only while waiting for the zero crossing; the scope and the data dispatch use integer `%` per sample. Change in the library fork: θ wraps with one conditional step (`fmodf` kept as a fallback if θ is still out of range, never in normal operation); the window position and the leaving sample's index wrap with a comparison. Host L0-GFL unchanged (52 pass).
+
+| Stage | Interrupt / period (mean) | Task tick worst | Lost | PLL section (mean) | Sync window (mean) |
+|---|---|---|---|---|---|
+| OFF_IDLE | 56.7 → 56.3 (−0.4) | 52.1 → 51.2 | 0 → 0 | 2.12 → 1.71 | 1.54 → 1.52 |
+| CONNECT_g | 71.3 → 70.8 (−0.5) | 66.6 → 66.1 | 0 → 0 | 2.11 → 1.70 | 1.54 → 1.52 |
+| FOLLOW_CONN_G | 72.2 → 71.7 (−0.5) | 69.0 → 68.4 | 0 → 0 | 2.11 → 1.70 | 1.54 → 1.52 |
+| other stages | −0.4 to −0.5 | −0.4 to −1.6 | 0 → 0 | −0.41 | −0.02 |
+
+The float modulo is worth replacing (0.41 µs); the integer ones are not worth much (0.02 µs: the M4 divides in hardware).
