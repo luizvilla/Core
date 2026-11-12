@@ -36,6 +36,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` | Measured alone: **−2.1 to −2.3 µs with the boost running**, 0 in OFF_IDLE (branch `perf/timing-3-writes`, `fb07a70`); bridge duty API: proposal 3b below |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
 | All | 1–4 together: final verdict | merge `5fcf14b` | **−10.15 µs** mean over the stages (−6.3 to −13.2 µs per stage), every test passes |
+| 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | Proposal, not measured: [section 5](#5--hot-path-in-ccm-sram-proposal) |
 
 Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
 
@@ -143,4 +144,72 @@ The float modulo is worth replacing (0.41 µs); the integer ones are not worth m
 | 4 Modulos | −0.44 µs | every stage |
 | **All** | **−10.15 µs** | |
 
-**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément.
+**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément; proposal 5 (hot path in CCM SRAM, every part of the tick), no API change.
+
+### 5 · Hot path in CCM SRAM (proposal)
+
+Investigation only, from the USB ELF and link map at `5fcf14b` and the Zephyr 4.0 tree in PlatformIO; nothing built or measured.
+
+**Why.** The flash wait states 8 → 4 shortened every part of the tick by about 38 %: the tick is still bound by flash fetches. The ART cache holds 1 KB of instructions; the per-tick path is about 18 KB of mostly straight-line code, so it misses on every tick. A linear extrapolation of the 8 WS and 4 WS figures to 0 WS gives `controlStep` about 11 µs instead of 32 µs and `calculateDuty` about 6 µs instead of 16 µs. This is a ceiling, not an estimate: peripheral register accesses and constants left in flash do not speed up.
+
+**Where.** CCM SRAM (32 KB) is the only memory that fetches code on the I-bus with 0 wait states.
+
+| Memory | Bus | Code execution |
+|---|---|---|
+| Flash, 4 WS + ART (1 KB I-cache) | I-bus | today |
+| SRAM1/SRAM2 at `0x20000000` | S-bus, shared with data | 0 WS, fetches compete with data accesses |
+| **CCM SRAM at `0x10000000`** | **I-bus / D-bus** | **0 WS, data stays on the S-bus** |
+
+- `sram0` in [spin.dts](../../zephyr/boards/owntech/spin/spin.dts) is `0x20000000`, 128 KB − 1: it already contains the CCM through its S-bus alias (`0x20018000`–`0x2001FFFF`). Static RAM ends at `0x20009B00` (about 39 KB), so nothing lives in the CCM today and taking 32 KB away costs nothing.
+- The retained boot-mode byte that MCUboot reads is at `0x2001FFFF`, the last byte of the CCM. It must not move: the code area stops below it (`0x10000000`, 31 KB).
+
+**How RAM functions are made in this Zephyr.**
+
+| Mechanism | What it does | Verdict |
+|---|---|---|
+| `__ramfunc` | Section `.ramfunc`, copied at boot (`kernel/xip.c`), MPU region opened for it | Lands in `sram0` (S-bus): the slow RAM path |
+| `zephyr_code_relocate(FILES … LOCATION <region>_TEXT)` + `CONFIG_CODE_DATA_RELOCATION` | Moves whole source files | Sees only CMake sources: the `lib_deps` are built by PlatformIO into separate `.a`; moves init code too |
+| **CCM declared as `zephyr,itcm`** | The Cortex-M linker script places `.itcm` / `.itcm.*` in region `ITCM`, loaded from flash; `z_data_copy` copies it at boot; tag `__itcm_section` (`zephyr/linker/section_tags.h`) | **Chosen.** Zephyr's Apollo3 boards declare their `0x10000000` TCM the same way |
+
+```dts
+/ {
+	chosen { zephyr,itcm = &ccm_code; };
+	ccm_code: memory@10000000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x10000000 0x7C00>;      /* below the retained byte */
+		zephyr,memory-region = "ITCM";
+	};
+};
+&sram0 { reg = <0x20000000 0x18000>; }; /* SRAM1 + SRAM2, 96 KB */
+```
+
+Functions are tagged one by one: `__itcm_section` in Core2 and the OwnTech modules; in the library forks a macro (`OT_FAST_CODE`) that is empty on the host and `__attribute__((section(".itcm.<name>")))` on target. Tagging at the source is required: Zephyr's `.text` output section comes first in the linker script and would claim the library code otherwise.
+
+**What to move** (static call graph from the HRTIM interrupt, init and background paths removed):
+
+| Group | Functions | Code | Time per tick (measured) |
+|---|---|---|---|
+| Inverter library | `calculateDuty`, `updateSyncWindow`, `updateMode`, `getSync`, `synchronizationAligned` | ~3.7 KB | ~16 µs |
+| Application | `controlStep`, `GridObserver::update/updateEstimates`, `BoostConverter::hotLoop/Mppt/runLeg1/…` | ~4 KB | rest of controlStep |
+| Critical tick | `loop_critical_task` (tick body and scope sample inlined), `ScopeMimicry::acquire` | ~1.8 KB | bookkeeping + scope |
+| ADC path | `data_dispatch_do_dispatch`, `data_dispatch_get_acquired_values`, `DataAPI::getChannelLatest`, `data_conversion_convert_raw_value`, `SensorsAPI::getLatestValue` | ~1 KB | 9.4 + 8.1 µs |
+| PWM writes | `PowerAPI::setDutyCycle/setInverterDutyCycle/start`, `hrtim_duty_cycle_*`, `hrtim_output_hot_swap` | ~1.3 KB | ~7 µs |
+| control_library | `Pid::calculate`, `Sogi::calc`, `Transform::rotation_*`, `ot_sin/ot_cos` | ~0.7 KB | inside the above |
+| Interrupt entry | `_hrtim_callback`, `user_task_proxy`, `safety_watch` | ~0.6 KB | ~2 µs |
+
+Total 16–18 KB: it fits in 31 KB. Init, telemetry, console, USB, logging, NVS and the kernel stay in flash.
+
+**Points to check.**
+
+| Point | Detail |
+|---|---|
+| Veneers | Flash and CCM are 128 MB apart, beyond the ±16 MB reach of `BL`: the linker adds a long-branch stub per crossing call. Move whole call chains; look for `*_veneer` in the map |
+| newlib / CMSIS | `hypotf`, `sinf`, `arm_sin_f32` and its 2 KB `sinTable_f32` cannot be tagged at the source; small, left in flash for now |
+| MPU | On (`CONFIG_ARM_MPU`). `0x10000000` is outside Zephyr's static FLASH and SRAM regions, so the background map applies: executable for privileged code (no userspace). Confirm on target |
+| Stray writes | Code in RAM can be overwritten; `SYSCFG_SWPR` can write-protect the CCM pages after boot |
+| ADC conversion | `data_conversion_convert_raw_value` can call the double `log` (thermistor type); check that no per-tick channel uses it |
+| Host L0 | The tag macros expand to nothing on the host: no change to the L0 builds |
+
+**Plan.** Branch `perf/timing-5-ccm` from `5fcf14b`, measured with L0-TIM-01/02/03 as changes 1–4:
+- **5a:** device tree, plus tags on Core2 and the OwnTech modules. Proves the method, the boot copy and the MPU behaviour.
+- **5b:** tags in the single_phase_inverter and control_library forks.
