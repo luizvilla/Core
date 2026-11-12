@@ -48,6 +48,7 @@ flowchart LR
 | [`src/timing/timing_harness.cpp`](../../../src/timing/timing_harness.cpp) | Scenario and measurement on the target |
 | [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
 | [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
+| [`compare.py`](compare.py) | Compares two campaigns per stage (before/after a change), Markdown table |
 | [`console_reader.py`](console_reader.py) | L0-TIM-03: reads the USB console as a bench terminal (timestamps), sends `h` and `r` |
 | [`read_report.py`](read_report.py) | Finds `g_timing_report` in the ELF, waits for DONE, dumps it over SWD |
 | [`evaluate.py`](evaluate.py) | Verdicts, the table and `target_manifest.json` (conditions and target snapshot for the review page) |
