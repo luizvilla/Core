@@ -515,3 +515,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | None in the USB firmware (TIMING only). TIM-02 records the controlStep and calculateDuty sections inside the critical tick (`2:` rows) |
 | Evidence | On the bare Spin, the sections inside the critical tick match TIM-01 within about 0.1 µs; the difference between the two tests is the sensor reads (10.5–10.9 µs), the PWM and relay writes (up to 18.1 µs) and the scope at its production rate |
 | Hardware check | Not needed |
+
+## 2026-11-12 — Review figure: bars add up to the measured tick; 8.4 µs outside every section
+
+| Field | Value |
+|---|---|
+| Commit | the `test(timing): …` commit that adds this entry |
+| Files | `tests/common/review_report.py`, `tests/l0/timing/README.md` |
+| Reason | Luiz Villa: in a TIM-02 figure the TIM-02 bars were shorter than TIM-01's. That report (campaign `380fe65`) predates the `2:` section rows; the renderer dropped the missing controlStep block (19.3 µs drawn for a 72.4 µs tick). The newer campaigns also left 8.4 µs undrawn |
+| Behaviour change | Test reporting only. Each bar now sums to its measured total; the unprobed rest is a grey *not in a section* segment; a run without section rows shows controlStep as one block |
+| Evidence | Re-rendered `380fe65`, `20f27df-dirty`, `4bb564b`: drawn = measured for every bar. Unprobed time in TIM-02, every stage: 3.9 µs inside the control part (struct copies, the call, `k_cycle_get_32` and `notePart` around controlStep) and 3.0 µs around the four parts (entry/exit, the end-of-tick `k_cycle_get_32`, `notePart`, `critical_max_us`); 0.6–0.7 µs in TIM-01 (probe overhead) |
+| Lead, not acted on | About 7 µs per tick go to the critical task's own `load` bookkeeping: five `k_cycle_get_32` calls and five `k_cyc_to_us_floor32` conversions (64-bit division). Keeping raw cycle counts in the task and converting in the telemetry thread would save most of it |
+| Hardware check | Not needed |

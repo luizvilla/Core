@@ -415,7 +415,11 @@ def tim02_event_figure(rep, budget_us=80.0, period_us=100.0):
 # sensors, boost, inverter logic, calculateDuty, observer, writes, scope passes the palette validator).
 SENSOR_GROUP = ('sensor reads', '#008300', [('tick_sensors', 'sensor reads')])
 WRITE_GROUP = ('PWM + relay writes', '#6250d6', [('tick_apply', 'PWM + relay writes')])
-TIMING_SHORT.update({'tick_sensors': 'sensors', 'tick_apply': 'writes', 'tick_scope': 'scope'})
+# What the probes do not cover (calls, struct copies, the task's own load bookkeeping): neutral grey, last in the bar,
+# so every bar adds up to its measured total (TIM-01: controlStep + scope; TIM-02: the whole tick).
+REST_GROUP = ('not in a section', '#b9b7b0', [('_rest', 'calls + timing bookkeeping')])
+TIMING_SHORT.update({'tick_sensors': 'sensors', 'tick_apply': 'writes', 'tick_scope': 'scope', '_rest': 'rest',
+                     'tick_control': 'controlStep'})
 
 
 def series_groups(rows, bucket, kind):
@@ -424,12 +428,15 @@ def series_groups(rows, bucket, kind):
     scope, in the order the tick runs them. Shared groups keep their hue and shades in both tests."""
     base = timing_groups(rows, bucket)
     if kind == 'tim01':
-        return base
+        return base + [REST_GROUP]
     out = [SENSOR_GROUP]
-    for gname, hue, secs in base:
-        if gname != 'scope':
-            out.append((gname, hue, [('2:' + k, t) for k, t in secs]))
-    out += [WRITE_GROUP, ('scope', '#e87ba4', [('tick_scope', 'snapshot + acquire')])]
+    if f'{bucket}/2:boost_cold' in rows:
+        for gname, hue, secs in base:
+            if gname != 'scope':
+                out.append((gname, hue, [('2:' + k, t) for k, t in secs]))
+    else:  # a run recorded before TIM-02 kept the sections: controlStep as one block, never dropped
+        out.append(('controlStep', '#1baf7a', [('tick_control', 'controlStep (not split in this run)')]))
+    out += [WRITE_GROUP, ('scope', '#e87ba4', [('tick_scope', 'snapshot + acquire')]), REST_GROUP]
     return out
 
 
@@ -441,17 +448,25 @@ def bar_rows(rep, kind, tag=''):
     u = lambda c: c * 1e6 / hz
     out = []
     for b in [x['name'] for x in rep['buckets']]:
+        mean_of = lambda k: u(rows[f'{b}/{k}']['sum_cycles'] / max(rows[f'{b}/{k}']['calls'], 1))
+        if kind == 'tim01':
+            total = mean_of('controlStep') + mean_of('scope')
+            worst = u(rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles'])
+        else:
+            total = mean_of('tick')
+            worst = u(rows[f'{b}/tick']['max_cycles'])
         segs = []
         for gname, hue, secs in series_groups(rows, b, kind):
             for k, (key, text) in enumerate(secs):
+                if key == '_rest':
+                    rest = total - sum(x[6] for x in segs)
+                    if rest > 0.05:
+                        segs.append((gname, hue, k, len(secs), key, text, rest, rest))
+                    continue
                 r = rows.get(f'{b}/{key}')
                 if r and r['calls']:
                     segs.append((gname, hue, k, len(secs), key, text, u(r['sum_cycles'] / r['calls']), u(r['max_cycles'])))
-        if kind == 'tim01':
-            worst = u(rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles'])
-        else:
-            worst = u(rows[f'{b}/tick']['max_cycles'])
-        out.append({'bucket': b, 'tag': tag, 'segs': segs, 'worst': worst, 'mean': sum(s[6] for s in segs)})
+        out.append({'bucket': b, 'tag': tag, 'segs': segs, 'worst': worst, 'mean': total})
     return out
 
 
@@ -534,7 +549,8 @@ def _bars_svg(bars, x, ys, bar, H, width, xmax, budget_us, period_us, label_mode
             x0, x1 = x(acc), x(acc + mean)
             svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{fill}" stroke="{SURFACE}" '
                        f'stroke-width="2"><title>{e(b["bucket"])} {e(b["tag"])} · {e(gname)} · {e(text)}: mean {mean:.2f} µs, '
-                       f'worst {worst:.2f} µs</title></rect>')
+                       + (f'the measured total minus the probed sections' if key == '_rest' else f'worst {worst:.2f} µs')
+                       + '</title></rect>')
             if label_mode == 'detail':
                 lbl, size = _segment_label(x1 - x0, text, TIMING_SHORT.get(key.split(':')[-1], key), mean)
             else:
