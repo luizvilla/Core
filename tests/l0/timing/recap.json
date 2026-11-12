@@ -1,0 +1,58 @@
+{
+  "_doc": "Lines of the changes table in docs/testing/timing-optimization.md and the L0-TIM campaign that measured each (tests/out/<campaign>). recap.py draws one L0-TIM-03 bar per line. 'step' names the line a change was measured against (its own base); the total gain is always against the first line. Add a line per new change.",
+  "lines": [
+    {
+      "tag": "base",
+      "campaign": "2026-11-12_6d00a25_150416_YU7So7",
+      "text": "base a528915 (4 wait states)"
+    },
+    {
+      "tag": "1 alone",
+      "campaign": "2026-11-12_527e36d_151613_MrgUHA",
+      "text": "1 load bookkeeping, alone",
+      "step": "base"
+    },
+    {
+      "tag": "2 alone",
+      "campaign": "2026-11-12_c96d94f_151814_LKQXmD",
+      "text": "2 scope 2 kHz, alone",
+      "step": "base"
+    },
+    {
+      "tag": "base'",
+      "campaign": "2026-11-12_23afd86_152108_EewYf2",
+      "text": "base' 23afd86 (+ write probes)",
+      "step": "base"
+    },
+    {
+      "tag": "3 alone",
+      "campaign": "2026-11-12_fb07a70_152338_MMmrUV",
+      "text": "3 writes on change, alone",
+      "step": "base'"
+    },
+    {
+      "tag": "4 alone",
+      "campaign": "2026-11-12_c664d8d_152708_cxhv2o",
+      "text": "4 modulos, alone",
+      "step": "base'"
+    },
+    {
+      "tag": "1–4",
+      "campaign": "2026-11-12_5fcf14b_153135_NtCZxW",
+      "text": "1–4 together (5fcf14b)",
+      "step": "base'"
+    },
+    {
+      "tag": "5a",
+      "campaign": "2026-11-12_2b3a893_162602_cYRLm5",
+      "text": "5a Core2 + OwnTech in CCM",
+      "step": "1–4"
+    },
+    {
+      "tag": "5b",
+      "campaign": "2026-11-12_6de51b9_164042_B0kRJZ",
+      "text": "5b libraries in CCM",
+      "step": "5a"
+    }
+  ]
+}

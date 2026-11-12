@@ -40,6 +40,27 @@ Tracks the changes that bring the critical task's time down, measured with the o
 
 Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
 
+### Recap (L0-TIM-03)
+
+One L0-TIM-03 bar per line of the table: the interrupt's mean work per 100 µs period, split as in the review page (task API, sensor reads, controlStep sections, PWM and relay writes, scope, unprobed rest). The black mark is the worst case.
+
+How to read the right-hand column:
+- **total**: the gain against the base `a528915`.
+- **step**: the gain against the code the change was measured on.
+- **base'** (`23afd86`) is the base plus the TIMING-only write probes (+0.34 µs), against which changes 3 and 4 and the 1–4 merge were measured.
+- Bars marked *alone* hold that one change on the base; the others are cumulative.
+
+![L0-TIM-03 recap, mean over the stages](images/timing-recap-summary.svg)
+
+<details><summary>Per stage</summary>
+
+![L0-TIM-03 recap per stage](images/timing-recap-stages.svg)
+
+</details>
+
+To regenerate after a new change, add its line and campaign to [tests/l0/timing/recap.json](../../tests/l0/timing/recap.json), then run `python3 tests/l0/timing/recap.py`. The campaigns are read from `tests/out/`, which is local to this machine, and the SVGs are committed.
+
+
 ## Results
 
 (one section per change, filled as it is measured)
