@@ -1,6 +1,6 @@
 {
  "_doc": "L0-TIM-01 baseline: worst case per section, in core cycles. Written by tests/l0/timing/run.sh --update-baseline; commit it with the change that justifies it.",
- "commit": "a48ef2f-dirty",
+ "commit": "a0d4cec",
  "date": "2026-11-12",
  "core_hz": 170000000,
  "tolerance": 0.1,
