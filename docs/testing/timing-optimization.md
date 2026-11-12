@@ -32,7 +32,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | # | Change | Where | Status |
 |---|---|---|---|
 | 1 | `load` bookkeeping: cycle counter read directly, raw cycles in the task, µs conversion in the telemetry thread | `src/main.cpp` | Measured alone: **−6.97 µs** (branch `perf/timing-1-bookkeeping`, `527e36d`) |
-| 2 | Scope: 10 kHz around the relay only on request (2 kHz by default) | `src/main.cpp` | Planned |
+| 2 | Scope: 10 kHz around the relay only on request (2 kHz by default) | `src/main.cpp` | Measured alone: **−3.7 µs in g and G, −2.9 µs in n**, 0 elsewhere (branch `perf/timing-2-scope`, `c96d94f`) |
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` (and the shield API if needed) | Planned |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork | Planned |
 | All | 1–4 together: final verdict | | Planned |
@@ -60,3 +60,16 @@ The task called `k_cycle_get_32()` five times per tick and converted five interv
 | OPEN_LOOP_o | 70.1 → 63.2 (−6.9) | 65.3 → 57.8 | 0 → 0 | 10.77 → 9.41 | 3.31 → 1.00 |
 
 Each tick part loses about 1.4 µs (its closing `k_cycle_get_32()` and conversion), the sensor reads 0.04 µs; the controlStep sections do not change. More than the 4 µs estimated from the grey segment, because part of the bookkeeping sat inside the measured parts. L0-TIM-01/02/03 all pass; background tasks served.
+
+### 2 · Scope at 2 kHz by default (`c96d94f`, campaign `2026-11-12_c96d94f_151814_LKQXmD`)
+
+`scope_fast_connect` now starts false: the scope samples every 5th tick in every stage; key `v` still switches CONNECT, INJECT and FOLLOW_CONNECT to every tick.
+
+| Stage | Interrupt / period (mean) | Task tick worst | Lost | Scope (mean) |
+|---|---|---|---|---|
+| CONNECT_g | 71.0 → 67.3 (−3.7) | 66.4 → 62.9 | 0 → 0 | 7.13 → 3.48 |
+| INJECT_n | 71.7 → 68.8 (−2.9) | 63.8 → 64.1 | 0 → 0 | 6.21 → 3.30 |
+| FOLLOW_CONN_G | 71.8 → 68.1 (−3.7) | 68.7 → 65.7 | 0 → 0 | 7.19 → 3.51 |
+| other stages | unchanged (within 0.05 µs) | unchanged | 0 → 0 | unchanged |
+
+The average load drops, not the worst tick: every 5th tick still takes the full scope sample (about 7 µs), and in INJECT that sampled tick is the worst one (64.1 µs). Mean over the 9 stages: −1.13 µs.
