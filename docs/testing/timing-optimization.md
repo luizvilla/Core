@@ -368,3 +368,41 @@ Each period, the dispatch walks the DMA buffer and copies every new sample into 
 - **Same timing:** a sequence half converted at the task start gives each channel its newest sample, exactly as today's dispatch does.
 - **Plan:** branch `perf/timing-6-adc`, measured with the new rows (`3:dispatch` → about 0; `3:rd_*` per layer), then reviewed with Jean before it goes into the Spin API.
 
+
+#### 6 · Robustness of option A (Jean Alinei's concern)
+
+Jean's concern: a circular DMA buffer overwrites what is not fetched in time, so reading it directly may not be robust. Checked on the Spin (`4f5ce32`, SWD):
+
+**Overwriting.**
+- **Fast read:** each DMA buffer is a multiple of its sequence length (ADC1 21 = 7 × 3, ADC2 22 = 11 × 2), so slot `i` always holds channel rank `i mod n`. A slot is only overwritten by a newer sample of the same channel, so a read of the newest sample loses nothing.
+- **Today's dispatch:** it is the part exposed to overwriting, since it needs every sample. If a task starts more than one lap late (140 µs for ADC1, 220 µs for ADC2), its count, taken modulo the buffer size, is wrong and samples are lost without notice. A late fast read still returns the newest value.
+
+**Position.**
+- **Deterministic:** the DMA writes next at `S − CNDTR` (CNDTR read `S` at the wrap, never 0), and the newest sample of rank `r` is the latest slot with `index mod n = r`.
+- **What varies:** only the number of new samples per period (ADC1 12–18, ADC2 8–12). The dispatch already gets that number from the same `CNDTR` (`dma_get_retrieved_data_count`).
+- **Seen on the board:** `CNDTR` of ADC1 read 21, 18, 9, 15, 21 (between sequences); ADC2 once read 15 (between the two conversions of a sequence).
+
+**Real risks and the checks for them.**
+
+| Risk | Today's dispatch | `getLatestValueFast` |
+|---|---|---|
+| Rank mapping lost (ADC overrun, DMA restarted mid-sequence) | Assumed, never checked | Check `ADCx->ISR.OVR` (one register read per ADC). If set, report the data missing and resynchronize (stop the ADC, clear `OVR`, restart the DMA at slot 0) outside the tick. `OVRMOD = 0` here: on an overrun the new conversion is discarded. Measured: `OVR = 0` on both ADCs and DMA `TEIF = 0` after every run |
+| Read while the DMA writes | — | The DMA writes slot `S − CNDTR`, never the newest one, unless it laps the buffer during the ~0.3 µs read (a lap takes ≥ 140 µs). 16-bit reads are atomic |
+| No sample yet, ADC stopped | Peek value returned as "old" | Buffer filled with `0xFFFF` at start (a 12-bit ADC cannot produce it). DMA position unchanged since the last read → `DATA_IS_OLD` |
+| Channels from different sequences | Same | Same (newest sample per channel) |
+| Task late by more than one lap | Wrong count, silent | No effect |
+
+Most deterministic alternative if the index arithmetic is not accepted: option B, injected channels (one result register per rank, no DMA). It needs more work in the ADC driver.
+
+**Implementation plan** (branch `perf/timing-6-adc`, local OwnTech modules):
+1. **New call:** `SensorsAPI::getLatestValueFast(sensor_t, uint8_t* dataValid = nullptr)` next to `getLatestValue` (unchanged), with the same return values and validity codes.
+   - At first use it caches, per sensor: ADC, rank, sequence length `n`, DMA buffer and size `S` (checked: `S % n == 0`), gain and offset.
+   - A non-linear conversion falls back to `getLatestValue`.
+2. **Hot path** (target 30–50 cycles):
+   - read `CNDTR`, compute the newest slot of the rank without division, load it;
+   - reject `0xFFFF`, check `OVR`;
+   - apply `raw × gain + offset`, and set `dataValid` from whether the DMA position moved.
+3. **Recovery:** an overrun is resynchronized in a cold path and counted in the telemetry.
+4. **`main.cpp`:** the five reads use the fast call.
+5. **Dispatch removed, in a second step and measured separately:** `task.startCritical(false)`, and `setup_routine` starts the acquisition itself (externally triggered, about 40 repetitions so a lap is about 280 µs) without `doFullDispatch()`.
+6. **Measurement:** L0-TIM-03 with the ADC rows (`3:dispatch` → about 0, `3:rd_*`); the probes move to the fast path. Then an `OVR` test (forced overrun, then resync) and the bench.
