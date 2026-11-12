@@ -870,6 +870,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
     grid_angle = out.grid_angle;
 
     /*----- Apply PWM commands ----- */
+    TIMING_APPLY_PROBE(0);
     if (out.boost_mode_changed)
     {
         shield.power.stop(LEG1_LOW);
@@ -880,11 +881,19 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
     {
         shield.power.setDutyCycle(LEG1_LOW, out.boost_duty.leg1);
         // shield.power.setDutyCycle(LEG2_LOW, out.boost_duty.leg2);
+        TIMING_APPLY_PROBE(1);
         if (out.leg1_enable) shield.power.start(LEG1_LOW);
         else shield.power.stop(LEG1_LOW);
         // if (out.leg2_enable) shield.power.start(LEG2_LOW);
         // else shield.power.stop(LEG2_LOW);
     }
+#ifdef TIMING_HARNESS
+    else
+    {
+        TIMING_APPLY_PROBE(1);
+    }
+#endif
+    TIMING_APPLY_PROBE(2);
 
     /* Leg 1 burst: skip out.burst_skip of every out.burst_period PWM periods. */
     if (out.boost_pwm_update && out.leg1_enable && out.burst_skip > 0U)
@@ -901,10 +910,13 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
         shield.power.stopBurstMode();
         burst_running = false;
     }
+    TIMING_APPLY_PROBE(3);
 
     /* Apply paired bridge duty; acknowledge only after PWM is enabled. */
-    if (out.bridge_enable &&
-        shield.power.setInverterDutyCycle(LEG2_HIGH, out.bridge_duty) == 0)
+    const bool bridge_duty_applied = out.bridge_enable &&
+                                     shield.power.setInverterDutyCycle(LEG2_HIGH, out.bridge_duty) == 0;
+    TIMING_APPLY_PROBE(4);
+    if (bridge_duty_applied)
     {
         if (inverter_pwm_staged)
         {
@@ -938,7 +950,9 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
         control.bridge_pwm_applied = false;
         inverter_pwm_staged = false;
     }
+    TIMING_APPLY_PROBE(5);
     control.inverter.setPwmEnabled(control.bridge_pwm_applied && !control.open_loop_active);
+    TIMING_APPLY_PROBE(6);
 
     /* Grid relay (GPIO 22): follow the command; report it closed/open once held for the contact time.
      * The manual test only holds while nothing else runs and no grid voltage appears. */
@@ -964,6 +978,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
         relay_closed = relay_command;
     }
 
+    TIMING_APPLY_PROBE(7);
     TIMING_TICK_PROBE(3);
     const uint32_t t_applied = k_cycle_get_32();
     notePart(2, t_controlled, t_applied);

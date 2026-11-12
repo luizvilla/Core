@@ -35,6 +35,7 @@ extern volatile uint32_t timing_proxy_cycles[3];
 namespace timing {
 volatile uint32_t probe_cycles[probe_count];
 volatile uint32_t tick_cycles[tick_probe_count];
+volatile uint32_t apply_cycles[apply_probe_count];
 }
 
 /** @brief Read by the host over SWD (tests/l0/timing/read_report.py); kept even though nothing reads it here. */
@@ -111,6 +112,14 @@ enum Section : uint8_t {
     SEC_T3_HARNESS,       ///< What the harness itself adds in the interrupt (inputs, recording), outside the task tick.
     SEC_T3_SAFETY,        ///< Task API proxy: the safety check (CONFIG_OWNTECH_SAFETY_API), same interrupt, before the task.
     SEC_T3_DISPATCH,      ///< Task API proxy: spin.data.doFullDispatch() (ADC data), same interrupt, before the task.
+    /* L0-TIM-03: the PWM and relay writes split by call (apply probes in main.cpp). */
+    SEC_T3_AP_BOOST_DUTY,   ///< Boost mode-change stop and setDutyCycle(LEG1_LOW).
+    SEC_T3_AP_BOOST_EN,     ///< Boost start/stop(LEG1_LOW).
+    SEC_T3_AP_BURST,        ///< setBurstMode / startBurstMode / stopBurstMode.
+    SEC_T3_AP_BRIDGE_DUTY,  ///< setInverterDutyCycle(LEG2_HIGH).
+    SEC_T3_AP_BRIDGE_EN,    ///< Bridge staging and start/stop of both high legs.
+    SEC_T3_AP_PWM_ACK,      ///< inverter.setPwmEnabled().
+    SEC_T3_AP_RELAY,        ///< Relay command and contact model (GPIO 22 on change).
     SEC_COUNT
 };
 const char *const section_names[SEC_COUNT] = {
@@ -122,8 +131,10 @@ const char *const section_names[SEC_COUNT] = {
     "3:tick", "3:tick_sensors", "3:tick_control", "3:tick_apply", "3:tick_scope",
     "3:boost_cold", "3:boost_hot", "3:inv_stage", "3:inv_duty", "3:observer", "3:outputs",
     "3:duty_pll", "3:duty_sogi", "3:duty_park", "3:duty_syncwin", "3:duty_mode_ff", "3:duty_current_pi", "3:duty_output",
-    "3:gap", "3:harness", "3:safety", "3:dispatch"
+    "3:gap", "3:harness", "3:safety", "3:dispatch",
+    "3:ap_boost_duty", "3:ap_boost_en", "3:ap_burst", "3:ap_bridge_duty", "3:ap_bridge_en", "3:ap_pwm_ack", "3:ap_relay"
 };
+static_assert(SEC_T3_AP_RELAY - SEC_T3_AP_BOOST_DUTY + 2U == timing::apply_probe_count, "one row per apply interval");
 static_assert(SEC_T2_OUTPUTS - SEC_T2_BOOST_COLD + 2U == timing::probe_count, "TIM-02 controlStep sections");
 static_assert(SEC_T2_DUTY_OUTPUT - SEC_T2_DUTY_PLL + 2U == INV_TIMING_PROBE_COUNT, "TIM-02 library sections");
 static_assert(SEC_TICK_SCOPE - SEC_TICK + 1U == timing::tick_probe_count && SEC_T2_DUTY_PLL == SEC_T2_OUTPUTS + 1U,
@@ -613,6 +624,8 @@ void tim03Tick()
     recordTickRows(base, SEC_T3_TICK, SEC_T3_BOOST_COLD, c1 - c0, inv_timing_seq != seq_before, t3.tick);
 
     const uint8_t vsi = static_cast<uint8_t>(t2.state->inverter.getMode());
+    for (uint8_t i = 0U; i + 1U < timing::apply_probe_count; ++i)
+        recordRow(base + SEC_T3_AP_BOOST_DUTY + i, timing::apply_cycles[i + 1U] - timing::apply_cycles[i], t3.tick);
     recordRow(base + SEC_T3_SAFETY, timing_proxy_cycles[1] - timing_proxy_cycles[0], t3.tick);
     recordRow(base + SEC_T3_DISPATCH, timing_proxy_cycles[2] - timing_proxy_cycles[1], t3.tick);
     recordRow(base + SEC_T3_HARNESS, (cycles() - start) - (c1 - c0), t3.tick);

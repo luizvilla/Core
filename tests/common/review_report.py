@@ -420,6 +420,8 @@ WRITE_GROUP = ('PWM + relay writes', '#6250d6', [('tick_apply', 'PWM + relay wri
 REST_GROUP = ('not in a section', '#b9b7b0', [('_rest', 'calls + timing bookkeeping')])
 # L0-TIM-03: work the task API does in the same interrupt before the task (low-chroma blue-grey, apart from the rest).
 TASKAPI_GROUP = ('task API (same interrupt)', '#4a5a6a', [('3:safety', 'safety check'), ('3:dispatch', 'ADC data dispatch')])
+TIMING_SHORT.update({'ap_boost_duty': 'b.duty', 'ap_boost_en': 'b.en', 'ap_burst': 'burst', 'ap_bridge_duty': 'br.duty',
+                     'ap_bridge_en': 'br.en', 'ap_pwm_ack': 'ack', 'ap_relay': 'relay'})
 TIMING_SHORT.update({'tick_sensors': 'sensors', 'tick_apply': 'writes', 'tick_scope': 'scope', '_rest': 'rest',
                      'tick_control': 'controlStep'})
 
@@ -441,7 +443,13 @@ def series_groups(rows, bucket, kind):
                 out.append((gname, hue, [(sp + k, t) for k, t in secs]))
     else:  # a run recorded before TIM-02 kept the sections: controlStep as one block, never dropped
         out.append(('controlStep', '#1baf7a', [(p + 'tick_control', 'controlStep (not split in this run)')]))
-    out += [(WRITE_GROUP[0], WRITE_GROUP[1], [(p + 'tick_apply', 'PWM + relay writes')]),
+    if kind == 'tim03' and f'{bucket}/3:ap_boost_duty' in rows:  # the writes split by call (apply probes)
+        writes = [('3:ap_boost_duty', 'boost duty'), ('3:ap_boost_en', 'boost enable'), ('3:ap_burst', 'burst'),
+                  ('3:ap_bridge_duty', 'bridge duty'), ('3:ap_bridge_en', 'bridge enables'),
+                  ('3:ap_pwm_ack', 'PWM ack'), ('3:ap_relay', 'relay')]
+    else:
+        writes = [(p + 'tick_apply', 'PWM + relay writes')]
+    out += [(WRITE_GROUP[0], WRITE_GROUP[1], writes),
             ('scope', '#e87ba4', [(p + 'tick_scope', 'snapshot + acquire')]), REST_GROUP]
     return out
 
@@ -687,7 +695,10 @@ TIM01_COLS = [('boost_cold', 'boost_cold'), ('boost_hot', 'boost_hot'), ('inv_st
               ('observer', 'observer'), ('outputs', 'outputs'), ('controlStep', 'controlStep'), ('scope', 'scope')]
 TIM03_COLS = ([('3:gap', 'gap'), ('3:safety', 'safety'), ('3:dispatch', 'data dispatch'), ('3:tick', 'task tick'),
                ('3:tick_sensors', 'sensors')] + [('3:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
-              + [('3:tick_control', 'controlStep'), ('3:tick_apply', 'writes'), ('3:tick_scope', 'scope'), ('3:harness', 'harness (test)')])
+              + [('3:tick_control', 'controlStep'), ('3:tick_apply', 'writes'), ('3:ap_boost_duty', 'w: boost duty'),
+                 ('3:ap_boost_en', 'w: boost enable'), ('3:ap_burst', 'w: burst'), ('3:ap_bridge_duty', 'w: bridge duty'),
+                 ('3:ap_bridge_en', 'w: bridge enables'), ('3:ap_pwm_ack', 'w: PWM ack'), ('3:ap_relay', 'w: relay'),
+                 ('3:tick_scope', 'scope'), ('3:harness', 'harness (test)')])
 TIM02_COLS = ([('tick', 'whole tick'), ('tick_sensors', 'sensors')] + [('2:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
               + [('tick_control', 'controlStep'), ('tick_apply', 'writes'), ('tick_scope', 'scope')])
 
