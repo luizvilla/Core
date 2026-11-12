@@ -316,6 +316,19 @@ def shade(hex_color, k, n=2):
     return '#%02x%02x%02x' % tuple(round(f(c)) for c in (r, g, b))
 
 
+# Short names for segments too narrow for the legend text.
+TIMING_SHORT = {'boost_cold': 'cold', 'boost_hot': 'hot', 'inv_stage': 'stage', 'outputs': 'out', 'duty_pll': 'PLL',
+                'duty_sogi': 'SOGI', 'duty_park': 'Park', 'duty_syncwin': 'win', 'duty_mode_ff': 'mode+ff',
+                'duty_current_pi': 'PI', 'duty_output': 'output', 'observer': 'obs', 'scope': 'scope', 'inv_duty': 'duty'}
+
+
+def text_on(fill):
+    """@brief Text ink with contrast on a fill: white on dark fills, the primary ink otherwise."""
+    r, g, b = (int(fill[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    lum = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    return '#ffffff' if 0.2126 * lum(r) + 0.7152 * lum(g) + 0.0722 * lum(b) < 0.18 else INK
+
+
 def timing_groups(rows, bucket):
     """@brief TIMING_GROUPS as present in a report: a report without the library probes (layout 1) shows
     calculateDuty as one section."""
@@ -344,16 +357,17 @@ def timing_section_table(rep):
     return '\n'.join(p)
 
 
-def timing_figure(rep, budget_us=80.0, period_us=100.0):
-    """@brief Inline SVG: per bucket, the mean cost of each section stacked (group hue, section shade), the worst
-    case marked, against the budget and the period. Hover a segment for its values. @return html."""
+def timing_figure(rep, budget_us=80.0, period_us=100.0, px_per_us=40):
+    """@brief Per bucket, the mean cost of each section stacked (group hue, section shade), the worst case marked,
+    against the budget and the period. Drawn at px_per_us so every segment carries its name and value; the plot
+    scrolls horizontally, the bucket names stay pinned on the left and the legend stays above. @return html."""
     e = html.escape
     hz = rep['core_hz']
     rows = {r['name']: r for r in rep['rows']}
     buckets = [b['name'] for b in rep['buckets']]
-    W, left, right, bar, gap = 960, 130, 70, 24, 10
-    # Legend: one cluster per group (name, then a swatch per section), wrapped onto rows.
     groups = timing_groups(rows, buckets[0])
+    # Legend (fixed above the scrolling plot): one cluster per group, wrapped onto rows.
+    W = 960
     legend, lx, ly = [], 0, 16
     for gname, hue, secs in groups:
         width = 8 + 7 * len(gname) + sum(22 + 6.3 * len(t) for _, t in secs)
@@ -370,21 +384,29 @@ def timing_figure(rep, budget_us=80.0, period_us=100.0):
         lx, ly = 0, ly + 20
     legend.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="{ly - 12}" y2="{ly + 3}" stroke="{INK}" stroke-width="2"/>'
                   f'<text x="{lx + 10}" y="{ly}" fill="{INK2}">worst case (controlStep + scope)</text>')
-    top = ly + 46
-    H = top + len(buckets) * (bar + gap) + 34
-    xmax = period_us
-    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
-    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Mean cost per section and worst case per bucket" '
-           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">'] + legend
-    for v in range(0, int(xmax) + 1, 20):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
-                   f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
+    legend_svg = (f'<svg viewBox="0 0 {W} {ly + 10}" width="100%" style="font:12px system-ui,sans-serif;background:{SURFACE}">'
+                  + ''.join(legend) + '</svg>')
+
+    label_w, pad, right, bar, gap, top = 130, 8, 90, 30, 10, 30
+    H = top + len(buckets) * (bar + gap) + 30
+    plot_w = int(period_us * px_per_us) + pad + right
+    x = lambda v: pad + px_per_us * min(v, period_us)
+    labels = [f'<svg width="{label_w}" height="{H}" style="font:12px system-ui,sans-serif;flex:none;position:sticky;left:0;'
+              f'background:{SURFACE};z-index:1">']
+    svg = [f'<svg width="{plot_w}" height="{H}" role="img" aria-label="Mean cost per section and worst case per bucket" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE};flex:none">']
+    for v in range(0, int(period_us) + 1):
+        major = v % 5 == 0
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 26}" stroke="{GRID}" '
+                   f'stroke-width="{1 if major else 0.5}"{"" if major else " stroke-dasharray=\"2 3\""}/>')
+        if major:
+            svg.append(f'<text x="{x(v):.1f}" y="{H - 10}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
     for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 30}" stroke="{INK2}" stroke-dasharray="6 4"/>'
-                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 12}" y2="{H - 26}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="{top - 16}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
     for i, b in enumerate(buckets):
         y = top + i * (bar + gap)
-        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
+        labels.append(f'<text x="{label_w - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
         acc = 0.0
         for gname, hue, secs in groups:
             for k, (key, text) in enumerate(secs):
@@ -395,16 +417,30 @@ def timing_figure(rep, budget_us=80.0, period_us=100.0):
                 svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k, len(secs))}" '
                            f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(gname)} · {e(text)} ({e(key)}): '
                            f'mean {mean:.2f} µs, worst {worst:.2f} µs</title></rect>')
-                if x1 - x0 >= 30:  # direct label on the segments wide enough to hold one
-                    svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{INK}" font-size="11" '
-                               f'text-anchor="middle" pointer-events="none">{mean:.1f}</text>')
+                # Direct label: name and value when they fit, else the value alone (smaller type for narrow ones).
+                full, short = f'{text} {mean:.1f}', f'{TIMING_SHORT.get(key, key)} {mean:.1f}'
+                if x1 - x0 >= 6.3 * len(full) + 8:
+                    lbl, size = full, 11
+                elif x1 - x0 >= 6.3 * len(short) + 6:
+                    lbl, size = short, 11
+                elif x1 - x0 >= 22:
+                    lbl, size = f'{mean:.1f}', 11
+                elif x1 - x0 >= 14:
+                    lbl, size = f'{mean:.1f}', 9
+                else:
+                    lbl = ''
+                if lbl:
+                    svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(shade(hue, k, len(secs)))}" font-size="{size}" '
+                               f'text-anchor="middle" pointer-events="none">{e(lbl)}</text>')
                 acc += mean
         wc = (rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles']) * 1e6 / hz
         svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2">'
                    f'<title>{e(b)}: worst case {wc:.1f} µs</title></line>'
-                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{wc:.1f}</text>')
+                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">worst {wc:.1f} µs (mean {acc:.1f})</text>')
+    labels.append('</svg>')
     svg.append('</svg>')
-    return ''.join(svg)
+    return (legend_svg + f'<div class="wrap" style="display:flex;overflow-x:auto;border:1px solid {GRID};border-radius:6px">'
+            + ''.join(labels) + ''.join(svg) + '</div>')
 
 
 def verdict_badge(r):
@@ -663,7 +699,7 @@ def main(out):
             p.append('<h3>4 · Figures</h3>')
             if rep_t and rep_t.get('rows'):
                 p.append('<figure>' + timing_figure(rep_t) + '<figcaption>Each bar: the mean cost of one tick in that '
-                         'bucket, one segment per code section, in µs where it fits. One hue per group (blue boost, '
+                         'bucket, one segment per code section with its name and mean in µs (scroll right for the rest of the period). One hue per group (blue boost, '
                          'orange inverter logic, green calculateDuty, yellow observer, pink scope), its sections in '
                          'shades of it in code order, darkest first; calculateDuty is split by the library probes '
                          '(PLL, SOGIs, Park, sync window, mode + feedforward, current PIs, output). Hover a segment for its '
