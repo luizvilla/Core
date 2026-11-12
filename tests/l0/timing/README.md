@@ -112,7 +112,7 @@ After L0-TIM-02, the same firmware starts the application task (full telemetry e
 | `3:harness` | the test's own cost in the interrupt (inputs, recording); reported, left out of the figures |
 | bucket `tim03_lost` | lost periods: accumulated lateness of one period each, so steadily late starts count even when no single gap reaches 1.5 periods |
 
-The ADC path probes (`owntech_timing_probe.h` in the Spin API: `data_dispatch.cpp`, `DataAPI.cpp`, `Sensors.cpp`) exist only in the TIMING builds. They add about 2.5 µs to `3:tick_sensors` (four cycle-counter reads and three sums per read, five reads) and 0.16 µs to `3:dispatch`; the baseline from `b4602d9`'s successor on includes them.
+The ADC path probes (`owntech_timing_probe.h` in the Spin API: `data_dispatch.cpp`, `DataAPI.cpp`, `Sensors.cpp`) exist only in the TIMING builds. They add about 2.5 µs to `3:tick_sensors` (four cycle-counter reads and three sums per read, five reads) and 0.16 µs to `3:dispatch`; the baseline includes them from `54227d3` on.
 
 Criteria: `.a` coverage; `.b-<bucket>` task tick ≤ 80 µs; `.c` no lost period; `.d` gap ≤ 150 µs; `.e` baseline; `.f` background tasks served (telemetry never silent more than 0.5 s outside scope downloads, every `h` and `r` answered); `.g-<bucket>` INFO, the interrupt's time per period without the harness.
 
