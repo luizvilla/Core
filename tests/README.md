@@ -66,7 +66,7 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
    | Kind | Folder content | Snapshot | Figures |
    |---|---|---|---|
    | L1 scenario | `manifest.json` (+ scenario in `l1/scenarios/`) | model (`l1/plant/snapshot.py`) | `l1/review_plots.json` entry per criterion |
-   | On target (L0-TIM) | `target_manifest.json` + its report JSON | target (board, MCU, flash, firmware, probe) | built from the report (`timing_figure`) |
+   | On target (L0-TIM) | `target_manifest.json` + its report JSON | target (board, MCU, flash, firmware, probe) | built from the report: overview fitted to the page (`timing_figure_overview`) and detailed view with every segment labelled (`timing_figure`) |
 
    A new kind of test case gets its own branch in `review_report.py` with the same four parts, and its figure follows the dataviz rules already used there (fixed palette order, legend, hover, a table view).
 7. A new catalogue tab appears by itself; a new kind of level (as on-target L0) gets its heading in `common/control_center.py`.

@@ -357,6 +357,69 @@ def timing_section_table(rep):
     return '\n'.join(p)
 
 
+def timing_figure_overview(rep, budget_us=80.0, period_us=100.0):
+    """@brief Overview, fitted to the page width (values only where they fit). Inline SVG: per bucket, the mean cost of each section stacked (group hue, section shade), the worst
+    case marked, against the budget and the period. Hover a segment for its values. @return html."""
+    e = html.escape
+    hz = rep['core_hz']
+    rows = {r['name']: r for r in rep['rows']}
+    buckets = [b['name'] for b in rep['buckets']]
+    W, left, right, bar, gap = 960, 130, 70, 24, 10
+    # Legend: one cluster per group (name, then a swatch per section), wrapped onto rows.
+    groups = timing_groups(rows, buckets[0])
+    legend, lx, ly = [], 0, 16
+    for gname, hue, secs in groups:
+        width = 8 + 7 * len(gname) + sum(22 + 6.3 * len(t) for _, t in secs)
+        if lx and lx + width > W - 10:
+            lx, ly = 0, ly + 20
+        legend.append(f'<text x="{lx}" y="{ly}" fill="{INK}" font-weight="600">{e(gname)}</text>')
+        sx = lx + 8 + 7 * len(gname)
+        for k, (_, text) in enumerate(secs):
+            legend.append(f'<rect x="{sx:.0f}" y="{ly - 10}" width="12" height="12" rx="2" fill="{shade(hue, k, len(secs))}"/>'
+                          f'<text x="{sx + 16:.0f}" y="{ly}" fill="{INK2}">{e(text)}</text>')
+            sx += 22 + 6.3 * len(text)
+        lx += width + 18
+    if lx + 240 > W - 10:
+        lx, ly = 0, ly + 20
+    legend.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="{ly - 12}" y2="{ly + 3}" stroke="{INK}" stroke-width="2"/>'
+                  f'<text x="{lx + 10}" y="{ly}" fill="{INK2}">worst case (controlStep + scope)</text>')
+    top = ly + 46
+    H = top + len(buckets) * (bar + gap) + 34
+    xmax = period_us
+    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Mean cost per section and worst case per bucket" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">'] + legend
+    for v in range(0, int(xmax) + 1, 20):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
+                   f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
+    for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 30}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+    for i, b in enumerate(buckets):
+        y = top + i * (bar + gap)
+        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
+        acc = 0.0
+        for gname, hue, secs in groups:
+            for k, (key, text) in enumerate(secs):
+                r = rows[f'{b}/{key}']
+                mean = r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz
+                worst = r['max_cycles'] * 1e6 / hz
+                x0, x1 = x(acc), x(acc + mean)
+                svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k, len(secs))}" '
+                           f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(gname)} · {e(text)} ({e(key)}): '
+                           f'mean {mean:.2f} µs, worst {worst:.2f} µs</title></rect>')
+                if x1 - x0 >= 30:  # direct label on the segments wide enough to hold one
+                    svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(shade(hue, k, len(secs)))}" font-size="11" '
+                               f'text-anchor="middle" pointer-events="none">{mean:.1f}</text>')
+                acc += mean
+        wc = (rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles']) * 1e6 / hz
+        svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2">'
+                   f'<title>{e(b)}: worst case {wc:.1f} µs</title></line>'
+                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{wc:.1f}</text>')
+    svg.append('</svg>')
+    return ''.join(svg)
+
+
 def timing_figure(rep, budget_us=80.0, period_us=100.0, px_per_us=40):
     """@brief Per bucket, the mean cost of each section stacked (group hue, section shade), the worst case marked,
     against the budget and the period. Drawn at px_per_us so every segment carries its name and value; the plot
@@ -698,15 +761,18 @@ def main(out):
                 p.append(timing_section_table(rep_t))
             p.append('<h3>4 · Figures</h3>')
             if rep_t and rep_t.get('rows'):
-                p.append('<figure>' + timing_figure(rep_t) + '<figcaption>Each bar: the mean cost of one tick in that '
-                         'bucket, one segment per code section with its name and mean in µs (scroll right for the rest of the period). One hue per group (blue boost, '
-                         'orange inverter logic, green calculateDuty, yellow observer, pink scope), its sections in '
-                         'shades of it in code order, darkest first; calculateDuty is split by the library probes '
-                         '(PLL, SOGIs, Park, sync window, mode + feedforward, current PIs, output). Hover a segment for its '
-                         'mean and worst case. Black mark: the '
-                         'worst controlStep plus the worst scope sampling of the bucket. Dashed: the 80 µs budget '
-                         '(L0-TIM-02/03) and the 100 µs period. Interrupts locked, no sensors or PWM: the running task '
-                         'costs more (L0-TIM-03). The table above is the same data.</figcaption></figure>')
+                p.append('<figure><div><b>Overview</b></div>' + timing_figure_overview(rep_t) + '<figcaption>The whole '
+                         'period at a glance: each bar is the mean cost of one tick in that bucket, one segment per code '
+                         'section (one hue per group: blue boost, orange inverter logic, green calculateDuty, yellow '
+                         'observer, pink scope; its sections in shades of it in code order, darkest first). Values where '
+                         'they fit; the detailed view below labels every segment. Black mark: the worst controlStep plus '
+                         'the worst scope sampling of the bucket. Dashed: the 80 µs budget (L0-TIM-02/03) and the 100 µs '
+                         'period.</figcaption></figure>')
+                p.append('<figure><div><b>Detailed view</b></div>' + timing_figure(rep_t) + '<figcaption>The same data at '
+                         '40 px per µs: every segment carries its name and mean in µs; scroll right for the rest of the '
+                         'period, the bucket names stay pinned. Hover a segment for its worst case. Interrupts locked, no '
+                         'sensors or PWM: the running task costs more (L0-TIM-03). The table above is the same data.'
+                         '</figcaption></figure>')
             else:
                 p.append(f'<p class="sub">No report in {e(f.name)}/.</p>')
             continue
