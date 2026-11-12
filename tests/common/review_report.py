@@ -295,10 +295,21 @@ def test_cases(out, rows):
     return cases
 
 
-# L0-TIM-01 figure: section groups stacked by their mean, in fixed categorical order (dataviz palette, slots 1-5).
-TIMING_GROUPS = [('boost', ('boost_cold', 'boost_hot')), ('inverter logic', ('inv_stage', 'outputs')),
-                 ('calculateDuty', ('inv_duty',)), ('grid observer', ('observer',)), ('scope', ('scope',))]
-TIMING_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4']
+# L0-TIM-01 figure: each section stacked by its mean; one hue per group in fixed categorical order (dataviz palette,
+# slots 1-5), its sections in shades of that hue (base, then lighter), so a group reads as one colour and its parts
+# stay apart. Labels: (section key, legend text).
+TIMING_GROUPS = [('boost', '#2a78d6', [('boost_cold', 'setters + cold loop'), ('boost_hot', 'hot loop')]),
+                 ('inverter logic', '#eb6834', [('inv_stage', 'stage logic'), ('outputs', 'outputs, relay')]),
+                 ('calculateDuty', '#1baf7a', [('inv_duty', 'PLL, SOGI, current loop')]),
+                 ('grid observer', '#eda100', [('observer', 'observer, quality gate')]),
+                 ('scope', '#e87ba4', [('scope', 'snapshot + acquire')])]
+
+
+def shade(hex_color, k):
+    """@brief Shade k of a hue: 0 the base, 1 mixed 45 % with white, 2 mixed 70 %."""
+    mix = (0.0, 0.45, 0.7)[min(k, 2)]
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return '#%02x%02x%02x' % tuple(round(c + (255 - c) * mix) for c in (r, g, b))
 
 
 def timing_section_table(rep):
@@ -322,23 +333,36 @@ def timing_section_table(rep):
 
 
 def timing_figure(rep, budget_us=80.0, period_us=100.0):
-    """@brief Inline SVG: per bucket, the mean cost stacked by section group, the worst case marked, against the
-    budget and the period. Hover a segment for its value. @return html."""
+    """@brief Inline SVG: per bucket, the mean cost of each section stacked (group hue, section shade), the worst
+    case marked, against the budget and the period. Hover a segment for its values. @return html."""
     e = html.escape
     hz = rep['core_hz']
     rows = {r['name']: r for r in rep['rows']}
     buckets = [b['name'] for b in rep['buckets']]
-    W, left, right, top, bar, gap = 960, 130, 70, 62, 22, 10
+    W, left, right, bar, gap = 960, 130, 70, 24, 10
+    # Legend: one cluster per group (name, then a swatch per section), wrapped onto rows.
+    legend, lx, ly = [], 0, 16
+    for gname, hue, secs in TIMING_GROUPS:
+        width = 8 + 7 * len(gname) + sum(22 + 6.3 * len(t) for _, t in secs)
+        if lx and lx + width > W - 10:
+            lx, ly = 0, ly + 20
+        legend.append(f'<text x="{lx}" y="{ly}" fill="{INK}" font-weight="600">{e(gname)}</text>')
+        sx = lx + 8 + 7 * len(gname)
+        for k, (_, text) in enumerate(secs):
+            legend.append(f'<rect x="{sx:.0f}" y="{ly - 10}" width="12" height="12" rx="2" fill="{shade(hue, k)}"/>'
+                          f'<text x="{sx + 16:.0f}" y="{ly}" fill="{INK2}">{e(text)}</text>')
+            sx += 22 + 6.3 * len(text)
+        lx += width + 18
+    if lx + 240 > W - 10:
+        lx, ly = 0, ly + 20
+    legend.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="{ly - 12}" y2="{ly + 3}" stroke="{INK}" stroke-width="2"/>'
+                  f'<text x="{lx + 10}" y="{ly}" fill="{INK2}">worst case (controlStep + scope)</text>')
+    top = ly + 46
     H = top + len(buckets) * (bar + gap) + 34
     xmax = period_us
     x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
-    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Mean cost per section group and worst case per bucket" '
-           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">']
-    lx = left
-    for (name, _), col in zip(TIMING_GROUPS, TIMING_COLORS):
-        svg.append(f'<rect x="{lx}" y="8" width="12" height="12" rx="2" fill="{col}"/><text x="{lx + 17}" y="18" fill="{INK2}">{e(name)}</text>')
-        lx += 30 + 7 * len(name)
-    svg.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="6" y2="22" stroke="{INK}" stroke-width="2"/><text x="{lx + 10}" y="18" fill="{INK2}">worst case (controlStep + scope)</text>')
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Mean cost per section and worst case per bucket" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">'] + legend
     for v in range(0, int(xmax) + 1, 20):
         svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
                    f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
@@ -349,12 +373,19 @@ def timing_figure(rep, budget_us=80.0, period_us=100.0):
         y = top + i * (bar + gap)
         svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
         acc = 0.0
-        for (name, secs), col in zip(TIMING_GROUPS, TIMING_COLORS):
-            mean = sum(rows[f'{b}/{s}']['sum_cycles'] / max(rows[f'{b}/{s}']['calls'], 1) for s in secs) * 1e6 / hz
-            worst = max(rows[f'{b}/{s}']['max_cycles'] for s in secs) * 1e6 / hz
-            svg.append(f'<rect x="{x(acc):.1f}" y="{y}" width="{max(x(acc + mean) - x(acc), 1):.1f}" height="{bar}" fill="{col}" '
-                       f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(name)}: mean {mean:.1f} µs, worst section {worst:.1f} µs</title></rect>')
-            acc += mean
+        for gname, hue, secs in TIMING_GROUPS:
+            for k, (key, text) in enumerate(secs):
+                r = rows[f'{b}/{key}']
+                mean = r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz
+                worst = r['max_cycles'] * 1e6 / hz
+                x0, x1 = x(acc), x(acc + mean)
+                svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k)}" '
+                           f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(gname)} · {e(text)} ({e(key)}): '
+                           f'mean {mean:.2f} µs, worst {worst:.2f} µs</title></rect>')
+                if x1 - x0 >= 30:  # direct label on the segments wide enough to hold one
+                    svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{INK}" font-size="11" '
+                               f'text-anchor="middle" pointer-events="none">{mean:.1f}</text>')
+                acc += mean
         wc = (rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles']) * 1e6 / hz
         svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2">'
                    f'<title>{e(b)}: worst case {wc:.1f} µs</title></line>'
@@ -619,7 +650,9 @@ def main(out):
             p.append('<h3>4 · Figures</h3>')
             if rep_t and rep_t.get('rows'):
                 p.append('<figure>' + timing_figure(rep_t) + '<figcaption>Each bar: the mean cost of one tick in that '
-                         'bucket, stacked by section group (hover a segment for its mean and worst section). Black mark: the '
+                         'bucket, one segment per code section, in µs where it fits. One hue per group (blue boost, '
+                         'orange inverter logic, green calculateDuty, yellow observer, pink scope), its sections in '
+                         'shades of it, base first; hover a segment for its mean and worst case. Black mark: the '
                          'worst controlStep plus the worst scope sampling of the bucket. Dashed: the 80 µs budget '
                          '(L0-TIM-02/03) and the 100 µs period. Interrupts locked, no sensors or PWM: the running task '
                          'costs more (L0-TIM-03). The table above is the same data.</figcaption></figure>')
