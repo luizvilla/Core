@@ -155,6 +155,19 @@ SensorsAPI::sensor_dt_data_t* SensorsAPI::enabled_sensors[DT_SUBSENSORS_COUNT] =
 
 bool SensorsAPI::initialized = false;
 
+/**
+ * Latest-sample reads from the DMA buffer (getLatestValueFast), one per
+ * sensor, indexed like enabled_sensors.
+ */
+enum fast_read_state_t : uint8_t
+{
+	FAST_READ_UNPREPARED = 0,
+	FAST_READ_READY      = 1,
+	FAST_READ_FALLBACK   = 2  /* use getLatestValue() */
+};
+static DataFastChannel fast_channels[DT_SUBSENSORS_COUNT];
+static volatile uint8_t fast_states[DT_SUBSENSORS_COUNT] = {0};
+
 
 /**
  *  Public functions accessible only when using a power shield
@@ -237,6 +250,121 @@ OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValue(sensor_t sensor_name, uin
 									 dataValid);
 }
 
+OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValueFast(sensor_t sensor_name, uint8_t* dataValid)
+{
+	OT_TIMING_READ_START();
+	const uint32_t index = (uint32_t)sensor_name - 1U;
+	if ( (index >= DT_SUBSENSORS_COUNT) ||
+		 (fast_states[index] != FAST_READ_READY) )
+	{
+		return prepareFastRead(sensor_name, dataValid);
+	}
+
+	DataFastChannel& channel = fast_channels[index];
+	const uint32_t remaining = *channel.dma_remaining;
+	OT_TIMING_MARK(t1);
+
+	/* Overrun: the slot-to-rank mapping may be lost until the resync */
+	if ( ((*channel.adc_isr & DATA_FAST_ADC_ISR_OVR) != 0) ||
+		 (*channel.resync_pending != 0) ||
+		 (remaining > channel.dma_size) )
+	{
+		DataAPI::noteFastOverrun(channel.adc_index);
+		if (dataValid != nullptr) *dataValid = DATA_IS_MISSING;
+		OT_TIMING_MARK(t2_ovr);
+		OT_TIMING_READ_END(t1, t2_ovr);
+		return NO_VALUE;
+	}
+
+	const uint16_t raw_value =
+				channel.dma_buffer[channel.newest_slot[remaining]];
+	if (raw_value == DATA_FAST_EMPTY_SAMPLE)
+	{
+		/* No sample written in this slot yet */
+		if (dataValid != nullptr) *dataValid = DATA_IS_MISSING;
+		OT_TIMING_MARK(t2_empty);
+		OT_TIMING_READ_END(t1, t2_empty);
+		return NO_VALUE;
+	}
+
+	if (dataValid != nullptr)
+	{
+		*dataValid = (remaining != channel.last_remaining) ?
+					 DATA_IS_OK : DATA_IS_OLD;
+	}
+	channel.last_remaining = remaining;
+	OT_TIMING_MARK(t2);
+
+	const float32_t value = (raw_value * channel.gain) + channel.offset;
+	OT_TIMING_READ_END(t1, t2);
+	return value;
+}
+
+float32_t SensorsAPI::prepareFastRead(sensor_t sensor_name, uint8_t* dataValid)
+{
+	const uint32_t index = (uint32_t)sensor_name - 1U;
+	if ( (index < DT_SUBSENSORS_COUNT) &&
+		 (fast_states[index] == FAST_READ_UNPREPARED) )
+	{
+		sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
+		if (sensor_info.adc_num != 0)
+		{
+			if (DataAPI::prepareFastChannel(sensor_info.adc_num,
+											sensor_info.channel_num,
+											fast_channels[index]) == 0)
+			{
+				fast_states[index] = FAST_READ_READY;
+				return getLatestValueFast(sensor_name, dataValid);
+			}
+			/* Not before the acquisition starts: try again next call */
+			if (DataAPI::is_started == true)
+			{
+				fast_states[index] = FAST_READ_FALLBACK;
+			}
+		}
+	}
+
+	return getLatestValue(sensor_name, dataValid);
+}
+
+void SensorsAPI::resetFastRead(sensor_t sensor_name)
+{
+	const uint32_t index = (uint32_t)sensor_name - 1U;
+	if ( (index >= DT_SUBSENSORS_COUNT) ||
+		 (fast_states[index] != FAST_READ_READY) )
+	{
+		return;
+	}
+
+	/* A prepared read only needs the new linear parameters */
+	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
+	if (data_conversion_get_conversion_type(sensor_info.adc_num,
+											sensor_info.channel_num) ==
+		conversion_linear)
+	{
+		fast_channels[index].gain =
+			data_conversion_get_parameter(sensor_info.adc_num,
+										  sensor_info.channel_num, 1);
+		fast_channels[index].offset =
+			data_conversion_get_parameter(sensor_info.adc_num,
+										  sensor_info.channel_num, 2);
+	}
+	else
+	{
+		fast_states[index] = FAST_READ_FALLBACK;
+	}
+}
+
+void SensorsAPI::serviceFastReads()
+{
+	DataAPI::resyncFastChannels();
+}
+
+uint32_t SensorsAPI::getFastReadOverruns()
+{
+	return DataAPI::getFastOverrunCount();
+}
+
 float32_t SensorsAPI::convertRawValue(sensor_t sensor_name, uint16_t raw_value)
 {
 	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
@@ -262,6 +390,7 @@ void SensorsAPI::setConversionParametersLinear(sensor_t sensor_name,
 			gain,
 			offset
 		);
+		resetFastRead(sensor_name);
 	}
 }
 
@@ -284,6 +413,7 @@ void SensorsAPI::setConversionParametersNtcThermistor(sensor_t sensor_name,
 			rdiv,
 			t0
 		);
+		resetFastRead(sensor_name);
 	}
 }
 
@@ -310,10 +440,12 @@ int8_t SensorsAPI::retrieveParametersFromMemory(sensor_t sensor_name)
 {
 	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
 
-	return data_conversion_retrieve_channel_parameters_from_nvs(
+	int8_t result = data_conversion_retrieve_channel_parameters_from_nvs(
 				sensor_info.adc_num,
 				sensor_info.channel_num
 			);
+	resetFastRead(sensor_name);
+	return result;
 }
 
 int8_t SensorsAPI::storeParametersInMemory(sensor_t sensor_name)

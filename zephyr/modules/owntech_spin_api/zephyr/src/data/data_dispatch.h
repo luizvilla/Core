@@ -43,6 +43,9 @@
 
 const uint16_t PEEK_NO_VALUE = 0xFFFF;
 const uint8_t CHANNELS_BUFFERS_SIZE = 32;
+/* DMA buffers are filled with this value before the acquisition starts: a
+ * 12-bit ADC cannot produce it, so a slot holding it was never written. */
+const uint16_t DMA_EMPTY_SAMPLE = 0xFFFF;
 
 /**
  * Dispatch method
@@ -114,5 +117,33 @@ uint16_t* data_dispatch_get_acquired_values(uint8_t adc_number,
 uint16_t data_dispatch_peek_acquired_value(uint8_t adc_number,
                                            uint8_t channel_rank);
 
+
+/**
+ * @brief  Circular DMA buffer of an ADC, for the latest-sample reads
+ *         (DataAPI fast channels). Only in task mode, where the DMA buffer
+ *         size is a multiple of the sequence length, so that slot i always
+ *         holds the sample of rank (i mod channel count) + 1.
+ *
+ * @param[in]  adc_number    ADC number (1-5)
+ * @param[out] buffer        DMA buffer
+ * @param[out] buffer_size   Buffer size in samples
+ * @param[out] channel_count Sequence length of the ADC
+ * @return 0 on success, -1 if the ADC has no DMA buffer or the dispatch is
+ *         not in task mode.
+ */
+int8_t data_dispatch_get_dma_buffer(uint8_t adc_number,
+                                    volatile const uint16_t*& buffer,
+                                    uint32_t& buffer_size,
+                                    uint8_t& channel_count);
+
+/**
+ * @brief  Restart an ADC's acquisition from the start of its DMA buffer,
+ *         which restores the slot-to-rank mapping after an ADC overrun:
+ *         stop the ADC, restart the DMA channel at slot 0, empty the buffer,
+ *         clear the overrun flag, restart the ADC. Cold path, thread context.
+ *
+ * @param[in] adc_number ADC number (1-5)
+ */
+void data_dispatch_resync(uint8_t adc_number);
 
 #endif /* DATA_DISPATCH_H_ */

@@ -96,6 +96,34 @@ const uint8_t DATA_IS_OLD     = 1;
 const uint8_t DATA_IS_MISSING = 2;
 
 /**
+ * Latest-sample read straight from the circular DMA buffer, without the data
+ * dispatch (Core2 docs/testing/timing-optimization.md, section 6).
+ *
+ * The DMA buffer of an ADC in task mode is a multiple of its sequence length
+ * n, so slot i always holds the sample of rank (i mod n) + 1. The DMA writes
+ * its next sample at slot S - CNDTR (S the buffer size, CNDTR the samples
+ * left before the wrap), so the newest sample of a rank is a function of
+ * CNDTR alone: newest_slot[CNDTR], computed once per channel.
+ */
+static const uint8_t DATA_FAST_MAX_DMA_SIZE = 64;
+static const uint32_t DATA_FAST_ADC_ISR_OVR = (1UL << 4); /* ADC_ISR.OVR */
+static const uint16_t DATA_FAST_EMPTY_SAMPLE = 0xFFFF; /* slot never written */
+
+struct DataFastChannel
+{
+	volatile const uint16_t* dma_buffer;    /* circular DMA buffer of the ADC */
+	volatile const uint32_t* dma_remaining; /* DMA CNDTR of the ADC */
+	volatile const uint32_t* adc_isr;       /* ADC ISR (overrun flag) */
+	volatile const uint8_t*  resync_pending;/* overrun seen, resync to do */
+	float32_t gain;                         /* raw x gain + offset */
+	float32_t offset;
+	uint32_t  last_remaining;               /* CNDTR at the previous read */
+	uint8_t   adc_index;
+	uint8_t   dma_size;                     /* S */
+	uint8_t   newest_slot[DATA_FAST_MAX_DMA_SIZE + 1]; /* CNDTR -> slot */
+};
+
+/**
  *  Static class definition
  */
 
@@ -717,6 +745,42 @@ private:
 	 * Pushes all currently acquired data through the dispatch mechanism.
 	 */
 	static void doFullDispatch();
+
+	/**
+	 * @brief Prepare a latest-sample read of a channel from the DMA buffer
+	 *        (DataFastChannel). Cold path, called once per channel.
+	 *
+	 * @return 0 if prepared; -1 if not possible (acquisition not started,
+	 *         dispatch not in task mode, DMA buffer larger than
+	 *         DATA_FAST_MAX_DMA_SIZE or not a multiple of the sequence
+	 *         length, non-linear conversion): use getChannelLatest().
+	 */
+	static int8_t prepareFastChannel(adc_t adc_number,
+									 uint8_t channel_num,
+									 DataFastChannel& channel);
+
+	/**
+	 * @brief Report an ADC overrun seen by a fast read: the ADC's reads
+	 *        return DATA_IS_MISSING until resyncFastChannels() has run.
+	 *        Hot path (no work but two stores).
+	 */
+	static void noteFastOverrun(uint8_t adc_index);
+
+	/**
+	 * @brief Resynchronize the ADCs on which a fast read saw an overrun
+	 *        (data_dispatch_resync()). Thread context; does nothing when no
+	 *        overrun is pending.
+	 */
+	static void resyncFastChannels();
+
+	/**
+	 * @brief Number of ADC overruns seen by the fast reads since start.
+	 */
+	static uint32_t getFastOverrunCount();
+
+private:
+	static volatile uint8_t fast_resync_pending[ADC_COUNT];
+	static volatile uint32_t fast_overrun_count;
 
 private:
 	static bool is_started;

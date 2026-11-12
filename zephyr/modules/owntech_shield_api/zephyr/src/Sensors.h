@@ -303,6 +303,38 @@ public:
 	float32_t getLatestValue(sensor_t sensor_name, uint8_t* dataValid = nullptr);
 
 	/**
+	 * @brief Same as getLatestValue(), with the same return values and
+	 *        validity codes, but reads the newest sample of the sensor's
+	 *        channel straight from the ADC's circular DMA buffer: no data
+	 *        dispatch is needed, and the call costs a few loads and the
+	 *        conversion (Core2 docs/testing/timing-optimization.md, section 6).
+	 *
+	 *        - The first call prepares the read (cold). If the read cannot be
+	 *          prepared (no DMA buffer in task mode, non-linear conversion),
+	 *          every call falls back to getLatestValue().
+	 *        - `DATA_IS_OK` when the DMA position moved since the previous
+	 *          call for this sensor, `DATA_IS_OLD` otherwise (ADC stopped).
+	 *        - `NO_VALUE` and `DATA_IS_MISSING` when no sample was written
+	 *          yet, or after an ADC overrun until serviceFastReads() has
+	 *          resynchronized the ADC.
+	 *        - Changing the sensor's conversion parameters takes effect at
+	 *          the next call.
+	 */
+	float32_t getLatestValueFast(sensor_t sensor_name, uint8_t* dataValid = nullptr);
+
+	/**
+	 * @brief Resynchronize the ADCs on which getLatestValueFast() saw an
+	 *        overrun. Call it regularly from a thread (not from the critical
+	 *        task); it costs a few loads when there is nothing to do.
+	 */
+	void serviceFastReads();
+
+	/**
+	 * @brief Number of ADC overruns getLatestValueFast() saw since start.
+	 */
+	uint32_t getFastReadOverruns();
+
+	/**
 	 * @brief Use this function to convert values obtained using matching
 	 *        spin.data.get*RawValues() function.
 	 * 	
@@ -529,6 +561,18 @@ private:
 	 *
 	 */
 	sensor_info_t getEnabledSensorInfo(sensor_t sensor_name);
+
+	/**
+	 * @brief  Cold part of getLatestValueFast(): prepare the sensor's read,
+	 *         or mark it to fall back to getLatestValue().
+	 */
+	float32_t prepareFastRead(sensor_t sensor_name, uint8_t* dataValid);
+
+	/**
+	 * @brief  The sensor's conversion parameters changed: update a prepared
+	 *         fast read (linear), or make it fall back to getLatestValue().
+	 */
+	void resetFastRead(sensor_t sensor_name);
 
 	/**
 	 * @brief    Builds the list of device-tree defined sensors for each ADC.

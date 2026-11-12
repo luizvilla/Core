@@ -31,6 +31,9 @@
 /* Zephyr */
 #include <zephyr/kernel.h>
 
+/* STM32 LL */
+#include <stm32_ll_adc.h>
+
 /* OwnTech API */
 #include "adc.h"
 #include "SpinAPI.h"
@@ -98,6 +101,12 @@ static size_t    dma_buffer_sizes[ADC_COUNT]      = {0};
 
 /* Dispatch method */
 static dispatch_t dispatch_type;
+
+/* Next DMA buffer index to dispatch, in task mode */
+static size_t next_dma_buffer_index[ADC_COUNT] = {0};
+
+/* ADC instances, for the overrun recovery */
+static ADC_TypeDef* const adc_instances[ADC_COUNT] = {ADC1, ADC2, ADC3, ADC4, ADC5};
 
 /**
  * Private Functions
@@ -210,6 +219,10 @@ void data_dispatch_init(dispatch_t dispatch_method, uint32_t repetitions)
 			dma_buffer_sizes[adc_index] = dma_buffer_size;
 			dma_main_buffers[adc_index] =
 					(uint16_t*)k_malloc(dma_buffer_size * sizeof(uint16_t));
+			for (size_t i = 0 ; i < dma_buffer_size ; i++)
+			{
+				dma_main_buffers[adc_index][i] = DMA_EMPTY_SAMPLE;
+			}
 
 			if (dispatch_type == interrupt)
 			{
@@ -311,7 +324,6 @@ OWNTECH_FAST_CODE void data_dispatch_do_dispatch(uint8_t adc_num)
 	}
 	OT_TIMING_DISPATCH_SAMPLES(adc_index, data_count_in_dma_buffer);
 
-	static size_t next_dma_buffer_index[ADC_COUNT] = {0};
 	size_t channel_count = enabled_channels_count[adc_index];
 	size_t dma_buffer_size = (dispatch_type == interrupt) ?
 				channel_count : dma_buffer_sizes[adc_index];
@@ -366,6 +378,53 @@ OWNTECH_FAST_CODE void data_dispatch_do_full_dispatch()
 		data_dispatch_do_dispatch(adc_num);
 		OT_TIMING_DISPATCH_CYCLES(adc_num - 1, t0);
 	}
+}
+
+int8_t data_dispatch_get_dma_buffer(uint8_t adc_number,
+									volatile const uint16_t*& buffer,
+									uint32_t& buffer_size,
+									uint8_t& channel_count)
+{
+	uint8_t adc_index = adc_number - 1;
+	if ( (adc_index >= ADC_COUNT) || (enabled_channels_count == nullptr) )
+		return -1;
+	if ( (dispatch_type != task) || (dma_main_buffers[adc_index] == nullptr) )
+		return -1;
+	if (enabled_channels_count[adc_index] == 0)
+		return -1;
+
+	buffer        = dma_main_buffers[adc_index];
+	buffer_size   = dma_buffer_sizes[adc_index];
+	channel_count = enabled_channels_count[adc_index];
+	return 0;
+}
+
+void data_dispatch_resync(uint8_t adc_number)
+{
+	uint8_t adc_index = adc_number - 1;
+	if ( (adc_index >= ADC_COUNT) || (dma_main_buffers[adc_index] == nullptr) )
+		return;
+
+	ADC_TypeDef* adc = adc_instances[adc_index];
+
+	/* Stop the conversions */
+	if (LL_ADC_REG_IsConversionOngoing(adc) != 0)
+	{
+		LL_ADC_REG_StopConversion(adc);
+		while (LL_ADC_REG_IsStopConversionOngoing(adc) != 0) { /* Wait */ }
+	}
+
+	/* Restart the DMA at slot 0 with an empty buffer */
+	dma_restart_adc_acquisition(adc_number);
+	for (size_t i = 0 ; i < dma_buffer_sizes[adc_index] ; i++)
+	{
+		dma_main_buffers[adc_index][i] = DMA_EMPTY_SAMPLE;
+	}
+	next_dma_buffer_index[adc_index] = 0;
+
+	/* Clear the overrun and restart the (externally triggered) sequence */
+	LL_ADC_ClearFlag_OVR(adc);
+	LL_ADC_REG_StartConversion(adc);
 }
 
 /**

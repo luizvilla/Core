@@ -38,6 +38,7 @@
 
 /* Current module private functions */
 #include "./data/data_dispatch.h"
+#include "./data/dma.h"
 #include "owntech_fast_code.h"
 #include "owntech_timing_probe.h"
 
@@ -57,6 +58,8 @@ uint8_t DataAPI::current_rank[ADC_COUNT] = {0};
 DispatchMethod_t DataAPI::dispatch_method = DispatchMethod_t::on_dma_interrupt;
 uint32_t DataAPI::repetition_count_between_dispatches = 0;
 float32_t*** DataAPI::converted_values_buffer = nullptr;
+volatile uint8_t DataAPI::fast_resync_pending[ADC_COUNT] = {0};
+volatile uint32_t DataAPI::fast_overrun_count = 0;
 
 
 adc_t DataAPI::current_adc[PIN_COUNT] = {DEFAULT_ADC};
@@ -714,6 +717,100 @@ OWNTECH_FAST_CODE float32_t DataAPI::getChannelLatest(adc_t adc_num,
 		OT_TIMING_READ_END(t1, t2_peek);
 		return peekValue;
 	}
+}
+
+static_assert(DATA_FAST_EMPTY_SAMPLE == DMA_EMPTY_SAMPLE,
+			  "fast reads and dispatch must agree on the empty DMA sample");
+
+int8_t DataAPI::prepareFastChannel(adc_t adc_num,
+								   uint8_t channel_num,
+								   DataFastChannel& channel)
+{
+	static volatile uint32_t* const adc_isr_registers[ADC_COUNT] =
+	{
+		&(ADC1->ISR), &(ADC2->ISR), &(ADC3->ISR), &(ADC4->ISR), &(ADC5->ISR)
+	};
+
+	if (DataAPI::is_started == false)
+		return -1;
+
+	uint8_t channel_rank = DataAPI::getChannelRank(adc_num, channel_num);
+	if (channel_rank == 0)
+		return -1;
+
+	if (data_conversion_get_conversion_type(adc_num, channel_num) !=
+		conversion_linear)
+		return -1;
+
+	volatile const uint16_t* buffer;
+	uint32_t size;
+	uint8_t count;
+	if (data_dispatch_get_dma_buffer(adc_num, buffer, size, count) != 0)
+		return -1;
+	if ( (size > DATA_FAST_MAX_DMA_SIZE) || (size % count != 0) ||
+		 (channel_rank > count) )
+		return -1;
+
+	uint8_t adc_index = adc_num - 1;
+	uint32_t rank_index = channel_rank - 1;
+
+	/**
+	 * CNDTR = c: next write at slot p = (S - c) mod S, newest written slot
+	 * p - 1 (mod S). The newest slot of the rank is the last slot at or
+	 * before it with (slot mod n) == rank_index.
+	 */
+	for (uint32_t c = 0 ; c <= size ; c++)
+	{
+		uint32_t newest = (2 * size - c - 1) % size;
+		uint32_t back = (newest + count - rank_index) % count;
+		channel.newest_slot[c] = (uint8_t)((newest + size - back) % size);
+	}
+
+	channel.dma_buffer     = buffer;
+	channel.dma_remaining  = dma_get_remaining_register(adc_num);
+	channel.adc_isr        = adc_isr_registers[adc_index];
+	channel.resync_pending = &DataAPI::fast_resync_pending[adc_index];
+	channel.gain           = data_conversion_get_parameter(adc_num,
+														   channel_num, 1);
+	channel.offset         = data_conversion_get_parameter(adc_num,
+														   channel_num, 2);
+	channel.last_remaining = UINT32_MAX;
+	channel.adc_index      = adc_index;
+	channel.dma_size       = (uint8_t)size;
+
+	return 0;
+}
+
+OWNTECH_FAST_CODE void DataAPI::noteFastOverrun(uint8_t adc_index)
+{
+	if (DataAPI::fast_resync_pending[adc_index] == 0)
+	{
+		DataAPI::fast_resync_pending[adc_index] = 1;
+		DataAPI::fast_overrun_count = DataAPI::fast_overrun_count + 1;
+	}
+}
+
+void DataAPI::resyncFastChannels()
+{
+	for (uint8_t adc_index = 0 ; adc_index < ADC_COUNT ; adc_index++)
+	{
+		if (DataAPI::fast_resync_pending[adc_index] != 0)
+		{
+			/**
+			 * The reads of this ADC return DATA_IS_MISSING while pending. An
+			 * overrun that occurs again after the restart keeps its flag set,
+			 * so the next read reports it again.
+			 */
+			uint8_t adc_num = adc_index + 1;
+			data_dispatch_resync(adc_num);
+			DataAPI::fast_resync_pending[adc_index] = 0;
+		}
+	}
+}
+
+uint32_t DataAPI::getFastOverrunCount()
+{
+	return DataAPI::fast_overrun_count;
 }
 
 uint8_t DataAPI::getChannelRank(adc_t adc_num, uint8_t channel_num)

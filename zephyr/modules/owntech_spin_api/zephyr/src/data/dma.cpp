@@ -68,6 +68,19 @@ static const uint32_t source_triggers[5] =
 
 static size_t buffers_sizes[5] = {0};
 
+/* DMA 1 channel x serves ADC x (dma_configure_adc_acquisition). */
+static DMA_Channel_TypeDef* const dma_channels[5] =
+{
+	DMA1_Channel1,
+	DMA1_Channel2,
+	DMA1_Channel3,
+	DMA1_Channel4,
+	DMA1_Channel5
+};
+
+/* -1 is equivalent to (buffer size - 1) in modulo arithmetics */
+static int32_t previous_dma_latest_data_pointers[5] = {-1, -1, -1, -1, -1};
+
 typedef struct
 {
 	bool     has_interrupt;
@@ -195,12 +208,6 @@ void dma_configure_adc_acquisition(uint8_t adc_number,
 
 OWNTECH_FAST_CODE uint32_t dma_get_retrieved_data_count(uint8_t adc_number)
 {
-	/**
-	 * Permanent variable
-	 * -1 is equivalent to (buffer size - 1) in modulo arithmetics
-	 */
-	static int32_t previous_dma_latest_data_pointers[5] = {-1, -1, -1, -1, -1};
-
 	/* Get data */
 	uint32_t dma_index = adc_number - 1;
 	uint32_t dma_remaining_data = LL_DMA_GetDataLength(DMA1, dma_index);
@@ -227,4 +234,25 @@ OWNTECH_FAST_CODE uint32_t dma_get_retrieved_data_count(uint8_t adc_number)
 	previous_dma_latest_data_pointers[dma_index] = dma_latest_data_pointer;
 
 	return retrieved_data;
+}
+
+volatile const uint32_t* dma_get_remaining_register(uint8_t adc_number)
+{
+	return &(dma_channels[adc_number - 1]->CNDTR);
+}
+
+void dma_restart_adc_acquisition(uint8_t adc_number)
+{
+	uint32_t dma_index = adc_number - 1;
+
+	LL_DMA_DisableChannel(DMA1, dma_index);
+	while (LL_DMA_IsEnabledChannel(DMA1, dma_index) != 0) { /* Wait */ }
+
+	/* Clear the channel's flags (global flag clears HT, TC and TE) */
+	DMA1->IFCR = (DMA_IFCR_CGIF1 << (4U * dma_index));
+
+	LL_DMA_SetDataLength(DMA1, dma_index, buffers_sizes[dma_index]);
+	previous_dma_latest_data_pointers[dma_index] = -1;
+
+	LL_DMA_EnableChannel(DMA1, dma_index);
 }

@@ -66,5 +66,19 @@ void dma_configure_adc_acquisition(uint8_t adc_number,
  */
 uint32_t dma_get_retrieved_data_count(uint8_t adc_number);
 
+/**
+ * @brief  Address of the DMA channel's CNDTR register (samples left before
+ *         the circular buffer wraps) for an ADC: the next sample is written
+ *         at index (buffer size - CNDTR). Used by the latest-sample reads.
+ */
+volatile const uint32_t* dma_get_remaining_register(uint8_t adc_number);
+
+/**
+ * @brief  Restart the ADC's DMA channel at the start of its buffer, with
+ *         the same buffer and size, and reset the retrieved data count.
+ *         The ADC must be stopped. Cold path (overrun recovery).
+ */
+void dma_restart_adc_acquisition(uint8_t adc_number);
+
 
 #endif /* DMA_H_ */

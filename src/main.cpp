@@ -624,6 +624,7 @@ void loop_communication_task()
  */
 void loop_application_task()
 {
+    shield.sensors.serviceFastReads();  /* resynchronize an ADC after an overrun (fast sensor reads) */
     if (is_scope_downloading)
     {
         dump_scope_datas(scope);
@@ -690,12 +691,12 @@ void loop_application_task()
     critical_gap_max_cycles = 0U;
     const uint32_t vac_stale = vac_stale_count;
     vac_stale_count = 0U;
-    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u, rate %u Hz, gap max %u us, vac stale %u\n",
+    printk("load us: total %u, sensors %u, control %u, pwm %u, scope %u, rate %u Hz, gap max %u us, vac stale %u, adc ovr %u\n",
            static_cast<unsigned int>(load_us),
            static_cast<unsigned int>(part_max_cycles[0] / cycles_per_us), static_cast<unsigned int>(part_max_cycles[1] / cycles_per_us),
            static_cast<unsigned int>(part_max_cycles[2] / cycles_per_us), static_cast<unsigned int>(part_max_cycles[3] / cycles_per_us),
            static_cast<unsigned int>(rate_hz), static_cast<unsigned int>(gap_max),
-           static_cast<unsigned int>(vac_stale));
+           static_cast<unsigned int>(vac_stale), static_cast<unsigned int>(shield.sensors.getFastReadOverruns()));
     for (int k = 0; k < 4; ++k) part_max_cycles[k] = 0U;
     /* Synchronization criterion, as the inverter judges it (one-period averages, #7) and the grid verdict. */
     const dqo_t vdq_avg = control.inverter.getVdqAverage();
@@ -812,15 +813,16 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     (void)meas_in;
     (void)cmd_in;
 #endif
-    /*----- Read sensors, holding the last valid value ----- */
-    meas_data = shield.sensors.getLatestValue(ILow1);
+    /*----- Read sensors, holding the last valid value -----
+     * Newest sample of each channel read from the ADC's DMA buffer (timing-optimization.md, change 6). */
+    meas_data = shield.sensors.getLatestValueFast(ILow1);
     if (meas_data != NO_VALUE) i_low_1_value = meas_data;
 
-    meas_data = shield.sensors.getLatestValue(VLow);
+    meas_data = shield.sensors.getLatestValueFast(VLow);
     if (meas_data != NO_VALUE) v_low_value = meas_data;
 
     v_ac_updated = false;
-    meas_data = shield.sensors.getLatestValue(VAC);
+    meas_data = shield.sensors.getLatestValueFast(VAC);
     if (meas_data != NO_VALUE)
     {
         v_ac_updated = true;
@@ -834,14 +836,14 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     // meas_data = shield.sensors.getLatestValue(ILow2);
     // if (meas_data != NO_VALUE) i_low_2_value = meas_data;
 
-    meas_data = shield.sensors.getLatestValue(IAC);
+    meas_data = shield.sensors.getLatestValueFast(IAC);
     if (meas_data != NO_VALUE) i_ac_value = meas_data;
     if (trip_test_countdown != 0U && --trip_test_countdown == 0U)
     {
         i_ac_value = trip_test_current;
     }
 
-    meas_data = shield.sensors.getLatestValue(VDCBus);
+    meas_data = shield.sensors.getLatestValueFast(VDCBus);
     if (meas_data != NO_VALUE)
     {
         v_dc_bus_value = meas_data;
