@@ -31,7 +31,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 
 | # | Change | Where | Status |
 |---|---|---|---|
-| 1 | `load` bookkeeping: cycle counter read directly, raw cycles in the task, µs conversion in the telemetry thread | `src/main.cpp` | Planned |
+| 1 | `load` bookkeeping: cycle counter read directly, raw cycles in the task, µs conversion in the telemetry thread | `src/main.cpp` | Measured alone: **−6.97 µs** (branch `perf/timing-1-bookkeeping`, `527e36d`) |
 | 2 | Scope: 10 kHz around the relay only on request (2 kHz by default) | `src/main.cpp` | Planned |
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` (and the shield API if needed) | Planned |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork | Planned |
@@ -42,3 +42,21 @@ Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), wi
 ## Results
 
 (one section per change, filled as it is measured)
+
+### 1 · Load bookkeeping (`527e36d`, campaign `2026-11-12_527e36d_151613_MrgUHA`)
+
+The task called `k_cycle_get_32()` five times per tick and converted five intervals with `k_cyc_to_us_floor32()` (a 64-bit division). It now reads the cycle counter (`DWT->CYCCNT`, one load, enabled in `setup_routine`) and keeps cycle counts; the telemetry thread divides by 170. Same telemetry fields, same lost-tick rule.
+
+| Stage | Interrupt / period (mean) | Task tick worst | Lost | Writes (mean) | Scope (mean) |
+|---|---|---|---|---|---|
+| OFF_IDLE | 56.4 → 50.1 (−6.3) | 52.0 → 45.0 | 0 → 0 | 2.57 → 1.18 | 2.86 → 1.16 |
+| OFF_BUSREG | 62.8 → 55.9 (−6.9) | 58.4 → 51.5 | 0 → 0 | 7.21 → 5.82 | 3.75 → 1.47 |
+| OFF_MPPT | 63.6 → 56.7 (−6.9) | 58.9 → 51.4 | 0 → 0 | 6.95 → 5.59 | 3.77 → 1.47 |
+| SETTLE_c | 66.9 → 60.0 (−6.9) | 62.4 → 55.0 | 0 → 0 | 10.65 → 9.29 | 3.47 → 1.15 |
+| CONNECT_g | 71.0 → 63.6 (−7.4) | 66.4 → 58.7 | 0 → 0 | 10.59 → 9.24 | 7.13 → 4.30 |
+| INJECT_n | 71.7 → 64.5 (−7.2) | 63.8 → 58.9 | 0 → 0 | 10.71 → 9.35 | 6.21 → 3.59 |
+| VAC_FOLLOW_a | 69.2 → 62.3 (−6.9) | 64.2 → 56.8 | 0 → 0 | 10.78 → 9.41 | 3.77 → 1.45 |
+| FOLLOW_CONN_G | 71.8 → 64.4 (−7.4) | 68.7 → 61.3 | 0 → 0 | 10.60 → 9.24 | 7.19 → 4.36 |
+| OPEN_LOOP_o | 70.1 → 63.2 (−6.9) | 65.3 → 57.8 | 0 → 0 | 10.77 → 9.41 | 3.31 → 1.00 |
+
+Each tick part loses about 1.4 µs (its closing `k_cycle_get_32()` and conversion), the sensor reads 0.04 µs; the controlStep sections do not change. More than the 4 µs estimated from the grey segment, because part of the bookkeeping sat inside the measured parts. L0-TIM-01/02/03 all pass; background tasks served.
