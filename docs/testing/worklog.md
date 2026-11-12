@@ -562,3 +562,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | 1: none (same telemetry fields and lost-tick rule; the task reads `DWT->CYCCNT`, enabled in `setup_routine`, and keeps cycles; the telemetry thread converts). 2: **the scope samples at 2 kHz in every stage by default**; key `v` switches CONNECT, INJECT and FOLLOW_CONNECT to 10 kHz as before. 3: boost leg 1 `start`/`stop` and `setBurstMode` sent on change; **a stop from the safety API now holds for boost leg 1 until the next mode change** (it was undone by the next tick; the bridge already behaved this way). 4: none (θ wrap and sync-window index without `fmodf`/`%`; `fmodf` kept as a fallback) |
 | Evidence | L0-TIM-01/02/03 pass alone and together on the bare Spin; interrupt time per period −10.15 µs on average (−6.3 µs OFF/boost idle to −13.2 µs G), worst task tick 45.1–56.1 µs, 0 lost periods. Host L0: 125 pass, 7 known, 0 new; L0-GFL 52 pass. USB build has no timing symbol |
 | Hardware check | Pending: bench with the USB firmware (steps 1 and 2b); for a capture around the relay at 10 kHz press `v` first (changed default) |
+
+## 2026-11-12 — Critical path executed from CCM SRAM (optimization 5a)
+
+| Field | Value |
+|---|---|
+| Commit | `2b3a893` on branch `perf/timing-5-ccm`; this entry in the `docs(timing): …` commit that follows |
+| Files | `zephyr/boards/owntech/spin/spin.dts`; `zephyr/modules/owntech_spin_api/zephyr/public_api/owntech_fast_code.h` (new), `src/fast_code.h` (new); tags in `src/main.cpp`, `src/app/control_step.cpp`, `src/grid_observer/gridObserver.cpp`, `src/boost_converter/boost.cpp` and the OwnTech hrtim driver, task, safety, spin (data, PWM, GPIO) and shield (Power, Sensors) modules |
+| Reason | Luiz Villa: use RAM functions to speed up the critical path. At 4 flash wait states the tick is still bound by flash fetches (the ART holds 1 KB of instructions, the per-period path is about 18 KB). The CCM SRAM fetches code on the I-bus at 0 wait states. Investigation and results: [timing-optimization.md](timing-optimization.md) section 5 |
+| Behaviour change | None in the control: the same code runs from another address. **Memory map:** `sram0` 128 KB → 96 KB (SRAM1 + SRAM2; 40 % used); the CCM's I-bus alias `0x10000000` (31 KB) is Zephyr's `zephyr,itcm`, filled from flash at boot by `z_data_copy`; the retained boot-mode byte stays at `0x2001FFFF`. 11.2 KB of per-period functions are tagged; the library forks stay in flash (5b) |
+| Evidence | L0-TIM-01/02/03 pass on the bare Spin; interrupt time per period −8.02 µs on average (−5.7 µs OFF_IDLE to −9.1 µs INJECT), worst task tick 38.8–47.5 µs, 0 lost periods; two runs agree within 0.1 µs. Host L0: 125 pass, 7 known, 0 new. USB build has no timing symbol |
+| Hardware check | Pending: bench with the USB firmware (boot through MCUboot, steps 1 and 2b); the board holds the TIMING firmware |

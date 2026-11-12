@@ -36,7 +36,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` | Measured alone: **−2.1 to −2.3 µs with the boost running**, 0 in OFF_IDLE (branch `perf/timing-3-writes`, `fb07a70`); bridge duty API: proposal 3b below |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
 | All | 1–4 together: final verdict | merge `5fcf14b` | **−10.15 µs** mean over the stages (−6.3 to −13.2 µs per stage), every test passes |
-| 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | Proposal, not measured: [section 5](#5--hot-path-in-ccm-sram-proposal) |
+| 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | 5a measured: **−8.02 µs** mean (−5.7 to −9.1 µs per stage; branch `perf/timing-5-ccm`, `2b3a893`); 5b to do. [Section 5](#5--hot-path-in-ccm-sram) |
 
 Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
 
@@ -144,11 +144,11 @@ The float modulo is worth replacing (0.41 µs); the integer ones are not worth m
 | 4 Modulos | −0.44 µs | every stage |
 | **All** | **−10.15 µs** | |
 
-**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément; proposal 5 (hot path in CCM SRAM, every part of the tick), no API change.
+**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément; proposal 5 (hot path in CCM SRAM, every part of the tick), no API change: 5a done (−8.02 µs), 5b next.
 
-### 5 · Hot path in CCM SRAM (proposal)
+### 5 · Hot path in CCM SRAM
 
-Investigation only, from the USB ELF and link map at `5fcf14b` and the Zephyr 4.0 tree in PlatformIO; nothing built or measured.
+Investigation from the USB ELF and link map at `5fcf14b` and the Zephyr 4.0 tree in PlatformIO; result of 5a at the end of the section.
 
 **Why.** The flash wait states 8 → 4 shortened every part of the tick by about 38 %: the tick is still bound by flash fetches. The ART cache holds 1 KB of instructions; the per-tick path is about 18 KB of mostly straight-line code, so it misses on every tick. A linear extrapolation of the 8 WS and 4 WS figures to 0 WS gives `controlStep` about 11 µs instead of 32 µs and `calculateDuty` about 6 µs instead of 16 µs. This is a ceiling, not an estimate: peripheral register accesses and constants left in flash do not speed up.
 
@@ -213,3 +213,33 @@ Total 16–18 KB: it fits in 31 KB. Init, telemetry, console, USB, logging, NVS 
 **Plan.** Branch `perf/timing-5-ccm` from `5fcf14b`, measured with L0-TIM-01/02/03 as changes 1–4:
 - **5a:** device tree, plus tags on Core2 and the OwnTech modules. Proves the method, the boot copy and the MPU behaviour.
 - **5b:** tags in the single_phase_inverter and control_library forks.
+
+#### 5a · Core2 and OwnTech modules (`2b3a893`, campaign `2026-11-12_2b3a893_162602_cYRLm5`, against `5fcf14b`)
+
+What was done:
+- **Device tree** ([spin.dts](../../zephyr/boards/owntech/spin/spin.dts)): `ccm_code` at `0x10000000`, 31 KB, chosen `zephyr,itcm`; `sram0` reduced to 96 KB.
+- **Tag macros:** `OWNTECH_FAST_CODE` ([owntech_fast_code.h](../../zephyr/modules/owntech_spin_api/zephyr/public_api/owntech_fast_code.h), empty without the chosen node) and `FAST_CODE` ([src/fast_code.h](../../src/fast_code.h), empty on the host).
+- **Tagged:** `loop_critical_task` (tick body inlined), `scopeSample`, `scope_trigger`, `controlStep`, `GridObserver::update/updateEstimates`, the boost per-tick functions; in the OwnTech modules, `_hrtim_callback`, `user_task_proxy`, `safety_task/safety_watch`, the data dispatch and conversion, `DataAPI` and `SensorsAPI` reads, `dma_get_retrieved_data_count`, `PowerAPI`/`PwmHAL` duty, start/stop and burst, the `hrtim_*` they call, `GpioHAL::setPin/resetPin`.
+
+Link: ITCM 11.2 KB of 31 KB, RAM 39.7 KB of 96 KB. 58 veneers, almost all calls into the library forks (5b) and newlib (`fmodf`, `hypotf`, `sinf`, `fminf/fmaxf`, `memset`). On target the boot copy and the execution from `0x10000000` work without an MPU change (L0-TIM-03 ran to its end, no fault). Two runs (`d9cfc91-dirty`, `2b3a893`) agree within 0.1 µs.
+
+| Stage | Interrupt / period (mean) | Task tick worst | Gap worst | Lost | Sensors | Control | Apply | Scope | Dispatch | Safety | inv_duty (flash) | Observer |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| OFF_IDLE | 50.4 → 44.7 (−5.7) | 45.1 → 38.8 | 121.1 → 117.3 | 0 → 0 | 8.13 → 7.31 | 27.76 → 24.70 | 1.44 → 1.06 | 1.32 → 0.99 | 9.39 → 8.68 | 1.42 → 1.00 | 14.54 → 14.40 | 3.62 → 2.79 |
+| OFF_BUSREG | 53.9 → 46.7 (−7.2) | 50.7 → 42.0 | 111.5 → 111.0 | 0 → 0 | 8.12 → 7.30 | 28.66 → 25.17 | 3.71 → 2.35 | 1.61 → 1.23 | 9.39 → 8.68 | 1.40 → 0.98 | 14.53 → 14.37 | 3.62 → 2.79 |
+| OFF_MPPT | 54.8 → 47.5 (−7.4) | 48.6 → 41.5 | 110.0 → 106.6 | 0 → 0 | 8.12 → 7.31 | 29.66 → 25.98 | 3.66 → 2.29 | 1.61 → 1.23 | 9.39 → 8.68 | 1.40 → 0.98 | 14.49 → 14.18 | 3.62 → 2.79 |
+| SETTLE_c | 57.8 → 49.4 (−8.4) | 51.6 → 43.7 | 112.7 → 113.6 | 0 → 0 | 8.12 → 7.30 | 29.53 → 25.89 | 7.14 → 4.63 | 1.27 → 0.93 | 9.39 → 8.68 | 1.40 → 0.98 | 15.24 → 15.08 | 3.62 → 2.79 |
+| CONNECT_g | 58.2 → 49.8 (−8.4) | 53.1 → 45.0 | 111.9 → 117.5 | 0 → 0 | 8.13 → 7.30 | 29.92 → 26.26 | 7.11 → 4.62 | 1.31 → 0.94 | 9.39 → 8.68 | 1.41 → 0.99 | 15.63 → 15.46 | 3.62 → 2.79 |
+| INJECT_n | 59.8 → 50.7 (−9.1) | 53.5 → 44.7 | 116.3 → 116.0 | 0 → 0 | 8.13 → 7.31 | 31.44 → 27.15 | 7.23 → 4.69 | 1.19 → 0.85 | 9.38 → 8.68 | 1.43 → 1.01 | 15.76 → 15.42 | 3.62 → 2.79 |
+| VAC_FOLLOW_a | 60.2 → 51.5 (−8.7) | 53.5 → 45.2 | 113.5 → 112.3 | 0 → 0 | 8.12 → 7.31 | 31.49 → 27.60 | 7.26 → 4.71 | 1.58 → 1.23 | 9.39 → 8.68 | 1.40 → 0.98 | 14.53 → 14.37 | 3.62 → 2.79 |
+| FOLLOW_CONN_G | 59.0 → 50.4 (−8.7) | 56.1 → 47.5 | 112.4 → 112.0 | 0 → 0 | 8.12 → 7.31 | 30.70 → 26.84 | 7.11 → 4.62 | 1.34 → 0.96 | 9.39 → 8.68 | 1.40 → 0.98 | 15.80 → 15.64 | 3.62 → 2.79 |
+| OPEN_LOOP_o | 61.1 → 52.5 (−8.6) | 55.3 → 47.4 | 121.3 → 115.3 | 0 → 0 | 8.13 → 7.31 | 32.79 → 28.92 | 7.27 → 4.71 | 1.12 → 0.87 | 9.38 → 8.68 | 1.44 → 1.02 | 14.53 → 14.37 | 3.62 → 2.79 |
+
+Parts in µs (mean, L0-TIM-03): tick sensors, control (controlStep), apply (PWM and relay), scope; task API dispatch and safety; `calculateDuty` (`inv_duty`, still in flash); grid observer.
+
+**Reading.**
+- The moved code gains about 25–35 % per part: PWM writes −2.5 µs with the bridge on, controlStep's own code −3 to −4 µs, observer −0.8 µs, safety −0.4 µs.
+- `inv_duty` does not move (14.4–15.6 µs): it is the largest part left, and it is 5b.
+- The ADC path gains least (sensors −0.8 µs, dispatch −0.7 µs): its time is mostly peripheral and memory accesses, not instruction fetches. A cheaper path there is still Jean's topic.
+- Worst task tick 38.8–47.5 µs (budget 80 µs). L0-TIM-01/02/03 pass. Host L0: 125 pass, 7 known, 0 new (campaign `2026-11-12_2b3a893_162801_p1MFbA`). The USB ELF builds and has no timing symbol.
+
