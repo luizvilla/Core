@@ -108,6 +108,9 @@ static uint16_t leg1_low_deadtime_ns = 100;
 static float32_t voltage_reference = app::initial_voltage_reference;
 /* Boost, inverter and grid observer, with the state kept between control steps. */
 static ControlState control;
+/* Boost 100 Hz rejection (Jean, ac9f5aa): VDCBus notch and current resonator, both off by default (keys N, K). */
+static bool voltage_notch_enabled = false;
+static bool current_resonant_enabled = false;
 
 /* One nominal 50 Hz period at the 10 kHz critical task rate. */
 static constexpr uint32_t v_ac_rms_window_sample_count = 200U;
@@ -116,12 +119,12 @@ static float32_t v_ac_rms_square_sum;
 static uint32_t v_ac_rms_sample_count;
 
 /* ScopeMimicry */
-/* 12 KiB capture: 256 samples of 12 channels, half before and half after the trigger: Sync rising
+/* 14 KiB capture: 256 samples of 14 channels, half before and half after the trigger: Sync rising
  * at 2 kHz; in the open-loop stage, the bridge start at 2 kHz; in CONNECT/INJECT, the relay command
- * rising at 10 kHz.
+ * rising at 10 kHz; after key p (boost alone, inverter OFF), the boost leaving IDLE at 2 kHz.
  * Keep the byte count within ScopeMimicry's uint16_t buffer-size/dump limits. */
 static constexpr uint16_t scope_buffer_sample_count = 256U;
-static constexpr uint16_t scope_channel_count = 12U;
+static constexpr uint16_t scope_channel_count = 14U;
 static constexpr uint16_t scope_sample_divider = 5U;
 static_assert(scope_buffer_sample_count * scope_channel_count * sizeof(float32_t) <= UINT16_MAX,
               "Scope capture exceeds ScopeMimicry's buffer-size limit");
@@ -192,6 +195,7 @@ static bool settle_count_test = false;
 static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the artificial sample (0: none) */
 static constexpr uint16_t trip_test_delay_ticks = 1000U;  /* 100 ms: fills the scope's pre-trigger half at 2 or 10 kHz */
 static bool scope_trigger_on_trip = false;  /* the capture waits for the bench trip (armed by 'z') */
+static bool scope_trigger_on_boost = false;  /* the capture waits for the boost start (armed by 'p') */
 static constexpr float32_t trip_test_current = 4.0F;  /* A, above the 3 A bench trip */
 /* Same, per part of the task: sensors, control step, PWM and relay application, scope (cycles). */
 static volatile uint32_t part_max_cycles[4] = {0U, 0U, 0U, 0U};
@@ -249,6 +253,7 @@ FAST_CODE bool scope_trigger()
     /* Grid stages: capture the relay closing, or an inverter fault before it; open loop: the bridge
      * start; otherwise the synchronization. */
     if (scope_trigger_on_trip) return control.bench_tripped;
+    if (scope_trigger_on_boost) return control.boost.getMode() != IDLE;
     if (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)
         return scope_relay_closed > 0.5F || scope_inverter_mode == static_cast<float32_t>(VSI_FAULT);
     if (inverter_stage == INV_OPEN_LOOP || inverter_stage == INV_SETTLE) return scope_bridge_on > 0.5F;
@@ -317,8 +322,8 @@ void setup_routine()
     shield.power.setDutyCycleMax(LEG1_LOW, app::duty_cycle_max);
     // shield.power.setDutyCycleMax(LEG2_LOW, app::duty_cycle_max);
     
-    /* Current-driven burst on boost leg 1 only (ADR 0003). */
-    shield.power.initBurstMode(LEG1_LOW);
+    /* Current-driven burst on boost leg 1 only (ADR 0003): initialized when it starts and released when it
+     * stops, as in Andres's code (Jean, 1506351). */
 
     shield.sensors.enableSensor(VLow, ADC_1);
     shield.sensors.enableSensor(VAC, ADC_1);
@@ -353,6 +358,8 @@ void setup_routine()
     scope.connectChannel(scope_inverter_mode, "inverter_mode");
     scope.connectChannel(scope_vd_avg, "Vd_avg_V");
     scope.connectChannel(scope_bridge_duty, "bridge_duty");
+    scope.connectChannel(i_low_1_value, "ILow1_A");     /* boost startup (Jean, 34fd7d9) */
+    scope.connectChannel(v_dc_bus_value, "VDCBus_V");
     scope.set_trigger(&scope_trigger);
     scope.set_delay(0.5F);
     scope.start();
@@ -391,7 +398,11 @@ void setup_routine()
         shield.power.stop(LEG1_LOW);
         shield.power.stop(LEG1_HIGH);
         shield.power.stop(LEG2_HIGH);
-        if (burst_running) shield.power.stopBurstMode();
+        if (burst_running)
+        {
+            shield.power.stopBurstMode();
+            shield.power.deInitBurstMode();
+        }
         spin.gpio.resetPin(relay_pin);
         timingFinish();
     }
@@ -436,9 +447,11 @@ void loop_communication_task()
         printk(" ________________________________________ \n"
                "|     ---- MENU microinverter ----       |\n"
                "|     press i : idle mode                |\n"
-               "|     press p : startup (0.25 A clamp)   |\n"
+               "|     press p : boost startup + scope arm|\n"
                "|     press b : bus regulation mode      |\n"
                "|     press m : MPPT mode                |\n"
+               "|     press N : toggle 100 Hz VDC notch  |\n"
+               "|     press K : toggle current resonator |\n"
                "|  inverter bench session (DC source):  |\n"
                "|     press o : step 0 open loop 230 V   |\n"
                "|     press c : step 1 PWM_SETTLE hold   |\n"
@@ -471,9 +484,21 @@ void loop_communication_task()
         relay_test = false;
         break;
     case 'p':
-        printk("startup: converter 1, current clamped\n");
+        /* Boost alone (inverter OFF); the scope re-arms on the boost start: r once it has left IDLE. */
+        printk("startup: converter 1, current clamped, inverter OFF; scope armed on the boost start\n");
+        scope_trigger_on_trip = false;
+        scope_trigger_on_boost = true;
+        scope.start();
         mode = STARTUP;
         inverter_stage = INV_OFF;
+        break;
+    case 'N':
+        voltage_notch_enabled = !voltage_notch_enabled;
+        printk("VDC notch: %s\n", voltage_notch_enabled ? "ON" : "OFF");
+        break;
+    case 'K':
+        current_resonant_enabled = !current_resonant_enabled;
+        printk("boost current resonator: %s\n", current_resonant_enabled ? "ON" : "OFF");
         break;
     case 'b':
         printk("VDCBus regulation mode\n");
@@ -488,6 +513,7 @@ void loop_communication_task()
     case 'o':
         printk("inverter step 0: open loop to 230 V RMS (relay open)\n");
         startStage(INV_OPEN_LOOP);
+        scope_trigger_on_boost = false;  /* back to the stage triggers */
         relay_test = false;
         break;
     case 'c':
@@ -495,18 +521,21 @@ void loop_communication_task()
         startStage(INV_SETTLE);
         scope.start();  /* re-arm: capture the bridge start of step 1 (compare with step 2b) */
         scope_trigger_on_trip = false;
+        scope_trigger_on_boost = false;
         relay_test = false;
         break;
     case 'a':
         printk("inverter step 1d: bridge copies VAC once the grid is qualified (relay never closed)\n");
         startStage(INV_VAC_FOLLOW);
         scope_trigger_on_trip = false;
+        scope_trigger_on_boost = false;
         relay_test = false;
         break;
     case 'G':
         printk("inverter step 2b: VAC copy until the contact, PI from the relay request, PLL frozen and feedforward held (5 ms)\n");
         startStage(INV_FOLLOW_CONNECT);
         scope_trigger_on_trip = false;
+        scope_trigger_on_boost = false;
         relay_test = false;
         scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
@@ -515,6 +544,7 @@ void loop_communication_task()
                static_cast<unsigned int>(app::inverter_settle_cycles));
         startStage(INV_CONNECT);
         scope_trigger_on_trip = false;
+        scope_trigger_on_boost = false;
         relay_test = false;
         scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
@@ -522,6 +552,7 @@ void loop_communication_task()
         printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
         startStage(INV_INJECT);
         scope_trigger_on_trip = false;
+        scope_trigger_on_boost = false;
         relay_test = false;
         scope.start();  /* re-arm: capture this stage's start (or a fault) */
         break;
@@ -603,6 +634,7 @@ void loop_communication_task()
         break;
     case 'z':
         scope_trigger_on_trip = true;
+        scope_trigger_on_boost = false;
         scope.start();  /* re-arm: the capture triggers on the trip */
         trip_test_countdown = trip_test_delay_ticks;
         printk("protection test: in 100 ms, one period at %.1f A (trip above %.1f A); scope armed on the trip\n",
@@ -689,7 +721,7 @@ void loop_application_task()
     printk("%7.3f:", (double)grid_angle);
     printk("%7.3f:", (double)i_ac_value);
     printk("%7.3f:", (double)v_dc_bus_value);
-    printk("%u:%u:", static_cast<unsigned int>(mode),
+    printk("%u:%u:", static_cast<unsigned int>(control.boost.getMode()),
            static_cast<unsigned int>(control.boost.getBurstSkip()));
     /* Inverter: stage, library mode, relay command/feedback, Id, Iq (A), P (W), Q (var), Id ref. */
     const dqo_t idq = control.inverter.getIdq();
@@ -896,6 +928,8 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     cmd.inject_current = inject_current;
     cmd.vac_offset = inverter_vac_offset;
     cmd.v_bus_ref = voltage_reference;
+    cmd.voltage_notch_enabled = voltage_notch_enabled;
+    cmd.current_resonant_enabled = current_resonant_enabled;
 
     const ControlOutputs out = controlStep(control, meas, cmd);
     TIMING_TICK_PROBE(2);
@@ -938,6 +972,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     /* Leg 1 burst: skip out.burst_skip of every out.burst_period PWM periods. */
     if (out.boost_pwm_update && out.leg1_enable && out.burst_skip > 0U)
     {
+        if (!burst_running) shield.power.initBurstMode(LEG1_LOW);
         if (!burst_running || out.burst_skip != burst_skip_applied || out.burst_period != burst_period_applied)
         {
             shield.power.setBurstMode(out.burst_skip, out.burst_period);
@@ -953,6 +988,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     else if (burst_running)
     {
         shield.power.stopBurstMode();
+        shield.power.deInitBurstMode();
         burst_running = false;
     }
     TIMING_APPLY_PROBE(3);

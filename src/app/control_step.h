@@ -48,8 +48,8 @@ inline constexpr uint32_t control_task_period = 100;
 /** @brief Run the boost voltage/startup or MPPT cold loop every ten critical ticks. */
 inline constexpr uint8_t cold_loop_divider = 10U;
 
-/** @brief Minimum PWM duty cycle applied to every leg. */
-inline constexpr float32_t duty_cycle_min = 0.005F;
+/** @brief Minimum PWM duty cycle applied to every leg (0.05 since Andres's retuned boost loops, ac9f5aa). */
+inline constexpr float32_t duty_cycle_min = 0.05F;
 /** @brief Maximum PWM duty cycle of the inverter high sides (LEG1_HIGH, LEG2_HIGH). The driver intersects the
  * two legs' limits, so the bridge duty spans 1 - 0.95 to 0.95: ±360 V at 400 V against a 325 V grid peak (the
  * driver default 0.1-0.9 gives ±320 V and clips, docs/testing/inverter-current-loop-design.md §3.4). */
@@ -64,8 +64,8 @@ inline constexpr float32_t cold_loop_period = hot_loop_period * cold_loop_divide
 inline constexpr float32_t initial_voltage_reference = 400.0F;
 /*
  * Boost control from Andres Vazquez Sieber's bench-tested controller
- * (core-micro-verter-boost 43e249e), adopted by ADR 0003; values confirmed with
- * Andres on 2026-11-06 (worklog).
+ * (core-micro-verter-boost 43e249e), adopted by ADR 0003. Voltage tuning and
+ * ripple rejection updated from b37b3d4/5bcfdf6 on 2026-11-09.
  */
 /** @brief Maximum PWM duty cycle of the boost legs (Andres's bench value). */
 inline constexpr float32_t duty_cycle_max = 0.60F;
@@ -84,7 +84,7 @@ inline constexpr float32_t boost_trip_voltage = 460.0F;
 /** @brief Leg current above which the boost trips (latched until IDLE), in A. */
 inline constexpr float32_t boost_trip_current = 8.0F;
 /** @brief Voltage PID gain schedule: Kp = gain · VBusRef / VLow, in A/V. */
-inline constexpr float32_t boost_voltage_gain = 2.6F / 6.0F;
+inline constexpr float32_t boost_voltage_gain = 0.24773F / 6.0F;
 /** @brief Input voltage range of the gain schedule, in V. */
 inline constexpr float32_t boost_schedule_vin_min = 24.0F;
 inline constexpr float32_t boost_schedule_vin_max = 48.0F;
@@ -93,12 +93,21 @@ inline constexpr float32_t boost_schedule_vbus_min = 390.0F;
 inline constexpr float32_t boost_schedule_vbus_max = 410.0F;
 /** @brief Boost voltage PID: Ts, Kp (scheduled at run time; nominal 400 V / 36 V), Ti, Td, N, current bounds (A). */
 inline constexpr PidParams boost_voltage_params = {
-    cold_loop_period, boost_voltage_gain * 400.0F / 36.0F, 4.57e-3F, 0.0F, 0.0F, 0.0F, rated_input_current
+    cold_loop_period, boost_voltage_gain * 400.0F / 36.0F, 0.03413F, 0.0F, 0.0F, 0.0F, rated_input_current
 };
 /** @brief Boost current PID: Ts, Kp, Ti, Td, N, lower and upper duty bound. */
 inline constexpr PidParams boost_current_params = {
     hot_loop_period, 0.002712F, 3.413e-4F, 0.0F, 0.0F, duty_cycle_min, duty_cycle_max
 };
+
+/** @brief 100 Hz rejection: notch bandwidth 10 Hz and parallel pure resonator.
+ * Kr is Andres's nominal 400 V gain; existing gain scheduling remains voltage-only.
+ * Both optional paths default OFF, matching the source branch's bench controls.
+ */
+inline constexpr float32_t boost_ripple_frequency = 100.0F;
+inline constexpr float32_t boost_notch_bandwidth = 10.0F;
+inline constexpr float32_t boost_resonant_gain = 0.88F;
+inline constexpr float32_t boost_resonant_phase = 0.09425F;
 
 /** @brief Nominal grid frequency, in Hz. */
 inline constexpr float32_t grid_frequency_hz = 50.0F;
@@ -225,6 +234,8 @@ struct OperatorCommands {
     float32_t v_bus_ref = app::initial_voltage_reference;  ///< VDCBus reference (V).
     bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
     float32_t vac_offset = 0.0F;     ///< Inverter voltage offset, fraction of VAC, clamped to [0, app::inverter_vac_offset_max].
+    bool voltage_notch_enabled = false; ///< Reject 100 Hz in boost voltage feedback (menu 'N').
+    bool current_resonant_enabled = false; ///< Add 100 Hz boost current correction (menu 'K').
 };
 
 /** @brief PWM commands for one control period. */
@@ -268,7 +279,7 @@ struct ControlState {
  * @brief Initializes and configures every controller with the application's tuning.
  * @param state Control state to initialize.
  * @return 0 on success, -1 if a controller rejected its configuration,
- * -2 if the boost burst, protection or gain schedule was rejected.
+ * -2 if the boost ripple control, burst, protection or gain schedule was rejected.
  */
 int8_t controlInit(ControlState &state);
 

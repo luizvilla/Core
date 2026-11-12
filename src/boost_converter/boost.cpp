@@ -49,13 +49,28 @@ bool validPidParams(const PidParams& params) {
 }
 }
 
+BoostConverter::~BoostConverter() {
+    releaseRippleControl();
+}
+
+void BoostConverter::releaseRippleControl() {
+    delete _voltage_notch;
+    delete _current1_resonator;
+    delete _current2_resonator;
+    _voltage_notch = nullptr;
+    _current1_resonator = _current2_resonator = nullptr;
+}
+
 int8_t BoostConverter::init(boost_mode mode, float32_t V_bus,
                             const PidParams& voltageParams,
                             const PidParams& currentParams,
                             float32_t leg1CurrentLimit) {
     _initialized = false;
+    _ripple_configured = _notch_enabled = _resonant_enabled = false;
+    releaseRippleControl();
     _mode = IDLE;
     _ILow_ref = 0.0F;
+    _voltage_current_demand = 0.0F;
     _ILow1_ref = 0.0F;
     _ILow2_ref = 0.0F;
     _duty = {};
@@ -81,6 +96,8 @@ int8_t BoostConverter::init(boost_mode mode, float32_t V_bus,
     _current_ref_min = voltageParams.lower_bound;
     _current_ref_max = voltageParams.upper_bound;
     _duty_min = currentParams.lower_bound;
+    _duty_max = currentParams.upper_bound;
+    _hot_period = currentParams.Ts;
     _startup_current_max = clamp(leg1CurrentLimit, 0.0F, _current_ref_max);
     _VBus = V_bus;
     _VBus_ref = V_bus;
@@ -91,6 +108,11 @@ int8_t BoostConverter::init(boost_mode mode, float32_t V_bus,
 }
 
 void BoostConverter::clearControlOutputs() {
+    _voltage_current_demand = 0.0F;
+    resetVoltageNotch();
+    _filtered_vbus = _VBus;
+    if (_current1_resonator) _current1_resonator->reset();
+    if (_current2_resonator) _current2_resonator->reset();
     if (_initialized) {
         _voltage_pid.reset();
         _current1_pid.reset();
@@ -105,6 +127,10 @@ void BoostConverter::clearControlOutputs() {
 void BoostConverter::reset() {
     clearControlOutputs();
     _burst_skip = _burst_period;  // an active mode starts with every period skipped
+    if (_initialized && _mode != IDLE && _burst_period > 0U) {
+        // Andres starts skipped PWM with a valid minimum pulse ready to run.
+        _duty.leg1 = _duty_min;
+    }
     _tripped = false;
     _mppt_previous_power = 0.0F;
     _mppt_direction = 1.0F;
@@ -118,12 +144,19 @@ FAST_CODE float32_t BoostConverter::coldLoop() {
     }
     if (_tripped) return 0.0F;
 
+    if (_mode == STARTUP && _VBus_ref > 0.0F && _VBus >= 0.95F * _VBus_ref) {
+        setMode(BUSREG);
+    }
+
     if (_mode == MPPT) {
         Mppt();
         return _ILow_ref;
     }
     scheduleVoltageGain();
-    _ILow_ref = calculateVoltageCurrent(_VBus_ref, _VBus);
+    _voltage_current_demand = calculateVoltageCurrent(_VBus_ref, _notch_enabled ? _filtered_vbus : _VBus);
+    // Negative voltage-loop demand means stop supplying energy, not reverse power.
+    // Keep it internally for leg 1's PI/burst; public per-leg commands stay nonnegative.
+    _ILow_ref = clamp(_voltage_current_demand, _current_ref_min, _current_ref_max);
     splitCurrentReference();
     return _ILow_ref;
 }
@@ -140,26 +173,50 @@ FAST_CODE bool BoostConverter::checkProtection() {
 }
 
 FAST_CODE void BoostConverter::runLeg1() {
+    // A nonzero burst period means pulse skipping has been configured.
+    // _burst_skip counts skipped PWM periods: 0 = continuous, period = all skipped.
     const bool burst = _burst_period > 0U;
-    if (burst && _ILow2_ref > 0.0F) _burst_skip = 0U;  // no burst while leg 2 has demand
+    // Preserve Andres's negative demand above the bus target. Even with zero
+    // measured current, it must lower duty and increase skipping until fully off.
+    const float32_t current_ref = _mode != MPPT && _voltage_current_demand < 0.0F
+        ? _voltage_current_demand : _ILow1_ref;
+
+    // If both burst and protection are configured, and the raw bus voltage exceeds
+    // the full-burst threshold, skip every leg-1 PWM period and hold its PID/duty.
     if (burst && _protection_enabled && _VBus > _full_burst_V) {
-        _burst_skip = _burst_period;  // over-voltage: skip every period, PID held
+        _burst_skip = _burst_period;
         return;
     }
+
+    // With burst disabled, or with no periods currently skipped, run the current
+    // controller normally to update leg 1's duty.
     if (!burst || _burst_skip == 0U) {
-        _duty.leg1 = _current1_pid.calculateWithReturn(_ILow1_ref, _ILow1);
-        // At the lower duty bound and still above the reference: start skipping periods.
-        if (burst && _ILow2_ref <= 0.0F && _duty.leg1 <= _duty_min && _ILow1 > _ILow1_ref) {
+        _duty.leg1 = calculateCurrentDuty(_current1_pid, _current1_resonator, current_ref, _ILow1);
+
+        // Start skipping only when ALL of these are true:
+        // - burst is configured;
+        // - duty has reached its minimum, so it cannot be reduced further;
+        // - measured leg-1 current is still above its requested current.
+        // Skip one period first; later calls adjust the skip count below.
+        // Leg 2's reference does not gate leg 1's current regulation.
+        if (burst && _duty.leg1 <= _duty_min && _ILow1 > current_ref) {
             _burst_skip = 1U;
         }
         return;
     }
-    // Skipping periods: the PID and the duty are held; the skip count follows the current error.
-    if (_ILow1_ref > _ILow1) {
+
+    // Already skipping: hold the PID and duty, and adjust only the skip count.
+    // If measured current is below demand, skip one fewer period to deliver more.
+    // The count is positive here, so decrementing cannot underflow.
+    if (current_ref > _ILow1) {
         --_burst_skip;
-    } else if (_ILow1_ref < _ILow1 && _burst_skip < _burst_period) {
+    // If measured current is above demand AND not all periods are skipped yet,
+    // skip one more period to deliver less. Never exceed the burst period.
+    } else if (current_ref < _ILow1 && _burst_skip < _burst_period) {
         ++_burst_skip;
     }
+    // At equal current, or when already fully skipped with excess current,
+    // leave the skip count unchanged.
 }
 
 FAST_CODE BoostDutyCycles BoostConverter::hotLoop() {
@@ -171,9 +228,10 @@ FAST_CODE BoostDutyCycles BoostConverter::hotLoop() {
 
     runLeg1();
     if (isLeg2Enabled()) {
-        _duty.leg2 = _current2_pid.calculateWithReturn(_ILow2_ref, _ILow2);
+        _duty.leg2 = calculateCurrentDuty(_current2_pid, _current2_resonator, _ILow2_ref, _ILow2);
     } else {
         _current2_pid.reset();
+        if (_current2_resonator) _current2_resonator->reset();
         _duty.leg2 = 0.0F;
     }
     return _duty;
@@ -218,7 +276,69 @@ FAST_CODE void BoostConverter::setVLow(float32_t VLow) {
     if (isfinite(VLow) && VLow >= 0.0F) _VLow = VLow;
 }
 FAST_CODE void BoostConverter::setVBus(float32_t VBus) {
-    if (isfinite(VBus) && VBus >= 0.0F) _VBus = VBus;
+    if (isfinite(VBus) && VBus >= 0.0F) {
+        _VBus = VBus;
+        _filtered_vbus = VBus;
+        if (_notch_enabled) {
+            // Preserve DC at startup while using the library's zero-state reset.
+            if (!_notch_primed) { _notch_offset = VBus; _notch_primed = true; }
+            _filtered_vbus = _notch_offset + _voltage_notch->calculateWithReturn(VBus - _notch_offset);
+        }
+    }
+}
+
+int8_t BoostConverter::configureRippleControl(float32_t frequency, float32_t bandwidth,
+                                              float32_t resonantGain, float32_t phase) {
+    if (!_initialized || !isfinite(frequency) || frequency <= 0.0F ||
+        frequency * _hot_period >= 0.5F || !isfinite(bandwidth) || bandwidth <= 0.0F ||
+        bandwidth * _hot_period >= 0.5F || !isfinite(resonantGain) || resonantGain <= 0.0F ||
+        !isfinite(phase)) return -EINVAL;
+    _ripple_configured = _notch_enabled = _resonant_enabled = false;
+    _notch_primed = false;
+    const PrParams params = {_hot_period, 0.0F, resonantGain, 2.0F * PI * frequency,
+                             phase, -1.0F, 1.0F};
+    releaseRippleControl();
+    _voltage_notch = new NotchFilter;
+    const int8_t notch_result = _voltage_notch->init(_hot_period, frequency, bandwidth);
+    _current1_resonator = new OwnedPr;
+    const int8_t current1_result = _current1_resonator->init(params);
+    _current2_resonator = new OwnedPr;
+    const int8_t current2_result = _current2_resonator->init(params);
+    if (notch_result != 0 || current1_result != 0 || current2_result != 0) return -EINVAL;
+    _filtered_vbus = _VBus;
+    _ripple_configured = true;
+    _notch_enabled = _resonant_enabled = false;
+    return 0;
+}
+
+FAST_CODE void BoostConverter::enableVoltageNotch(bool enabled) {
+    enabled = enabled && _ripple_configured;
+    if (enabled != _notch_enabled) {
+        resetVoltageNotch();
+        _filtered_vbus = _VBus;
+        _notch_enabled = enabled;
+    }
+}
+
+FAST_CODE void BoostConverter::enableCurrentResonant(bool enabled) {
+    enabled = enabled && _ripple_configured;
+    if (enabled != _resonant_enabled) {
+        if (_current1_resonator) _current1_resonator->reset();
+        if (_current2_resonator) _current2_resonator->reset();
+        _resonant_enabled = enabled;
+    }
+}
+
+void BoostConverter::resetVoltageNotch() {
+    if (_voltage_notch) _voltage_notch->reset();
+    _notch_primed = false;
+}
+
+FAST_CODE float32_t BoostConverter::calculateCurrentDuty(Pid& pid, Pr* resonator,
+                                               float32_t reference, float32_t measurement) {
+    const float32_t pi = pid.calculateWithReturn(reference, measurement);
+    const float32_t correction = _resonant_enabled ? resonator->calculateWithReturn(reference, measurement) : 0.0F;
+    return clamp(pi + correction, _duty_min, _duty_max);
 }
 
 int8_t BoostConverter::setBurst(uint16_t period) {
@@ -289,6 +409,8 @@ float32_t BoostConverter::getStartupCurrentMax() const { return _startup_current
 FAST_CODE void BoostConverter::setILowRef(float32_t ILowRef) {
     if (isfinite(ILowRef)) {
         _ILow_ref = clamp(ILowRef, _current_ref_min, _current_ref_max);
+        // A direct command replaces the voltage-loop demand until the next cold loop.
+        _voltage_current_demand = _ILow_ref;
         if (_mode == MPPT) {
             // A manual reference change invalidates the previous MPPT comparison.
             _mppt_has_previous_power = false;
@@ -314,6 +436,7 @@ void BoostConverter::setMode(boost_mode mode) {
     }
     // Between active modes nothing is reset: only the new mode's bounds apply.
     if (next == MPPT && previous != MPPT) {
+        _voltage_current_demand = 0.0F;
         _mppt_has_previous_power = false;
         _mppt_direction = 1.0F;
     }
@@ -333,13 +456,16 @@ FAST_CODE void BoostConverter::splitCurrentReference() {
     // at zero reference it runs at minimum duty and burst skips its periods.
     if (_ILow2_ref <= 0.0F) {
         if (_initialized) _current2_pid.reset();
+        if (_current2_resonator) _current2_resonator->reset();
         _duty.leg2 = 0.0F;
     }
 }
 
 FAST_CODE float32_t BoostConverter::calculateVoltageCurrent(float32_t reference, float32_t measurement) {
     const float32_t upper = _mode == STARTUP ? _startup_current_max : _current_ref_max;
-    const float32_t lower = clamp(_current_ref_min, 0.0F, upper);
+    // Andres's signed PI output also drives pulse suppression at zero current.
+    // Only the delivered current references are clamped to nonnegative values.
+    const float32_t lower = -upper;
     if (lower == upper) {
         // Pid::setBounds requires a nonempty interval; handle a fixed output here.
         _voltage_pid.reset();

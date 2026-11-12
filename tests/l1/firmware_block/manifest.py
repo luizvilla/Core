@@ -24,7 +24,7 @@ manifest={'core_commit':git(REPO,'rev-parse','HEAD'),'core_dirty':bool(git(REPO,
  'inverter_path':str(INV),'control_library_commit':git(CTL,'rev-parse','HEAD'),
  'contract':CONTRACT['version'],'profile':CONTRACT['application_profile'],'compiler':subprocess.check_output([os.environ.get('CXX','g++'),'--version'],text=True).splitlines()[0],
  'dependency_tracking':'compiler -MMD transitive headers',
- 'flags':['-std=c++17','-O1','-g','-fPIC','-fsanitize=undefined','-fno-sanitize-recover=undefined'],
+ 'flags':['-std=c++20','-O1','-g','-fPIC','-fsanitize=undefined','-fno-sanitize-recover=undefined'],
  'sources':{str(p):digest(p) for p in sorted(set(paths))},'library_sha256':digest(Path(__file__).parent/'build/libcore_control.so')}
 import os
 (Path(os.environ.get('L1_BUILD_DIR',Path(__file__).parent/'build'))/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')

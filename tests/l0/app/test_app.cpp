@@ -209,7 +209,8 @@ int main() {
             const float ref_before = state.boost.getILowRef();
             const ControlOutputs out = controlStep(state, m, cmd);
             c.check("mode change flagged", out.boost_mode_changed);
-            c.check("boost switched to the requested mode", state.boost.getMode() == mode);
+            const boost_mode expected_mode = mode == STARTUP ? BUSREG : mode;
+            c.check("boost switched mode (charged bus completes STARTUP immediately)", state.boost.getMode() == expected_mode);
             c.check("PWM updated unless IDLE", out.boost_pwm_update == (mode != IDLE));
             if (mode != IDLE) {
                 c.check("cold loop ran on the change tick (current reference set)",
@@ -253,8 +254,8 @@ int main() {
         ControlState state;
         controlInit(state);
         Measurements m = boostMeasurements();
-        // 0.2 V below the reference: with the scheduled Kp (about 5.8 A/V at 30 V,
-        // ADR 0003) the voltage PID stays below its 11 A bound over the 20 cold loops.
+        // 0.2 V below the reference keeps the 10 Hz voltage PI below its 11 A
+        // bound over the 20 cold loops.
         m.v_dc_bus = app::initial_voltage_reference - 0.2F;
         OperatorCommands cmd;
         cmd.mode = BUSREG;
@@ -291,6 +292,33 @@ int main() {
         }
         controlStep(state, m, cmd);
         c.check("cold loop on the 10th tick", state.cold_loop_tick == 0U);
+    }
+
+    {
+        tc::Criterion c("L0-APP-02.c", "Automatic startup handover persists while the operator request remains STARTUP");
+        ControlState state;
+        controlInit(state);
+        Measurements m = boostMeasurements();
+        OperatorCommands cmd;
+        cmd.mode = STARTUP;
+        cmd.v_bus_ref = 400;
+        m.v_dc_bus = 379;
+        controlStep(state, m, cmd);
+        c.check("below 95% stays in STARTUP", state.boost.getMode() == STARTUP);
+        m.v_dc_bus = 380;
+        for (int n = 0; n < app::cold_loop_divider; ++n) controlStep(state, m, cmd);
+        c.check("at 95% enters BUSREG", state.boost.getMode() == BUSREG);
+        m.v_dc_bus = 370;
+        for (int n = 0; n < 25; ++n) {
+            const auto out = controlStep(state, m, cmd);
+            c.check("held request does not restart STARTUP", state.boost.getMode() == BUSREG);
+            c.check("automatic handover does not stop PWM", !out.boost_mode_changed && out.boost_pwm_update);
+        }
+        cmd.mode = IDLE;
+        controlStep(state, m, cmd);
+        cmd.mode = STARTUP;
+        controlStep(state, m, cmd);
+        c.check("new startup request after IDLE restarts STARTUP", state.boost.getMode() == STARTUP);
     }
 
     // ---------------------------------------------------------------- L0-APP-03
@@ -834,5 +862,27 @@ int main() {
         c.near("back to step 2: no connect window", state.inverter.getConnectWindow(), 0.0, 0.0);
     }
 
+    // ---------------------------------------------------------------- L0-APP-13
+    {
+        /** @test L0-APP-13.a: operator ripple controls reach the boost controller without changing modes */
+        tc::Criterion c("L0-APP-13.a", "Operator ripple controls reach the boost controller without changing modes");
+        ControlState state;
+        c.check("init", controlInit(state) == 0);
+        Measurements m = boostMeasurements();
+        OperatorCommands cmd;
+        cmd.mode = BUSREG;
+        cmd.voltage_notch_enabled = cmd.current_resonant_enabled = true;
+        controlStep(state, m, cmd);
+        c.check("both enabled", state.boost.isVoltageNotchEnabled() && state.boost.isCurrentResonantEnabled());
+        controlStep(state, m, cmd); // Prime after the mode-entry reset.
+        m.v_dc_bus += 1.0F;
+        controlStep(state, m, cmd);
+        c.check("feedback filtered", state.boost.getFilteredVBus() != state.boost.getVBus());
+        cmd.voltage_notch_enabled = cmd.current_resonant_enabled = false;
+        const auto out = controlStep(state, m, cmd);
+        c.check("both disabled", !state.boost.isVoltageNotchEnabled() && !state.boost.isCurrentResonantEnabled());
+        c.check("mode unchanged", !out.boost_mode_changed && state.boost.getMode() == BUSREG);
+        c.near("feedback bypassed", state.boost.getFilteredVBus(), m.v_dc_bus, 1e-6);
+    }
     return tc::finish();
 }

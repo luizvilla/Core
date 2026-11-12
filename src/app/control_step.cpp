@@ -50,7 +50,9 @@ int8_t controlInit(ControlState &state)
     state.inverter.setPwmSettleCycles(0);
     state.boost.setStartupCurrentMax(app::startup_current_max);
     state.boost.setVBusRef(app::initial_voltage_reference);
-    if (state.boost.setBurst(app::boost_burst_period) != 0 ||
+    if (state.boost.configureRippleControl(app::boost_ripple_frequency, app::boost_notch_bandwidth,
+                                          app::boost_resonant_gain, app::boost_resonant_phase) != 0 ||
+        state.boost.setBurst(app::boost_burst_period) != 0 ||
         state.boost.setProtection(app::boost_full_burst_voltage, app::boost_trip_voltage,
                                   app::boost_trip_current) != 0 ||
         state.boost.setVoltageGainSchedule(app::boost_voltage_gain,
@@ -79,6 +81,8 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
     if (state.grid_voltage_age_ticks < app::grid_voltage_stale_ticks) ++state.grid_voltage_age_ticks;
     if (meas.v_ac_updated) state.grid_voltage_age_ticks = 0U;
 
+    state.boost.enableVoltageNotch(cmd.voltage_notch_enabled);
+    state.boost.enableCurrentResonant(cmd.current_resonant_enabled);
     state.boost.setILow1(meas.i_low_1);
     state.boost.setILow2(meas.i_low_2);
     state.boost.setVLow(meas.v_low);

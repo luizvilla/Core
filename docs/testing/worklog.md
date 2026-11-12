@@ -348,6 +348,51 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Firmware builds |
 | Hardware check | Bench L2-INV-04.f: `z` in GRID_CONNECTED → fault, bridge stopped and relay command dropped in the same period, latched until `x` |
 
+
+
+## 2026-11-09 — Boost voltage bandwidth and optional 100 Hz rejection
+
+| Field | Value |
+|---|---|
+| Source | Andres's `b37b3d4` and `5bcfdf6` on `andres/SoftStart-with-Cascaded-Voltage+Current-PI` |
+| Reason | Requested control improvements: avoid following twice-grid-frequency bus ripple and add resonant correction to boost current regulation |
+| Behaviour change | Voltage tuning becomes 10 Hz: scheduled gain factor 0.24773/6 and Ti 34.13 ms. Optional 100 Hz notch (10 Hz bandwidth, sampled at 10 kHz) feeds the voltage PI; raw bus voltage still drives protection. Independent resonators on both boost legs add to the current PI before final duty clamping. Both optional paths default OFF, toggled with serial `n` and `k`. Modes and the existing voltage-only gain schedule are retained |
+| Implementation | Uses control_library's `NotchFilter` and `Pr` directly (`Kp = 0` for the added resonant path). FIR buffers are allocated during configuration and freed before reconfiguration or destruction; toggles and control loops only reset or run the library objects. The notch is primed around the first measurement to preserve DC at startup. Resonators hold state with the PI during burst, reset on IDLE/trip, and leg 2 clears its resonator when disabled |
+| Evidence | USB PlatformIO firmware build succeeds. L1 firmware C-Block builds and L1-INT-01.a–c pass. Full L0: 98 pass, 7 known failures, no new failures. New L0-BST-10.a–d and L0-APP-06.a pass with UBSan. Six existing L0-BST-09 failures and L0-APP-03.c reproduced using unchanged HEAD sources. Host builds now use C++20, matching firmware, because control_library's filters.cpp uses parenthesized aggregate initialization. Catalogue and procedure updated |
+| Limits | No hardware or closed-loop plant stability validation in this change. The existing L1 ABI does not expose the optional enable flags; the C-Block build checks compilation, while the new host tests exercise those controls directly |
+
+
+## 2026-11-09 — Startup DC current and bus-voltage scope capture
+
+| Field | Value |
+|---|---|
+| Reason | Record the capacitor-charge transient from serial `p`, with decimation and fewer channels |
+| Behaviour change | ScopeMimicry records only `ILow1_A` (boost input current) and raw `VDCBus_V`. User-selected final settings: 4096 points at 1 kHz, decimation by 10 from the 10 kHz control loop, about 4.096 s and 32 KiB of sample memory. Serial `p` requests startup and restarts capture together; `q` rearms; `r` dumps only a completed capture |
+| Implementation | Critical task owns start/trigger/acquire. A baseline sample before boost PWM plus 4095 triggered samples fills the library's circular buffer without stale rows. The buffer freezes at completion. Requests and download flags use Zephyr atomics; startup and capture requests are published together under irq_lock. The existing ScopeMimicry dump format is retained; sample-period metadata is printed before `begin record` |
+| Evidence | Host smoke check using real ScopeMimicry and the capture code extracted from main.cpp passes with UBSan: 4096 two-channel samples, 4.096 s completion, baseline/order, decimation, freeze, rearm, repeated trigger and complete dump. USB firmware build checked separately |
+| Limits | Hardware capture not run. Scope measures the enabled boost leg 1; leg 2 remains disabled. No change to controller limits or inverter startup |
+
+## 2026-11-09 — Restore Andres's signed demand in boost burst regulation
+
+| Field | Value |
+|---|---|
+| Reason | Burst could hold a partially skipped pattern above the voltage target when measured input current reached zero: the port had clamped Andres's signed voltage-PI demand to zero |
+| Source | Compared local reference commits `43e249e` and `5bcfdf6`: symmetric voltage-PI bounds, minimum initial pulse duty, and stop plus deinitialization on burst exit |
+| Behaviour change | Preserve symmetric internal voltage-PI demand for leg 1 PI/burst decisions while delivered total/per-leg current references stay nonnegative. Negative demand lowers duty and increases skipping even at zero measured current. Direct current commands replace this demand; entering MPPT clears it. Active burst starts with minimum pulse duty; IDLE and trip clear duty. Restore the guard preventing burst entry while leg 2 has demand. Hardware burst is initialized on entry, then stopped and disabled on exit |
+| Evidence | L0-BST-06.f/g failed before the fix and pass afterward; .h verifies burst entry from elevated duty with zero measured current. All other boost criteria pass except the six previously recorded L0-BST-09 failures. Application L0 retains only the known L0-APP-03.c failure. Host checks use strict warnings and UBSan. USB firmware build succeeds; native L1 C-Block builds and L1-INT-01.a–c pass. `git diff --check` passes |
+| Limits | No hardware flash or bench regulation run, and no full switched-plant campaign in this change |
+
+## 2026-11-09 — Remove leg-2 burst gating and fix hardware preload updates
+
+| Field | Value |
+|---|---|
+| Reason | User still observes missing pulse suppression; any positive leg-2 residual forced leg 1 continuous. Driver inspection also found compare-first/period-last writes despite burst preload being enabled |
+| Evidence for hardware gap | RM0440 section 28.3.15, page 960: a BMPER write blocks preload transfer until BMCMP is written. Old ordering could hold the old hardware pattern while software skip count changed. Unlike Andres's original driver, this driver enables burst preload |
+| Behaviour change | Remove both leg-2 gates from leg 1 burst decisions; current error and minimum duty determine entry and progression. Write HRTIM period first and compare last to release the update lock |
+| Verification | L0-BST-06.d and new L0-BST-11.a failed before correction and pass afterward. The latter compiles the actual driver function against a preload handshake model with a boundary between writes. Boost suite retains four known leg-2 enable-threshold failures; the two burst-cancellation failures now pass. Application suite retains only known L0-APP-03.c. USB firmware build succeeds |
+| Bench follow-up | User reports pulse skipping now works after the corrections. No quantitative waveform or regulation measurements were supplied |
+| Limits | Register model does not prove physical gate timing; bench confirmation is the user's observation |
+
 ## 2026-11-10 — Inverter current loop set from the application; inverter duty limit 0.95
 
 | Field | Value |

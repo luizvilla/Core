@@ -384,7 +384,7 @@
    "tab": "boost",
    "level": "L0",
    "title": "Current-driven burst on leg 1",
-   "criterion": ".a from full skipping the skip count falls by one per hot loop while ILow1 < reference, then the PID runs; .b at minimum duty with ILow1 > reference skipping starts and follows the current error within [0, period]; .c the PID keeps its state across burst (duty held while skipping; continuous duty = an uninterrupted mirror PID); .d no burst while leg 2 has demand; .e a zero period is rejected and without burst leg 1 never skips",
+   "criterion": ".a from full skipping the skip count falls by one per hot loop while ILow1 < reference, then the PID runs; .b at minimum duty with ILow1 > reference skipping starts and follows the current error within [0, period]; .c the PID keeps its state across burst (duty held while skipping; continuous duty = an uninterrupted mirror PID); .d leg 1 enters and maintains burst independently of leg 2 demand, including one-step residuals, in BUSREG and MPPT; .e a zero period is rejected and without burst leg 1 never skips; .f signed voltage demand reaches full skipping at zero current above target, recovers below target, and does not leak into MPPT or manual commands; .g active burst starts with minimum pulse duty while IDLE/trip clear duty; .h signed demand lowers elevated duty and enters burst at zero measured current",
    "source": "`setBurst`, `hotLoop`; `boost_burst_period` = 200",
    "status": "implemented",
    "status_note": "Implemented 2026-11-06 (ADR 0003)"
@@ -418,6 +418,26 @@
    "source": "`splitCurrentReference`",
    "status": "implemented",
    "status_note": "Test implemented 2026-11-06; fails until the threshold is implemented (#5)"
+  },
+  {
+   "id": "L0-BST-10",
+   "tab": "boost",
+   "level": "L0",
+   "title": "100 Hz voltage notch and parallel current resonators",
+   "criterion": ".a notch preserves DC without a startup transient, rejects a 10 V peak 100 Hz ripple below 0.02 V RMS, bypass/reset work, and raw over-voltage still trips; .b selective 100 Hz gain, correction on both legs, combined duty bounds and reset; .c burst holds PI and resonator histories until continuous PWM resumes; .d repeated library reconfiguration, initialization and destruction",
+   "source": "`configureRippleControl`, control_library `NotchFilter` and `Pr`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09; host response checks, not plant stability or hardware validation"
+  },
+  {
+   "id": "L0-BST-11",
+   "tab": "boost",
+   "level": "L0",
+   "title": "HRTIM burst preload register handshake",
+   "criterion": ".a actual hrtim_burst_set writes release the preload update lock and apply changing skip counts and periods, including a burst boundary between writes",
+   "source": "hrtim.c `hrtim_burst_set`; RM0440 section 28.3.15, page 960",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09; host register handshake model, not physical gate validation"
   },
   {
    "id": "L0-PWR-01",
@@ -1275,6 +1295,16 @@
    "source": "`controlStep` INV_FOLLOW_CONNECT",
    "status": "implemented",
    "status_note": "Implemented 2026-11-10"
+  },
+  {
+   "id": "L0-APP-13",
+   "tab": "app",
+   "level": "L0",
+   "title": "Operator ripple controls reach the boost controller",
+   "criterion": ".a enable both optional paths, verify filtered voltage feedback, then bypass both without changing the active mode",
+   "source": "`controlStep`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-09 (Jean, as L0-APP-06; renumbered at the merge)"
   },
   {
    "id": "L1-APP-01",

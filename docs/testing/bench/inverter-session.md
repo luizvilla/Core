@@ -55,7 +55,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 The DC bus voltage is the 8th telemetry field (`VDCBus`) and the DC source display; it needs no oscilloscope channel.
 
-The firmware scope (`r` downloads, `q` re-arms) records 12 channels: VAC, V_alpha, V_beta, V_d, V_q, IAC, omega, Sync, relay command, inverter state, VDCBus, applied bridge duty. It triggers on Sync rising at 2 kHz (about 64 ms before and after); in the open-loop stage, on the bridge start at 2 kHz (re-arm with `q` before pressing `o`); in the CONNECT and INJECT stages, on the relay command rising at 10 kHz (12.8 ms before and after).
+The firmware scope (`r` downloads, `q` re-arms) records 14 channels: VAC, Vq_avg, omega_avg, V_d, V_q, IAC, omega, Sync, relay command, inverter state, Vd_avg, applied bridge duty, ILow1, VDCBus. After `p` (boost alone, inverter OFF) it triggers on the boost leaving IDLE at 2 kHz; otherwise it triggers on Sync rising at 2 kHz (about 64 ms before and after); in the open-loop stage, on the bridge start at 2 kHz (re-arm with `q` before pressing `o`); in the CONNECT and INJECT stages, on the relay command rising at 10 kHz (12.8 ms before and after).
 
 ## L2-INV-10 · Pre-checks (before any power)
 

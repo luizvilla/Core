@@ -38,7 +38,8 @@ L0_BIN=$(mktemp -d)
 trap 'rm -rf "$L0_BIN"' EXIT
 
 L0_CXX=${CXX:-g++}
-L0_FLAGS=(-std=c++17 -O1 -g -fsanitize=undefined -fno-sanitize-recover=undefined)
+# Match firmware: control_library's filters.cpp uses C++20 aggregate initialization.
+L0_FLAGS=(-std=c++20 -O1 -g -fsanitize=undefined -fno-sanitize-recover=undefined)
 L0_INCLUDES=(
     -I"$REPO_ROOT/tests/common/shim"
     -I"$REPO_ROOT/tests/common"

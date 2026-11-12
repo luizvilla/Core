@@ -1462,11 +1462,12 @@ void hrtim_burst_mode_init(hrtim_tu_number_t tu_number){
 }
 
 OWNTECH_FAST_CODE void hrtim_burst_set(int bm_cmp, int bm_per){
-    /* Set the number of period inactive in burst mode*/
-    LL_HRTIM_BM_SetCompare(HRTIM1, bm_cmp - 1 );
-    /* Set the number of period of the burst pattern
-    (active + inactive periods)*/
+    /* RM0440 28.3.15: writing BMPER blocks preload transfer until BMCMP
+     * is written. Always write period FIRST and compare LAST, otherwise
+     * the active burst pattern can remain frozen despite new commands. */
     LL_HRTIM_BM_SetPeriod(HRTIM1, bm_per - 1);
+    /* Number of inactive periods; this write commits the register pair. */
+    LL_HRTIM_BM_SetCompare(HRTIM1, bm_cmp - 1);
 }
 
 OWNTECH_FAST_CODE void hrtim_burst_start(void){

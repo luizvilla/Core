@@ -32,7 +32,7 @@
  * | L0-BST-03 | Cold-loop saturation sets the total current reference |
  * | L0-BST-04 | MPPT perturb and observe |
  * | L0-BST-05 | STARTUP current clamp; STARTUP to BUSREG resets nothing; IDLE resets all |
- * | L0-BST-06 | Current-driven burst on leg 1, PID state kept, none while leg 2 runs |
+ * | L0-BST-06 | Current-driven burst on leg 1, PID state kept, independent of leg 2 |
  * | L0-BST-07 | Over-voltage full burst; over-voltage and over-current trip |
  * | L0-BST-08 | Voltage PID gain scheduled with VBusRef / VLow, without reset |
  * | L0-BST-09 | Leg 2 starts only above a demand threshold; below it, off and leg 1's burst kept |
@@ -248,6 +248,84 @@ int main() {
     };
 
     {
+        tc::Criterion c("L0-BST-06.f", "Above-target voltage keeps increasing skipping at zero current, then recovers when voltage falls");
+        BoostConverter b;
+        c.check("configured", fresh(b));
+        b.setMode(BUSREG);
+        b.setILowRef(0.1F);
+        for (int n = 0; n <= period; ++n) b.hotLoop();
+        b.setVBus(410);
+        b.setILow1(0.1F);
+        b.coldLoop();
+        b.hotLoop();
+        c.check("enters burst at minimum duty", b.getBurstSkip() == 1);
+        b.setILow1(0);
+        for (int n = 0; n < period; ++n) {
+            if (n % 10 == 0) b.coldLoop();
+            b.hotLoop();
+        }
+        c.check("zero measured current still reaches full skipping", b.getBurstSkip() == period);
+        c.check("physical current references stay zero", b.getILowRef() == 0 &&
+                b.getILow1Ref() == 0 && b.getILow2Ref() == 0 && !b.isLeg2Enabled());
+        b.setMode(MPPT);
+        b.hotLoop();
+        c.check("MPPT zero reference holds skipping instead of inheriting signed demand", b.getBurstSkip() == period);
+        b.setILowRef(1);
+        b.hotLoop();
+        c.check("MPPT positive reference resumes pulses", b.getBurstSkip() == period - 1);
+        b.setMode(BUSREG);
+        b.coldLoop();
+        b.hotLoop();
+        c.check("voltage control suppresses pulses again", b.getBurstSkip() == period);
+        b.setILowRef(1);
+        b.hotLoop();
+        c.check("manual demand reduces skipping", b.getBurstSkip() == period - 1);
+        b.setILowRef(0);
+        b.hotLoop();
+        c.check("direct zero command holds partial skipping", b.getBurstSkip() == period - 1);
+        b.setVBus(390);
+        b.coldLoop();
+        b.hotLoop();
+        c.check("below target starts delivering again", b.getILowRef() > 0 && b.getBurstSkip() < period);
+        b.setMode(MPPT);
+        b.setILowRef(0);
+        b.setILow1(0);
+        const auto skip = b.getBurstSkip();
+        b.hotLoop();
+        c.check("MPPT does not inherit signed voltage demand", b.getBurstSkip() == skip);
+    }
+    {
+        tc::Criterion c("L0-BST-06.g", "Active burst starts at minimum pulse duty; IDLE and trip clear duty");
+        BoostConverter b;
+        c.check("configured", fresh(b));
+        c.near("IDLE duty zero", b.getDutyLeg1(), 0, tol);
+        b.setMode(STARTUP);
+        c.near("startup pulse duty at lower bound", b.hotLoop().leg1, i_app.lower_bound, tol);
+        b.setMode(IDLE);
+        c.near("IDLE clears duty", b.getDutyLeg1(), 0, tol);
+        b.setMode(BUSREG);
+        c.near("reentry pulse duty at lower bound", b.hotLoop().leg1, i_app.lower_bound, tol);
+        b.setVBus(461);
+        c.near("trip clears duty", b.hotLoop().leg1, 0, tol);
+    }
+    {
+        tc::Criterion c("L0-BST-06.h", "Signed voltage demand lowers duty and enters burst even with zero measured current");
+        BoostConverter b;
+        c.check("configured", fresh(b));
+        b.setMode(BUSREG);
+        b.setILowRef(3);
+        b.setILow1(0);
+        for (int n = 0; n < 1000; ++n) b.hotLoop();
+        c.check("continuous at elevated duty", b.getBurstSkip() == 0 && b.getDutyLeg1() > i_app.lower_bound);
+        b.setVBus(410);
+        for (int n = 0; n < 1000; ++n) {
+            if (n % 10 == 0) b.coldLoop();
+            b.hotLoop();
+        }
+        c.near("duty reduced to minimum", b.getDutyLeg1(), i_app.lower_bound, tol);
+        c.check("all pulses suppressed", b.getBurstSkip() == period);
+    }
+    {
         /** @test L0-BST-05.a: STARTUP regulates toward the bus reference with the current clamped, leg 1 only */
         tc::Criterion c("L0-BST-05.a", "STARTUP regulates toward the bus reference with the current clamped, leg 1 only");
         BoostConverter b;
@@ -259,8 +337,56 @@ int main() {
         c.check("leg 2 never", b.getILow2Ref() == 0 && !b.isLeg2Enabled());
         b.setILowRef(3);
         c.near("manual reference clamped too", b.getILowRef(), 0.25, tol);
-        b.setVBus(399.9F);
-        c.range("near the reference the demand falls below the clamp", b.coldLoop(), 0, 0.25F);
+        b.setVBus(379.9F);
+        c.range("below 95% the demand stays within the startup clamp", b.coldLoop(), 0, 0.25F);
+        c.check("still in STARTUP", b.getMode() == STARTUP);
+    }
+
+    {
+        tc::Criterion c("L0-BST-05.d", "STARTUP automatically enters BUSREG at 95% of a positive target without resetting state");
+        for (float target : {200.0F, 400.0F}) {
+            BoostConverter automatic, manual;
+            for (auto* b : {&automatic, &manual}) {
+                c.check("configured", fresh(*b));
+                b->setVBusRef(target);
+                b->setVBus(0.95F * target - 0.1F);
+                b->setMode(STARTUP);
+                b->coldLoop();
+                for (int n = 0; n < 250; ++n) b->hotLoop();
+                c.check("below threshold stays in STARTUP", b->getMode() == STARTUP);
+                b->setVBus(0.95F * target);
+            }
+            const auto skip = automatic.getBurstSkip();
+            const auto duty = automatic.getDutyLeg1();
+            manual.setMode(BUSREG);
+            c.near("voltage PID continues like an explicit transition", automatic.coldLoop(), manual.coldLoop(), tol);
+            c.check("exact threshold enters BUSREG", automatic.getMode() == BUSREG);
+            c.check("startup current clamp released", automatic.getILowRef() > automatic.getStartupCurrentMax());
+            c.check("burst state preserved", automatic.getBurstSkip() == skip);
+            c.near("duty preserved", automatic.getDutyLeg1(), duty, tol);
+            const auto expected = manual.hotLoop();
+            const auto actual = automatic.hotLoop();
+            c.near("leg 1 PID continues", actual.leg1, expected.leg1, tol);
+            c.near("leg 2 PID continues", actual.leg2, expected.leg2, tol);
+            automatic.setVBus(0);
+            automatic.coldLoop();
+            c.check("voltage dip does not return to STARTUP", automatic.getMode() == BUSREG);
+        }
+        BoostConverter b;
+        c.check("configured", fresh(b));
+        b.setMode(STARTUP);
+        b.setVBusRef(0);
+        b.coldLoop();
+        c.check("zero target does not complete startup", b.getMode() == STARTUP);
+        b.setVBusRef(400);
+        b.setVBus(381);
+        b.coldLoop();
+        c.check("already above threshold also enters BUSREG", b.getMode() == BUSREG);
+        b.setMode(STARTUP);
+        b.setVBus(461);
+        b.hotLoop();
+        b.coldLoop();
+        c.check("tripped startup does not advance", b.isTripped() && b.getMode() == STARTUP);
     }
 
     {
@@ -320,7 +446,7 @@ int main() {
         for (uint16_t i = 1; i <= period; ++i) {
             const float32_t d = b.hotLoop().leg1;
             c.check("skip count falls by one", b.getBurstSkip() == period - i);
-            c.near("duty held while skipping", d, 0, tol);
+            c.near("minimum pulse duty held while skipping", d, i_app.lower_bound, tol);
         }
         c.check("continuous", !b.isBurstActive());
         c.range("then the PID drives leg 1", b.hotLoop().leg1, 0.05F, 0.60F);
@@ -384,21 +510,28 @@ int main() {
     }
 
     {
-        /** @test L0-BST-06.d: No burst while leg 2 has demand */
-        tc::Criterion c("L0-BST-06.d", "No burst while leg 2 has demand");
-        BoostConverter b;
-        c.check("configured", fresh(b));
-        b.setVBus(395);
-        b.setMode(BUSREG);
-        b.setILowRef(8);  // leg 1 5.5 A, leg 2 2.5 A
-        c.check("leg 2 has demand", b.isLeg2Enabled());
-        b.setILow1(7);  // above leg 1's 5.5 A reference, below the 8 A trip
-        b.setILow2(0);
-        b.hotLoop();
-        c.check("full skipping cancelled", b.getBurstSkip() == 0);
-        for (int i = 0; i < 2000; ++i) b.hotLoop();
-        c.near("leg 1 at minimum duty", b.getDutyLeg1(), 0.05, tol);
-        c.check("still no burst", b.getBurstSkip() == 0);
+        tc::Criterion c("L0-BST-06.d", "Leg 1 burst follows its current error independently of leg 2 demand");
+        const float limit = 5.5F;
+        const float one_step = std::nextafter(limit, std::numeric_limits<float>::infinity()) - limit;
+        for (boost_mode mode : {BUSREG, MPPT}) {
+            for (float excess : {one_step, 0.001F, 2.5F}) {
+                BoostConverter b;
+                c.check("configured", fresh(b));
+                b.setMode(mode);
+                b.setILowRef(limit + excess);
+                c.check("positive leg 2 reference exercised", b.getILow2Ref() > 0);
+                b.setILow1(7);
+                b.hotLoop();
+                c.check("leg 2 demand does not cancel full skipping", b.getBurstSkip() == period);
+                b.setILow1(0);
+                for (int n = 0; n <= period; ++n) b.hotLoop();
+                c.check("leg 1 below reference resumes continuous PWM", b.getBurstSkip() == 0);
+                b.setILow1(7);
+                for (int n = 0; n < 2000; ++n) b.hotLoop();
+                c.near("leg 1 at minimum duty", b.getDutyLeg1(), i_app.lower_bound, tol);
+                c.check("leg 1 above reference enters full skipping", b.getBurstSkip() == period);
+            }
+        }
     }
 
     {
@@ -651,5 +784,117 @@ int main() {
         c.check("duty bound > 1 rejected", boost.init(BUSREG, 48, voltage, current, 5) < 0);
     }
 
+    {
+        tc::Criterion c("L0-BST-10.a", "Notch rejects 100 Hz, preserves DC, and never masks raw over-voltage");
+        BoostConverter filtered;
+        const PidParams notch_current = {0.0001F, 0.1F, 1.0F, 0, 1, 0, 0.95F};
+        c.check("cannot configure before init", filtered.configureRippleControl(100, 10, 0.88F, 0.09425F) < 0);
+        c.check("init", filtered.init(BUSREG, 400, voltage, notch_current, 5) == 0);
+        for (float frequency : {0.0F, 5000.0F, std::numeric_limits<float>::quiet_NaN()})
+            c.check("invalid frequency rejected", filtered.configureRippleControl(frequency, 10, 0.88F, 0.09425F) < 0);
+        c.check("configure", filtered.configureRippleControl(100, 10, 0.88F, 0.09425F) == 0);
+        filtered.enableVoltageNotch(true);
+        filtered.setVBus(400);
+        c.near("no startup transient", filtered.getFilteredVBus(), 400, 1e-5);
+        double energy = 0;
+        for (int n = 0; n < 30000; ++n) {
+            filtered.setVBus(400.0F + 10.0F * std::sin(2.0F * 3.14159265358979323846F * n / 100.0F));
+            if (n >= 20000) {
+                const double residual = filtered.getFilteredVBus() - 400.0;
+                energy += residual * residual;
+            }
+        }
+        c.check("100 Hz residual below 0.02 V RMS for 10 V peak input", std::sqrt(energy / 10000) < 0.02);
+        filtered.setProtection(440, 460, 8);
+        filtered.setVBus(460.05F);
+        c.check("notch hides spike from voltage loop", filtered.getFilteredVBus() < 460);
+        filtered.hotLoop();
+        c.check("raw spike still trips", filtered.isTripped() && !filtered.isLeg1Enabled());
+        filtered.setMode(IDLE);
+        filtered.setVBus(400);
+        c.near("IDLE clears notch history", filtered.getFilteredVBus(), 400, 1e-5);
+        filtered.enableVoltageNotch(false);
+        filtered.setVBus(410);
+        c.near("bypass uses raw sample", filtered.getFilteredVBus(), 410, 1e-5);
+    }
+    {
+        tc::Criterion c("L0-BST-10.b", "Resonator selectively increases 100 Hz current-loop gain and resets cleanly");
+        auto response = [](float frequency) {
+            Pr resonator;
+            resonator.init({0.0001F, 0.0F, 0.88F, 2.0F * PI * 100.0F, 0.09425F, -1.0F, 1.0F});
+            double energy = 0;
+            for (int n = 0; n < 20000; ++n) {
+                const float error = 0.01F * std::sin(2.0F * 3.14159265358979323846F * frequency * n * 0.0001F);
+                const double output = resonator.calculateWithReturn(error, 0.0F);
+                if (n >= 10000) energy += output * output;
+            }
+            return std::sqrt(energy / 10000);
+        };
+        c.check("100 Hz gain exceeds 50 Hz gain by 100x", response(100) > 100 * response(50));
+        BoostConverter regulated, pi_only;
+        PidParams v = {0.001F, 0.1F, 1, 0, 0, 0, 12};
+        PidParams i = {0.0001F, 0.002712F, 0.0003413F, 0, 0, 0.005F, 0.6F};
+        regulated.init(BUSREG, 400, v, i, 5);
+        pi_only.init(BUSREG, 400, v, i, 5);
+        regulated.configureRippleControl(100, 10, 0.88F, 0.09425F);
+        regulated.enableCurrentResonant(true);
+        regulated.setILowRef(7); pi_only.setILowRef(7);
+        const auto pr = regulated.hotLoop();
+        const auto pi = pi_only.hotLoop();
+        c.check("correction added on both legs", pr.leg1 > pi.leg1 && pr.leg2 > pi.leg2);
+        for (int n = 0; n < 10000; ++n) {
+            const auto d = regulated.hotLoop();
+            c.check("combined duties bounded", d.leg1 >= 0.005F && d.leg1 <= 0.6F && d.leg2 >= 0.005F && d.leg2 <= 0.6F);
+        }
+        regulated.setMode(IDLE); pi_only.setMode(IDLE);
+        regulated.setMode(BUSREG); pi_only.setMode(BUSREG);
+        regulated.setILowRef(7); pi_only.setILowRef(7);
+        regulated.enableCurrentResonant(false);
+        const auto reset = regulated.hotLoop();
+        const auto baseline = pi_only.hotLoop();
+        c.near("disable/reset restores PI leg 1", reset.leg1, baseline.leg1, 1e-6);
+        c.near("disable/reset restores PI leg 2", reset.leg2, baseline.leg2, 1e-6);
+    }
+    {
+        tc::Criterion c("L0-BST-10.c", "Burst holds the combined PI/resonator state until continuous PWM resumes");
+        BoostConverter paused, continuous;
+        PidParams v = {0.001F, 0.1F, 1, 0, 0, 0, 12};
+        PidParams i = {0.0001F, 0.002712F, 0.0003413F, 0, 0, 0.005F, 0.6F};
+        for (auto* controller : {&paused, &continuous}) {
+            controller->init(MPPT, 400, v, i, 5);
+            controller->configureRippleControl(100, 10, 0.88F, 0.09425F);
+            controller->enableCurrentResonant(true);
+            controller->setBurst(200);
+            controller->setProtection(440, 460, 8);
+            controller->setMode(IDLE);
+            controller->setMode(MPPT);
+            controller->setILowRef(2);
+            for (int n = 0; n < 250; ++n) controller->hotLoop();
+        }
+        const float held = paused.getDutyLeg1();
+        paused.setVBus(450);
+        for (int n = 0; n < 50; ++n) c.near("duty held during full burst", paused.hotLoop().leg1, held, 1e-6);
+        paused.setVBus(400);
+        for (int n = 0; n < 200; ++n) paused.hotLoop();
+        c.check("skip count returns to zero", paused.getBurstSkip() == 0);
+        c.near("resumed PI+R matches unpaused state", paused.hotLoop().leg1, continuous.hotLoop().leg1, 1e-6);
+    }
+    {
+        tc::Criterion c("L0-BST-10.d", "Library filter buffers survive reconfiguration, reinitialization and destruction");
+        BoostConverter controller;
+        const PidParams v = {0.001F, 0.1F, 1, 0, 0, 0, 12};
+        const PidParams i = {0.0001F, 0.002712F, 0.0003413F, 0, 0, 0.005F, 0.6F};
+        for (int n = 0; n < 10; ++n) {
+            c.check("reinitialize", controller.init(BUSREG, 400, v, i, 5) == 0);
+            c.check("configure", controller.configureRippleControl(100, 10, 0.88F, 0.09425F) == 0);
+            controller.enableVoltageNotch(true);
+            controller.enableCurrentResonant(true);
+            controller.setVBus(400);
+            controller.setILowRef(2);
+            controller.hotLoop();
+            c.check("reconfigure", controller.configureRippleControl(100, 10, 0.88F, 0.09425F) == 0);
+            c.check("reconfiguration disables paths", !controller.isVoltageNotchEnabled() && !controller.isCurrentResonantEnabled());
+        }
+    }
     return tc::finish();
 }

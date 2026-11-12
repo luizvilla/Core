@@ -2,7 +2,7 @@
 
 `wrapper.cpp` implements Pulsim's C-Block ABI and calls `controlInit` once per independent context and `controlStep` exactly once per 100 us. Its input/output index enums are in `contract.h` and documented by `../contract.json`.
 
-Compile from Core with `tests/l1/firmware_block/build.sh`. Core sources and the wrapper use C++17, `-O1 -g -fPIC -Wall -Wextra -Werror` and UBSan without recovery. Library sources use the same flags without `-Werror`. No production source is copied or changed. The resolved inverter override follows L0's `SINGLE_PHASE_INVERTER_DIR` convention. Source/dependency hashes, revisions and the binary hash are in `build/manifest.json`; build artifacts are ignored.
+Compile from Core with `tests/l1/firmware_block/build.sh`. Core sources and the wrapper use C++20 (matching the firmware and control_library), `-O1 -g -fPIC -Wall -Wextra -Werror` and UBSan without recovery. Library sources use the same flags without `-Werror`. No production source is copied or changed. The resolved inverter override follows L0's `SINGLE_PHASE_INVERTER_DIR` convention. Source/dependency hashes, revisions and the binary hash are in `build/manifest.json`; build artifacts are ignored.
 
 The wrapper only translates buffers, holds the last delivered VAC at the sensor boundary, owns the native context and logs state. It contains no alternate application sequence, tuning or hardware PWM generation. Bridge and relay requests are read from the real application/library for assertions; both remain off in this application.
 

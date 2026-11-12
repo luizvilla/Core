@@ -27,11 +27,13 @@
 
 #include <stdint.h>
 #include "pid.h"
+#include "filters.h"
+#include "pr.h"
 
 /** @brief Operating modes of the boost controller. */
 typedef enum {
     IDLE = 0,    ///< Disable control and clear every state.
-    STARTUP = 1, ///< Regulate the bus like BUSREG, converter 1 only, current reference clamped to startupCurrentMax.
+    STARTUP = 1, ///< Current-limited bus charge on leg 1; automatically enters BUSREG at 95% of target.
     BUSREG = 2,  ///< Regulate bus voltage with the voltage/current cascade.
     MPPT = 3     ///< Track maximum input power by adjusting the total input current reference.
 } boost_mode;
@@ -58,9 +60,14 @@ struct BoostDutyCycles {
  * count goes up by one per hot-loop call. While skipping, the PID is held (state kept,
  * duty held) and the skip count goes down by one per call while the current is below
  * its reference and up by one while above, within [0, N]. The PIDs are never reset by
- * burst. Entering an active mode from IDLE starts fully skipped (N). While leg 2 has
- * demand, burst is off. The caller applies getBurstSkip() and getBurstPeriod() with
+ * burst. Entering an active mode from IDLE starts fully skipped (N). Leg 1's burst
+ * follows its own current error independently of leg 2's reference. The caller
+ * applies getBurstSkip() and getBurstPeriod() with
  * the hardware burst generator on leg 1 only.
+ * The voltage PI uses symmetric internal bounds (+/- the mode's current ceiling).
+ * Negative demand reduces leg 1 duty and increases skipping even at zero measured
+ * current; delivered current references remain nonnegative. Active burst starts
+ * with minimum duty, ready for the first unskipped pulse.
  *
  * **Protection.** Once configured with setProtection(): above fullBurstV the skip count
  * is forced to N; above tripV, or with either leg current above tripA, the controller
@@ -69,11 +76,17 @@ struct BoostDutyCycles {
  * **Mode changes.** IDLE clears every state. From IDLE to an active mode, every state is
  * cleared and burst starts at N. Between active modes nothing is reset: PID states, the
  * total reference and the burst state carry over; only the bounds of the new mode apply.
+ * STARTUP automatically enters BUSREG in coldLoop() when raw VBus reaches at least
+ * 95% of a positive VBusRef. The transition is one-way and preserves control state.
  */
 class BoostConverter {
 public:
     /** @brief Construct an idle controller; call init() before enabling control. */
     BoostConverter() = default;
+    ~BoostConverter();
+    // Library filters own FIR buffers and must not be shallow-copied.
+    BoostConverter(const BoostConverter&) = delete;
+    BoostConverter& operator=(const BoostConverter&) = delete;
 
     /**
      * @brief Initialize the voltage PID and both current PIDs and reset control and MPPT history.
@@ -81,7 +94,8 @@ public:
      * @param V_bus Initial bus measurement and bus voltage reference, in V; must be positive.
      * @param voltageParams Voltage PID tuning; Ts is the cold-loop period in s.
      * Output bounds define the allowed nonnegative total current reference in A,
-     * including the MPPT search limits.
+     * including the MPPT search limits. Internally the voltage PI uses symmetric
+     * bounds around zero, with the mode's current ceiling as their magnitude.
      * @param currentParams Current PID tuning shared by both legs; Ts is the hot-loop period in s.
      * Output bounds define the duty-cycle range and must lie within [0, 1].
      * @param leg1CurrentLimit Positive current threshold in A. Leg 1 receives
@@ -91,6 +105,7 @@ public:
      * @note Values must be finite. Failure leaves the controller disabled.
      * Both sampling periods must be positive, with voltageParams.Ts >= currentParams.Ts.
      * Burst, protection and gain-schedule settings are kept across init().
+     * Ripple rejection must be configured again after init().
      */
     int8_t init(boost_mode mode, float32_t V_bus,
                 const PidParams& voltageParams, const PidParams& currentParams,
@@ -100,6 +115,8 @@ public:
      * @brief Clear PID states, total and per-leg current references, both duties,
      * MPPT history and the trip; start burst fully skipped.
      * @details Preserve the mode, measurements, target voltage reference and settings.
+     * With burst configured in an initialized active mode, prepare leg 1 at its
+     * minimum duty for the first unskipped pulse; otherwise duties remain zero.
      */
     void reset();
 
@@ -107,6 +124,8 @@ public:
      * @brief Update and distribute the total input current reference.
      * @details STARTUP and BUSREG regulate VBus toward VBusRef with the voltage PID
      * (its Kp first updated by the gain schedule when configured); MPPT calls Mppt().
+     * Before regulation, STARTUP enters BUSREG when raw VBus >= 0.95 * VBusRef
+     * and VBusRef > 0; BUSREG current bounds apply on that same call.
      * @return Total current reference in A within the voltage PID bounds, STARTUP
      * additionally clamped to startupCurrentMax. Zero if idle, uninitialized or tripped.
      */
@@ -146,7 +165,9 @@ public:
     void setILow2(float32_t ILow2);
     /** @brief Update the input voltage. @param VLow Voltage in V; negative or non-finite values are ignored. */
     void setVLow(float32_t VLow);
-    /** @brief Update the bus voltage. @param VBus Voltage in V; negative or non-finite values are ignored. */
+    /** @brief Update the raw bus voltage and hot-rate notch once per sample.
+     * @param VBus Voltage in V; negative or non-finite values are ignored.
+     */
     void setVBus(float32_t VBus);
 
     /**
@@ -188,6 +209,22 @@ public:
     /** @brief Get the voltage PID's current Kp. @return Kp in A/V. */
     float32_t getVoltageKp() const;
 
+    /** @brief Configure ripple rejection after init(), at the hot-loop sample rate.
+     * @return 0 on success, -EINVAL for invalid arguments or before init().
+     * Both paths start disabled. init() disables them; reset()/IDLE clear histories
+     * while preserving the enable flags. Frequency/bandwidth are in Hz, phase in rad.
+     */
+    int8_t configureRippleControl(float32_t frequency, float32_t bandwidth,
+                                  float32_t resonantGain, float32_t phase);
+    /** @brief Switch the voltage-feedback notch, resetting its history on a change. */
+    void enableVoltageNotch(bool enabled);
+    /** @brief Switch both current resonators, resetting histories on a change. */
+    void enableCurrentResonant(bool enabled);
+    bool isVoltageNotchEnabled() const { return _notch_enabled; }
+    bool isCurrentResonantEnabled() const { return _resonant_enabled; }
+    /** @brief Voltage used by the outer loop; protection always uses getVBus(). */
+    float32_t getFilteredVBus() const { return _filtered_vbus; }
+
     /** @brief Get the total current reference. @return Total input current reference in A. */
     float32_t getILowRef() const;
     /** @brief Get leg 1 current reference. @return Reference in A. */
@@ -224,7 +261,7 @@ public:
     /** @brief Set the target bus voltage. @param VBusRef Voltage in V; negative or non-finite values are ignored. */
     void setVBusRef(float32_t VBusRef);
 
-    /** @brief Get leg 1 duty. @return Last duty command, or zero when disabled/reset. */
+    /** @brief Get leg 1 duty. @return Last duty command; zero when idle/tripped, minimum on active burst reset. */
     float32_t getDutyLeg1() const;
     /** @brief Get leg 2 duty. @return Last duty command, or zero when disabled/reset. */
     float32_t getDutyLeg2() const;
@@ -249,12 +286,16 @@ private:
     bool checkProtection();
     /** @brief Run leg 1: burst bookkeeping or its current PID. */
     void runLeg1();
-    /** @brief Run the voltage PID with mode-specific current bounds. @return Current reference in A. */
+    /** @brief Run the voltage PID with symmetric mode-specific bounds. @return Signed internal demand in A. */
     float32_t calculateVoltageCurrent(float32_t reference, float32_t measurement);
     /** @brief Use converter 1 only in STARTUP; otherwise allocate excess demand to leg 2. */
     void splitCurrentReference();
     /** @brief Apply the voltage gain schedule to the voltage PID. */
     void scheduleVoltageGain();
+    float32_t calculateCurrentDuty(Pid& pid, Pr* resonator,
+                                   float32_t reference, float32_t measurement);
+    void resetVoltageNotch();
+    void releaseRippleControl();
 
     boost_mode _mode = IDLE;
     bool _initialized = false;
@@ -263,12 +304,26 @@ private:
     float32_t _VLow = 0.0F;
     float32_t _VBus = 0.0F;
     float32_t _ILow_ref = 0.0F;
+    float32_t _voltage_current_demand = 0.0F; ///< Signed voltage PI output; negative requests suppress pulses.
     float32_t _VBus_ref = 0.0F;
     float32_t _ILow1_ref = 0.0F;
     float32_t _ILow2_ref = 0.0F;
     float32_t _leg1_current_limit = 0.0F;
     float32_t _startup_current_max = 0.0F; ///< Total current reference ceiling in STARTUP, in A.
     float32_t _duty_min = 0.0F;            ///< Current PID lower output bound (duty).
+    float32_t _duty_max = 1.0F;
+    float32_t _hot_period = 0.0F;
+    bool _ripple_configured = false;
+    bool _notch_enabled = false, _resonant_enabled = false;
+    float32_t _filtered_vbus = 0.0F;
+    // Allocate only at configuration: library FIR buffers are unusable before
+    // init(). Pr has no virtual destructor; the final type permits safe deletion.
+    struct OwnedPr final : Pr {};
+    NotchFilter* _voltage_notch = nullptr;
+    OwnedPr* _current1_resonator = nullptr;
+    OwnedPr* _current2_resonator = nullptr;
+    bool _notch_primed = false;
+    float32_t _notch_offset = 0.0F;
     BoostDutyCycles _duty;
 
     uint16_t _burst_period = 0U;  ///< PWM periods per burst period; 0 = burst not configured.
