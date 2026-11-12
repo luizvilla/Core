@@ -35,7 +35,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 2 | Scope: 10 kHz around the relay only on request (2 kHz by default) | `src/main.cpp` | Measured alone: **−3.7 µs in g and G, −2.9 µs in n**, 0 elsewhere (branch `perf/timing-2-scope`, `c96d94f`) |
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` | Measured alone: **−2.1 to −2.3 µs with the boost running**, 0 in OFF_IDLE (branch `perf/timing-3-writes`, `fb07a70`); bridge duty API: proposal 3b below |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
-| All | 1–4 together: final verdict | | Planned |
+| All | 1–4 together: final verdict | merge `5fcf14b` | **−10.15 µs** mean over the stages (−6.3 to −13.2 µs per stage), every test passes |
 
 Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
 
@@ -118,3 +118,29 @@ Audit of the critical path: the inverter library wrapped θ with `fmodf` every t
 | other stages | −0.4 to −0.5 | −0.4 to −1.6 | 0 → 0 | −0.41 | −0.02 |
 
 The float modulo is worth replacing (0.41 µs); the integer ones are not worth much (0.02 µs: the M4 divides in hardware).
+
+### All four together (`5fcf14b`, campaign `2026-11-12_5fcf14b_153135_NtCZxW`, against `23afd86`)
+
+| Stage | Interrupt / period (mean) | Task tick worst | Gap worst | Lost | Writes (mean) | Scope (mean) |
+|---|---|---|---|---|---|---|
+| OFF_IDLE | 56.7 → 50.4 (−6.3) | 52.1 → 45.1 | 117.6 → 121.1 | 0 → 0 | 2.76 → 1.44 | 2.91 → 1.32 |
+| OFF_BUSREG | 63.2 → 53.9 (−9.3) | 58.8 → 50.7 | 111.6 → 111.5 | 0 → 0 | 7.44 → 3.71 | 3.82 → 1.61 |
+| OFF_MPPT | 64.0 → 54.8 (−9.2) | 59.2 → 48.6 | 111.7 → 110.0 | 0 → 0 | 7.26 → 3.66 | 3.84 → 1.61 |
+| SETTLE_c | 67.2 → 57.8 (−9.4) | 62.7 → 51.6 | 113.6 → 112.7 | 0 → 0 | 10.83 → 7.14 | 3.52 → 1.27 |
+| CONNECT_g | 71.3 → 58.2 (−13.1) | 66.6 → 53.1 | 120.6 → 111.9 | 0 → 0 | 10.81 → 7.11 | 7.13 → 1.31 |
+| INJECT_n | 72.1 → 59.8 (−12.4) | 64.2 → 53.5 | 115.6 → 116.3 | 0 → 0 | 10.93 → 7.23 | 6.26 → 1.19 |
+| VAC_FOLLOW_a | 69.5 → 60.2 (−9.3) | 64.4 → 53.5 | 115.6 → 113.5 | 0 → 0 | 10.95 → 7.26 | 3.81 → 1.58 |
+| FOLLOW_CONN_G | 72.2 → 59.0 (−13.2) | 69.0 → 56.1 | 114.5 → 112.4 | 0 → 0 | 10.81 → 7.11 | 7.22 → 1.34 |
+| OPEN_LOOP_o | 70.3 → 61.1 (−9.2) | 65.4 → 55.3 | 117.5 → 121.3 | 0 → 0 | 10.97 → 7.27 | 3.37 → 1.12 |
+
+**Verdict.** The four gains add up: alone they sum to about −10.5 µs on average, together −10.15 µs (changes 1 and 2 both shorten the scope part, so they overlap a little). The worst task tick is 45.1–56.1 µs (budget 80 µs: 24 µs of margin in the worst stage, G). With the task API's mean 10.8 µs in the same interrupt, the interrupt's worst is about 56–67 µs per period, so the 80 µs budget holds even if it is read as the whole interrupt. No period lost, background tasks served (telemetry every 102 ms). Against the code before any change (`a528915`, without the write probes): −9.82 µs.
+
+| Change | Alone (mean over stages) | Where it shows |
+|---|---|---|
+| 1 Load bookkeeping | −6.97 µs | every stage |
+| 2 Scope 2 kHz by default | −1.13 µs | g, n, G (−2.9 to −3.7 µs); mean only, not the worst tick |
+| 3 Boost start / burst on change | −1.99 µs | stages with the boost running (−2.2 µs); 0 on the bench (boost idle) |
+| 4 Modulos | −0.44 µs | every stage |
+| **All** | **−10.15 µs** | |
+
+**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément.

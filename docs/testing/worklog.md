@@ -551,3 +551,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | On the bare Spin, 4 wait states: task tick worst 52.0–68.7 µs, **0 lost periods**, gap ≤ 118.5 µs, interrupt time per period 56–72 % without the harness, all scope downloads answered. 8 wait states (reference): 4 000–8 000 lost periods per stage with the bridge on, interrupt time 86 % (OFF_IDLE) to 112 % (G), the console dead during the run — the bench's "call rate 9916 Hz" symptom. New: the task API spends about 2 µs (safety check) and 9–11 µs (ADC data dispatch) in the same interrupt before the task, every period |
 | Lead, not acted on | The data dispatch (9.4 µs at 4 WS) costs more than the five sensor reads (8.2 µs): together about 18 µs per period on the ADC path |
 | Hardware check | Not needed |
+
+## 2026-11-12 — Critical task optimizations 1–4 (measured one by one, then together)
+
+| Field | Value |
+|---|---|
+| Commit | branches `perf/timing-1-bookkeeping` (`527e36d`), `perf/timing-2-scope` (`c96d94f`), `perf/timing-3-writes` (`fb07a70`), `perf/timing-4-modulo` (`c664d8d`, library `ac3dbc6`), merged in `5fcf14b`; TIMING-only write probes `23afd86` |
+| Files | `src/main.cpp`; `src/app.ini` and `tests/l1/dependencies.lock.json` (single_phase_inverter `f98cfac` → `ac3dbc6`); library `src/singlePhaseInverterFollowing.cpp` |
+| Reason | Luiz Villa: bring down the three remaining contributions (load bookkeeping, scope, PWM and relay writes) one at a time, then together; Jean Alinei: replace modulos by conditions. Results and method: [timing-optimization.md](timing-optimization.md) |
+| Behaviour change | 1: none (same telemetry fields and lost-tick rule; the task reads `DWT->CYCCNT`, enabled in `setup_routine`, and keeps cycles; the telemetry thread converts). 2: **the scope samples at 2 kHz in every stage by default**; key `v` switches CONNECT, INJECT and FOLLOW_CONNECT to 10 kHz as before. 3: boost leg 1 `start`/`stop` and `setBurstMode` sent on change; **a stop from the safety API now holds for boost leg 1 until the next mode change** (it was undone by the next tick; the bridge already behaved this way). 4: none (θ wrap and sync-window index without `fmodf`/`%`; `fmodf` kept as a fallback) |
+| Evidence | L0-TIM-01/02/03 pass alone and together on the bare Spin; interrupt time per period −10.15 µs on average (−6.3 µs OFF/boost idle to −13.2 µs G), worst task tick 45.1–56.1 µs, 0 lost periods. Host L0: 125 pass, 7 known, 0 new; L0-GFL 52 pass. USB build has no timing symbol |
+| Hardware check | Pending: bench with the USB firmware (steps 1 and 2b); for a capture around the relay at 10 kHz press `v` first (changed default) |
