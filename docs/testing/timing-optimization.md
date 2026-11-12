@@ -6,7 +6,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 
 | Item | Rule |
 |---|---|
-| Base | `a528915` (4 flash wait states, TIM-01/02/03 at TIM-03's detail), campaign `2026-11-12_6d00a25_150416_YU7So7` |
+| Base | `a528915` (4 flash wait states, TIM-01/02/03 at TIM-03's detail), campaign `2026-11-12_6d00a25_150416_YU7So7`; from change 3 on, `23afd86` (same code plus TIMING-only probes inside the writes, +0.34 µs in the TIMING build), campaign `2026-11-12_23afd86_152108_EewYf2` |
 | One change at a time | Branch `perf/timing-<n>-<name>` from the base; one TIMING run (`tests/l0/timing/run.sh --run`) |
 | Comparison | `python3 tests/l0/timing/compare.py <base campaign> <change campaign> --rows <parts>` |
 | Main figure | **Interrupt time per period** (mean, L0-TIM-03): the task API's safety check and ADC data dispatch plus the critical task tick, without the test harness |
@@ -33,7 +33,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 |---|---|---|---|
 | 1 | `load` bookkeeping: cycle counter read directly, raw cycles in the task, µs conversion in the telemetry thread | `src/main.cpp` | Measured alone: **−6.97 µs** (branch `perf/timing-1-bookkeeping`, `527e36d`) |
 | 2 | Scope: 10 kHz around the relay only on request (2 kHz by default) | `src/main.cpp` | Measured alone: **−3.7 µs in g and G, −2.9 µs in n**, 0 elsewhere (branch `perf/timing-2-scope`, `c96d94f`) |
-| 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` (and the shield API if needed) | Planned |
+| 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` | Measured alone: **−2.1 to −2.3 µs with the boost running**, 0 in OFF_IDLE (branch `perf/timing-3-writes`, `fb07a70`); bridge duty API: proposal 3b below |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork | Planned |
 | All | 1–4 together: final verdict | | Planned |
 
@@ -73,3 +73,35 @@ Each tick part loses about 1.4 µs (its closing `k_cycle_get_32()` and conversio
 | other stages | unchanged (within 0.05 µs) | unchanged | 0 → 0 | unchanged |
 
 The average load drops, not the worst tick: every 5th tick still takes the full scope sample (about 7 µs), and in INJECT that sampled tick is the worst one (64.1 µs). Mean over the 9 stages: −1.13 µs.
+
+### 3 · PWM and relay writes (`fb07a70`, campaign `2026-11-12_fb07a70_152338_MMmrUV`, against `23afd86`)
+
+First the writes were split by call (TIMING-only probes, `23afd86`). Mean per tick in CONNECT `g`:
+
+| Call | µs | Every tick needed? |
+|---|---|---|
+| Boost duty `setDutyCycle(LEG1_LOW)` | 1.82 | yes (value changes) |
+| Boost enable `start(LEG1_LOW)` | 2.48 | no: the leg was already on |
+| Burst `setBurstMode` | 0.61 | only when skip/period change |
+| Bridge duty `setInverterDutyCycle` | 3.38–3.50 | yes (value changes); the cost is the API's validation |
+| Bridge enables | 0.15 | already on change |
+| PWM acknowledgement | 0.34 | — |
+| Relay | 0.37–0.40 | already on change |
+
+Change: boost leg 1 `start`/`stop` and `setBurstMode` are sent when the command changes. **Behaviour change:** a stop from the safety API (`safety_action()` stops ALL legs) is no longer undone by the next tick for boost leg 1; it holds until the next mode change, as it already did for the bridge.
+
+| Stage | Interrupt / period (mean) | Task tick worst | Lost | Boost enable (mean) | Writes (mean) |
+|---|---|---|---|---|---|
+| OFF_IDLE | 56.7 → 56.7 (+0.1) | 52.1 → 52.3 | 0 → 0 | 0.02 → 0.02 | 2.76 → 2.85 |
+| OFF_BUSREG | 63.2 → 60.9 (−2.2) | 58.8 → 57.7 | 0 → 0 | 2.48 → 0.14 | 7.44 → 5.27 |
+| OFF_MPPT | 64.0 → 61.8 (−2.2) | 59.2 → 57.0 | 0 → 0 | 2.48 → 0.14 | 7.26 → 5.22 |
+| SETTLE_c | 67.2 → 65.0 (−2.2) | 62.7 → 60.5 | 0 → 0 | 2.48 → 0.14 | 10.83 → 8.73 |
+| CONNECT_g | 71.3 → 69.0 (−2.3) | 66.6 → 64.3 | 0 → 0 | 2.48 → 0.14 | 10.81 → 8.64 |
+| INJECT_n | 72.1 → 69.8 (−2.3) | 64.2 → 61.9 | 0 → 0 | 2.48 → 0.14 | 10.93 → 8.76 |
+| VAC_FOLLOW_a | 69.5 → 67.3 (−2.2) | 64.4 → 62.3 | 0 → 0 | 2.48 → 0.14 | 10.95 → 8.84 |
+| FOLLOW_CONN_G | 72.2 → 69.9 (−2.3) | 69.0 → 66.8 | 0 → 0 | 2.48 → 0.14 | 10.81 → 8.65 |
+| OPEN_LOOP_o | 70.3 → 68.2 (−2.1) | 65.4 → 63.4 | 0 → 0 | 2.49 → 0.14 | 10.97 → 8.85 |
+
+On the bench the boost is idle, so this change shows only when the boost runs. The burst check saves 0.13 µs (`setBurstMode` was cheap).
+
+**Proposal 3b (not done, shield API):** `setInverterDutyCycle()` re-validates the whole pair on every call (periods, prescalers, frequencies, modulation, mode, phase shifts, switch conventions) and recomputes the duty limits before two register writes. Caching the validated pair and its raw limits when the configuration changes (`initInverter`, duty min/max, frequency, convention) would leave clamp, convert and write: most of 3.4 µs per tick in every bridge stage. It changes the OwnTech shield API (cache invalidation), so it needs Jean's and Clément's agreement.
