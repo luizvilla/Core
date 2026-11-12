@@ -468,3 +468,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Key `c` re-arms the scope; in step 1 it triggers on the bridge start (2 kHz, 64 ms on each side), so step 1 and step 2b captures compare directly. No control change |
 | Evidence | Firmware builds |
 | Hardware check | Pending: one capture of `c` and one of `G` (with `v` for 2 kHz) |
+
+## 2026-11-12 — On-target timing harness (L0-TIM-01)
+
+| Field | Value |
+|---|---|
+| Commit | the `test(timing): …` commit that adds this entry |
+| Files | `src/app/control_step.cpp`, `src/main.cpp`, `src/timing/` (new), `src/app.ini` (env `TIMING`), `zephyr/CMakeLists.txt` |
+| Reason | A timing bottleneck is suspected in the critical task (74–75 µs at idle, 82–88 µs with the bridge on, out of 100 µs). [ADR 0005](../adr/0005-on-target-timing-tests.md): timing tests on the Spin through an ST-Link, so a change that saturates the task is caught before the bench |
+| Behaviour change | None in the USB firmware. `TIMING_PROBE(0…6)` in `controlStep` expands to nothing unless `TIMING_HARNESS` (env `TIMING` only; the USB ELF has no timing symbol). The critical task's scope snapshot and acquisition moved unchanged into `scopeSample()`, so the harness times the same code. In env `TIMING`, `setup_routine()` runs the harness after `controlInit()` and the scope setup instead of starting the tasks: no PWM, no relay |
+| Evidence | USB and TIMING builds succeed. Host L0 campaign: 125 pass, 7 known fails, 0 new (as before), L0-TIM-01 BLOCKED (not requested). On the Spin (STLINK-V3): L0-TIM-01.a PASS; two runs agree to the cycle. Worst cases, interrupts locked: `controlStep` 50.8 µs (OFF, boost IDLE) to 59.6 µs (G, o); `calculateDuty` alone 26–29 µs; scope sampling 6.3–8.1 µs; controlStep + scope 58.5–66.2 µs, before sensors, PWM writes and ISRs. Baseline committed in `tests/l0/timing/baseline.json` |
+| Lead, not acted on | `FLASH_ACR` reads `0x00040708`: prefetch, instruction and data caches on, but **8 wait states**; RM0440 gives 4 at 170 MHz (range 1 boost). `calculateDuty` takes about 4 500 cycles for about 470 instructions (2026-11-10 entry), about 10 cycles per instruction, which points at flash stalls. To be confirmed with L0-TIM-01 before and after the change |
+| Hardware check | Done for the harness itself; the board was left with the TIMING firmware (reflash USB before the bench) |

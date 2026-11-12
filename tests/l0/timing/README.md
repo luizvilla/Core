@@ -1,0 +1,84 @@
+# L0-TIM: on-target timing tests
+
+Cycle cost of the control code **on the Spin**, so that a change that saturates the 100 µs critical task is caught before the bench. Decision and limits: [ADR 0005](../../../docs/adr/0005-on-target-timing-tests.md). Criteria: procedure §6, tab Timing.
+
+Unlike the other L0 folders, these tests **reflash the board**. They run only when asked:
+
+```bash
+bash tests/l0/timing/preflight.sh            # check everything below; --install fixes what it can
+bash tests/l0/timing/run.sh --run            # build, flash, measure, compare with baseline.json
+tests/run_all.sh --l0 --target               # the same inside an L0 campaign
+```
+
+Without `--run` / `--target` the test reports `BLOCKED` and leaves the board alone. **After a run the board holds the TIMING firmware** (no tasks, no PWM): flash the USB env again (`pio run -e USB -t upload`) before a bench session.
+
+## What is needed to reproduce
+
+`preflight.sh` checks each row and prints `OK <item>` or `MISSING <item>: <why>. Fix: <command>`. An AI assistant should run it first and act on the `MISSING` lines: the fixes marked *no sudo* can be run directly (or with `--install`); the ones marked *sudo* must be handed to the user.
+
+| Item | Version used | Check | Fix |
+|---|---|---|---|
+| Spin board | 1.2.0 (uSolarVerter shield optional; it is not powered or switched) | OpenOCD reads `0x08000000` | Power the Spin from its USB-C (or the shield) |
+| ST-Link probe | STLINK-V3 (V2 and V2-1 also work with `interface/stlink.cfg`) | `lsusb` shows `0483:374f` (V3), `3748` (V2), `374b` (V2-1) | Plug it in; SWD cable to the Spin's SWD header (SWDIO, SWCLK, GND, VTref) |
+| USB access to the probe (Linux) | PlatformIO udev rules | OpenOCD does not report `LIBUSB_ERROR_ACCESS` | *sudo*: `curl -fsSL https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules \| sudo tee /etc/udev/rules.d/99-platformio-udev.rules && sudo udevadm control --reload-rules && sudo udevadm trigger`, then replug |
+| PlatformIO Core | 6.x, user install in `~/.platformio/penv` (not the distribution package) | `~/.platformio/penv/bin/pio --version` | *no sudo*: `curl -fsSL -o /tmp/get-platformio.py https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py && python3 /tmp/get-platformio.py` |
+| OpenOCD | PlatformIO `tool-openocd` (xPack 0.12.0), declared in `owntech/pio_extra.ini` | `~/.platformio/packages/tool-openocd/bin/openocd --version` | *no sudo*: `pio pkg install -e TIMING` (or `preflight.sh --install`) |
+| ARM toolchain | PlatformIO `toolchain-gccarmnoneeabi` 12.3.1 | `arm-none-eabi-nm` in that package | *no sudo*: `pio pkg install -e TIMING` |
+| MCUboot bootloader on the Spin | owntech-foundation/bootloader v1.1.0 | first word at `0x08000000` is not `ffffffff` | *no sudo*: `preflight.sh --install` downloads it and flashes it at `0x08000000` over the ST-Link |
+| Firmware libraries | pinned in `src/app.ini` | `owntech/lib/TIMING/` exists | First `pio run -e TIMING` clones them (network needed once) |
+| Python | ≥ 3.8, standard library only | `python3 --version` | System package manager |
+
+A distribution `openocd` is not used: the scripts call PlatformIO's copy so that every machine runs the same version. `PIO` and `PLATFORMIO_PACKAGES_DIR` override the default paths.
+
+## How it works
+
+```mermaid
+flowchart LR
+  R[run.sh] -- "pio run -e TIMING -t upload<br/>(OpenOCD, ST-Link, slot 0x8047800)" --> S[Spin]
+  S -- "main.cpp: controlInit, then<br/>timingHarnessRun instead of the tasks" --> H[harness]
+  H -- "DWT cycles per section" --> M[(g_timing_report<br/>in RAM)]
+  R -- "read_report.py: nm + OpenOCD dump_image<br/>(core keeps running)" --> M
+  R --> E[evaluate.py] --> L["@@ result lines<br/>timing_tim01.md"]
+```
+
+| File | Role |
+|---|---|
+| [`src/timing/timing_probe.h`](../../../src/timing/timing_probe.h) | `TIMING_PROBE(i)` in `controlStep`; empty unless `TIMING_HARNESS` |
+| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 1) |
+| [`src/timing/timing_harness.cpp`](../../../src/timing/timing_harness.cpp) | Scenario and measurement on the target |
+| [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
+| [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
+| [`read_report.py`](read_report.py) | Finds `g_timing_report` in the ELF, waits for DONE, dumps it over SWD |
+| [`evaluate.py`](evaluate.py) | Verdicts and the table |
+| [`baseline.json`](baseline.json) | Committed worst case per section, in cycles |
+
+Env `TIMING` (in `src/app.ini`) is the USB image plus `-DTIMING_HARNESS`, uploaded by OpenOCD into the MCUboot slot. The bootloader is left in place. The console stays on USB CDC (`pre_usb.py`), so the harness also prints its start and end there.
+
+## L0-TIM-01: cycle cost per section
+
+The harness runs `controlStep()` on the production `ControlState` (after `controlInit()`), with synthetic measurements (230 V / 50 Hz grid, 400 V bus, 36 V / 2 A input, 50 mA AC current) and the critical task's relay and PWM-acknowledgement models. It walks through the stages in buckets: OFF with the boost in IDLE, BUSREG and MPPT, then c, g, n, a, G and o with the boost in BUSREG; 225 000 ticks in all. Each tick runs with **interrupts locked** and back to back, so a row is the code's own cost, without ISRs. The numbers are deterministic: two runs agree to the cycle.
+
+| Section | Between |
+|---|---|
+| `boost_cold` | setters, mode change, cold loop (every 10th tick: the worst case is a cold tick) |
+| `boost_hot` | boost hot loop |
+| `inv_stage` | stage logic before `calculateDuty` |
+| `inv_duty` | `singlePhaseInverterFollowing::calculateDuty` |
+| `observer` | grid observer and quality gate |
+| `outputs` | outputs, open loop, VAC follower, protection, relay timing |
+| `controlStep` | the whole call |
+| `scope` | the critical task's scope snapshot and `acquire`, run on every tick (the 10 kHz case) |
+
+Criteria: `.a` the scenario reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault (otherwise the rows don't mean what their names say); `.b-<bucket>` no section exceeds the baseline by more than 10 % + 50 cycles; `.c-<bucket>` INFO, controlStep + scope against the 80 µs budget.
+
+**Updating the baseline.** When a change legitimately costs more (or less), run `run.sh --run --update-baseline` and commit `baseline.json` with that change, saying why in the commit message.
+
+## Not yet implemented
+
+| ID | What |
+|---|---|
+| L0-TIM-02 | `controlStep` worst case per stage and on the transition ticks, against the 80 µs budget |
+| L0-TIM-03 | The full critical task in the running firmware with synthetic inputs, console and scope download active: worst case ≤ 80 µs, no lost ticks, gap ≤ 150 µs |
+| L0-TIM-04 | Start delay of the critical task (other threads' interrupt locks) |
+
+Sensor reads (`getLatestValue`) need the ADC acquisition running, so they are measured in L0-TIM-03, not in L0-TIM-01.

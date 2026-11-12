@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Procedure version | 1.15 (draft) |
+| Procedure version | 1.16 (draft) |
 | Firmware under test | Core2 branch `test/microinverter-validation`, application in `src/` |
 | Hardware target | Spin 1.2.0 + uSolarVerter 0.9.0 |
 | Owner | Luiz Villa |
@@ -31,7 +31,7 @@ This procedure verifies features that **already exist** in the firmware. It does
 
 | Level | What runs | Inputs | Plant | Tooling |
 |---|---|---|---|---|
-| **L0** | One object at a time, or `controlStep` | Fixed values or synthetic signals chosen by the test | None, open loop | `g++` on the host, hardware stand-in headers |
+| **L0** | One object at a time, or `controlStep` | Fixed values or synthetic signals chosen by the test | None, open loop | `g++` on the host, hardware stand-in headers; **L0-TIM** (timing) on the Spin through an ST-Link, PlatformIO env `TIMING`, run only with `--target` ([ADR 0005](../adr/0005-on-target-timing-tests.md)) |
 | **D** | The controller's arithmetic, re-implemented (library SOGI, PI, PLL), for fast evaluation of ideas at the user's request ([ADR 0004](../adr/0004-averaged-model-for-fast-evaluation.md)) | A scenario chosen by the design test | **Averaged** plant model in Python, closed loop; INFO only, never a verdict | `tests/l1/design/`, filed under the Model tab |
 | **L1** | The **firmware block** (`controlStep` + all controllers) | Operator commands from a scenario timeline | **Plant model** in Pulsim, closed loop | Pulsim C-Block, Python |
 | **L2** | The flashed firmware on the board | Serial menu commands, bench sources | The real converter on the bench | Bench sessions with a written sheet and record ([inverter session](bench/inverter-session.md)) |
@@ -316,6 +316,19 @@ The [switched DCDC results](switched-dcdc-results.md) preserve the current regul
 | L1-APP-15 | MPPT into the grid | PV power tracked and injected; overall efficiency INFO *Conditions:* Grid-connected operation on the PV panel |  | Blocked: BLOCKED: the application is synchronization-only and never injects into the grid |
 | L1-APP-16 | Anti-islanding | Stops injecting within the standard's time when the grid disappears *Conditions:* Grid loss during injection |  | Blocked: BLOCKED: the application is synchronization-only and never injects into the grid |
 
+### 6.7 Timing
+
+Does the control code fit in the 100 µs critical task on the Spin? Cycle cost per section, then the whole task in the running firmware (ADR 0005).
+
+On-target tests: they reflash the Spin through an ST-Link and run only with `tests/run_all.sh --l0 --target` (otherwise BLOCKED). Requirements and preflight: [tests/l0/timing/README.md](../../tests/l0/timing/README.md). Budget 80 µs (80 % of the period), set by the user on 2026-11-12.
+
+| ID | Test | Criterion and conditions | Source | Status |
+|---|---|---|---|---|
+| L0-TIM-01 | Cycle cost of each `controlStep` section and of the scope sampling, per stage, on the Spin | .a the scenario reaches PWM_SETTLE, GRID_CONNECTED and RUN without a fault; .b-<bucket> no section's worst case exceeds the committed baseline by more than 10 % + 50 cycles; .c-<bucket> INFO controlStep + scope worst case against the 80 µs budget *Conditions:* Interrupts locked, ticks back to back, synthetic 230 V / 50 Hz grid, 400 V bus, boost BUSREG in the grid stages; 225 000 ticks *Harness:* tests/l0/timing/run.sh --run | ADR 0005; `tests/l0/timing/baseline.json` | Implemented: Implemented 2026-11-12 (baseline 2026-11-12) |
+| L0-TIM-02 | `controlStep` worst case per stage and on the transition ticks within the budget | Worst case of `controlStep` in every stage (OFF, c, o, g, n, a, G) and on the relay request, PLL freeze and CONNECTED ticks ≤ 80 µs; baseline check as L0-TIM-01 *Conditions:* As L0-TIM-01, with the transitions repeated | ADR 0005, budget 80 µs | Planned: Defined 2026-11-12 |
+| L0-TIM-03 | Full critical task in the running firmware: worst case within the budget, no lost tick | Worst-case run time ≤ 80 µs; lost ticks = 0; gap between starts ≤ 150 µs; sensors read with the ADC acquisition running *Conditions:* TIMING build with the tasks running, synthetic measurements in place of the sensors, stages driven over SWD, console printing and a scope download in progress | ADR 0005; critical task `load` and `lost` telemetry | Planned: Defined 2026-11-12 |
+| L0-TIM-04 | Start delay of the critical task (interrupt locks in other threads) | Histogram of the delay between the expected 100 µs grid and the task's start, INFO; FAIL above 50 µs *Conditions:* As L0-TIM-03 | ADR 0005 | Planned: Defined 2026-11-12 |
+
 ## 7. Running a campaign
 
 ```bash
@@ -564,6 +577,7 @@ flowchart LR
 | 1.13 | 2026-11-06 | L0-BST-09 (leg 2 starts only above a demand threshold, requirement (c); fails, finding #5). L0-PWR-01 planned (PWM duty limits across 200/50 kHz timing units, finding #6). Application minimum duty 0.005 (Luiz, as Andres's code) and the leg-1 dead-time fix in `main.cpp` (worklog); the L1 contract's `duty_min` follows (0.005). |
 | 1.14 | 2026-11-09 | Level L2 (on the board, §2). Inverter bench session ([sheet](bench/inverter-session.md)): L2-INV-10 pre-checks and L2-INV-00…03 (open-loop 230 V RMS, PWM_SETTLE with the relay open, relay closing then zero current, fixed current injection). The application takes an inverter stage instead of the sync request (OFF, SETTLE, OPEN_LOOP, CONNECT, INJECT), drives the relay on GPIO 22 with contact-time feedback, and protects the bench at 1.5 A (L0-APP-06…08). Builds on Jean Alinei's PWM_SETTLE hold, PWM application and scope capture (2026-11-08). |
 | 1.15 | 2026-11-09 | Finding #7 (no synchronization on the real grid): library fix on a branch (one-period averages of Vd, Vq and ω, \|Vq\| < 1 % of the peak), the firmware temporarily fetches it; L0-GFL-10 (harmonics: bench levels, EN 50160) and L0-GFL-13 (VAC offset) implemented. Bench calibration of VDCBus and IAC. Firmware scope: VDCBus, bridge duty, forced trigger. |
+| 1.16 | 2026-11-12 | On-target timing tests L0-TIM ([ADR 0005](../adr/0005-on-target-timing-tests.md)): Timing tab, L0-TIM-01 implemented (cycle cost per `controlStep` section on the Spin, baseline regression), L0-TIM-02…04 defined; budget 80 µs. `tests/run_all.sh --target`. Production change: `TIMING_PROBE` points in `controlStep` (empty outside the TIMING env) and the scope sampling moved into `scopeSample()` (worklog). |
 
 ## 11. Findings register
 

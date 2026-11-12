@@ -44,6 +44,14 @@
    "notes": [
     "The [switched DCDC results](switched-dcdc-results.md) preserve the current regulation failure, numerical refinement and remaining coverage. Grid-injection cases are defined now and stay blocked while the application is synchronization-only."
    ]
+  },
+  {
+   "id": "timing",
+   "title": "Timing",
+   "question": "Does the control code fit in the 100 µs critical task on the Spin? Cycle cost per section, then the whole task in the running firmware (ADR 0005).",
+   "notes": [
+    "On-target tests: they reflash the Spin through an ST-Link and run only with `tests/run_all.sh --l0 --target` (otherwise BLOCKED). Requirements and preflight: [tests/l0/timing/README.md](../../tests/l0/timing/README.md). Budget 80 µs (80 % of the period), set by the user on 2026-11-12."
+   ]
   }
  ],
  "tests": [
@@ -1452,6 +1460,51 @@
    "status": "blocked",
    "status_note": "BLOCKED: the application is synchronization-only and never injects into the grid",
    "conditions": "Grid loss during injection"
+  },
+  {
+   "id": "L0-TIM-01",
+   "tab": "timing",
+   "level": "L0",
+   "title": "Cycle cost of each `controlStep` section and of the scope sampling, per stage, on the Spin",
+   "criterion": ".a the scenario reaches PWM_SETTLE, GRID_CONNECTED and RUN without a fault; .b-<bucket> no section's worst case exceeds the committed baseline by more than 10 % + 50 cycles; .c-<bucket> INFO controlStep + scope worst case against the 80 µs budget",
+   "conditions": "Interrupts locked, ticks back to back, synthetic 230 V / 50 Hz grid, 400 V bus, boost BUSREG in the grid stages; 225 000 ticks",
+   "source": "ADR 0005; `tests/l0/timing/baseline.json`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-12 (baseline 2026-11-12)",
+   "harness": "tests/l0/timing/run.sh --run"
+  },
+  {
+   "id": "L0-TIM-02",
+   "tab": "timing",
+   "level": "L0",
+   "title": "`controlStep` worst case per stage and on the transition ticks within the budget",
+   "criterion": "Worst case of `controlStep` in every stage (OFF, c, o, g, n, a, G) and on the relay request, PLL freeze and CONNECTED ticks ≤ 80 µs; baseline check as L0-TIM-01",
+   "conditions": "As L0-TIM-01, with the transitions repeated",
+   "source": "ADR 0005, budget 80 µs",
+   "status": "planned",
+   "status_note": "Defined 2026-11-12"
+  },
+  {
+   "id": "L0-TIM-03",
+   "tab": "timing",
+   "level": "L0",
+   "title": "Full critical task in the running firmware: worst case within the budget, no lost tick",
+   "criterion": "Worst-case run time ≤ 80 µs; lost ticks = 0; gap between starts ≤ 150 µs; sensors read with the ADC acquisition running",
+   "conditions": "TIMING build with the tasks running, synthetic measurements in place of the sensors, stages driven over SWD, console printing and a scope download in progress",
+   "source": "ADR 0005; critical task `load` and `lost` telemetry",
+   "status": "planned",
+   "status_note": "Defined 2026-11-12"
+  },
+  {
+   "id": "L0-TIM-04",
+   "tab": "timing",
+   "level": "L0",
+   "title": "Start delay of the critical task (interrupt locks in other threads)",
+   "criterion": "Histogram of the delay between the expected 100 µs grid and the task's start, INFO; FAIL above 50 µs",
+   "conditions": "As L0-TIM-03",
+   "source": "ADR 0005",
+   "status": "planned",
+   "status_note": "Defined 2026-11-12"
   }
  ],
  "retired": {

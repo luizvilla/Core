@@ -115,5 +115,6 @@ target_sources(app PRIVATE
   ../src/boost_converter/boost.cpp
   ../src/grid_observer/gridObserver.cpp
   ../src/app/control_step.cpp
+  ../src/timing/timing_harness.cpp
 )
 zephyr_include_directories(../src)

@@ -41,6 +41,15 @@
 #include "app/control_step.h"
 #include <math.h>
 #include "ScopeMimicry.h"
+#ifdef TIMING_HARNESS
+#include "timing/timing_harness.h"
+#endif
+
+/* Scope snapshot and acquisition of one sampled critical tick. */
+static void scopeSample(ControlState &state, const ControlOutputs &out);
+#ifdef TIMING_HARNESS
+static void timingScopeSample(ControlState &state, const ControlOutputs &out, const Measurements &meas);
+#endif
 
 /*--------------SETUP FUNCTIONS DECLARATION------------------- */
 /* Setups the hardware and software of the system */
@@ -303,6 +312,12 @@ void setup_routine()
     scope.set_trigger(&scope_trigger);
     scope.set_delay(0.5F);
     scope.start();
+
+#ifdef TIMING_HARNESS
+    /* TIMING env (ADR 0005): run the L0-TIM-01 scenario instead of the tasks; no PWM is ever started. */
+    timingHarnessRun(control, timingScopeSample);
+    return;
+#endif
 
     /* Then declare tasks */
     uint32_t app_task_number = task.createBackground(loop_application_task);
@@ -634,6 +649,40 @@ void loop_application_task()
 }
 
 /**
+ * Scope snapshot and acquisition of one sampled critical tick (also timed by the L0-TIM-01 harness).
+ */
+static void scopeSample(ControlState &state, const ControlOutputs &out)
+{
+    const dqo_t grid_voltage_dq = state.inverter.getVdq();
+    {
+        const dqo_t vdq_avg = state.inverter.getVdqAverage();
+        scope_v_alpha = vdq_avg.q;
+        scope_vd_avg = vdq_avg.d;
+        scope_v_beta = state.inverter.getwAverage();
+    }
+    scope_v_d = grid_voltage_dq.d;
+    scope_v_q = grid_voltage_dq.q;
+    scope_omega = state.inverter.getw();
+    v_ac_rms_value = state.grid_observer.getVoltageRms();
+    scope_sync = state.inverter.getSync() ? 1.0F : 0.0F;
+    scope_relay_closed = relay_command ? 1.0F : 0.0F;
+    scope_inverter_mode = static_cast<float32_t>(state.inverter.getMode());
+    scope_bridge_on = state.bridge_pwm_applied ? 1.0F : 0.0F;
+    scope_bridge_duty = state.bridge_pwm_applied ? out.bridge_duty : 0.0F;
+    if (!is_scope_downloading) scope.acquire();
+}
+
+#ifdef TIMING_HARNESS
+/* L0-TIM-01: the harness's measurements stand in for the sensor values the scope records. */
+static void timingScopeSample(ControlState &state, const ControlOutputs &out, const Measurements &meas)
+{
+    v_ac_value = meas.v_ac;
+    i_ac_value = meas.i_ac;
+    scopeSample(state, out);
+}
+#endif
+
+/**
  * This is the code loop of the critical task
  * This task runs at 10kHz.
  *  - It retrieves sensors values
@@ -821,23 +870,7 @@ void loop_critical_task()
     if (++scope_sample_tick >= divider)
     {
         scope_sample_tick = 0U;
-        const dqo_t grid_voltage_dq = control.inverter.getVdq();
-        {
-            const dqo_t vdq_avg = control.inverter.getVdqAverage();
-            scope_v_alpha = vdq_avg.q;
-            scope_vd_avg = vdq_avg.d;
-            scope_v_beta = control.inverter.getwAverage();
-        }
-        scope_v_d = grid_voltage_dq.d;
-        scope_v_q = grid_voltage_dq.q;
-        scope_omega = control.inverter.getw();
-        v_ac_rms_value = control.grid_observer.getVoltageRms();
-        scope_sync = control.inverter.getSync() ? 1.0F : 0.0F;
-        scope_relay_closed = relay_command ? 1.0F : 0.0F;
-        scope_inverter_mode = static_cast<float32_t>(control.inverter.getMode());
-        scope_bridge_on = control.bridge_pwm_applied ? 1.0F : 0.0F;
-        scope_bridge_duty = control.bridge_pwm_applied ? out.bridge_duty : 0.0F;
-        if (!is_scope_downloading) scope.acquire();
+        scopeSample(control, out);
     }
     const uint32_t t_end = k_cycle_get_32();
     notePart(3, t_applied, t_end);

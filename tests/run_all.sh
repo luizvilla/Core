@@ -20,6 +20,7 @@
 ##   tests/run_all.sh          # L0 then L1
 ##   tests/run_all.sh --l0     # L0 only
 ##   tests/run_all.sh --l1     # L1 only
+##   tests/run_all.sh --l0 --target   # also the on-target L0-TIM tests: REFLASHES the Spin over the ST-Link
 set -uo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,7 +29,8 @@ for arg in "$@"; do
     case "$arg" in
         --l0) levels+=(L0) ;;
         --l1) levels+=(L1) ;;
-        -h|--help) sed -n '/^## @brief/,/^##   .*--l1/s/^## \{0,1\}//p' "$0"; exit 0 ;;
+        --target) export CORE_TARGET=1 ;;
+        -h|--help) sed -n '/^## @brief/,/^##   .*--target/s/^## \{0,1\}//p' "$0"; exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
@@ -48,6 +50,7 @@ object_code() {
         grid_observer) echo GOB ;;
         inverter_following) echo GFL ;;
         app) echo APP ;;
+        timing) echo TIM-01 ;;
         l1) echo INT-00 ;;
         *) echo "$1" | tr '[:lower:]' '[:upper:]' ;;
     esac

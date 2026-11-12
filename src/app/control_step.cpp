@@ -26,6 +26,7 @@
  * see docs/testing/worklog.md.
  */
 #include "app/control_step.h"
+#include "timing/timing_probe.h"  /* L0-TIM probes: empty unless TIMING_HARNESS (ADR 0005) */
 
 #include <math.h>
 
@@ -63,6 +64,7 @@ int8_t controlInit(ControlState &state)
 ControlOutputs controlStep(ControlState &state, const Measurements &meas,
                            const OperatorCommands &cmd)
 {
+    TIMING_PROBE(0);
     ControlOutputs out;
 
     /* Bench step 1c: the inverter aims vac_offset above the measured grid voltage, never below it. */
@@ -97,7 +99,9 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
         state.cold_loop_tick = 0U;
         state.boost.coldLoop();
     }
+    TIMING_PROBE(1);
     out.boost_duty = state.boost.hotLoop();
+    TIMING_PROBE(2);
 
     /* ---- Inverter bench stage (docs/testing/bench/inverter-session.md) ---- */
     const InverterStage stage = cmd.inverter_stage;
@@ -159,7 +163,9 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     }
     if (follow_connect)  /* the VAC copy as feedforward; the inverter stops using it at the predicted contact */
         state.inverter.setExternalFeedforward(vac_copy, !state.bench_tripped);
+    TIMING_PROBE(3);
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
+    TIMING_PROBE(4);
     const clarke_t grid_voltage_ab = state.inverter.getVab();
     /* The observer judges one-period averages once the inverter's window is full (as its
      * synchronization does, #7): a real grid's harmonics ripple the instantaneous SOGI
@@ -174,6 +180,7 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     /* Apply this tick's quality verdict before accepting any PWM request. */
     state.inverter.setGridQuality(state.grid_observer.canOperate());
     out.grid_angle = state.inverter.getTheta();
+    TIMING_PROBE(5);
 
     out.boost_pwm_update = requested_mode != IDLE;
     out.leg1_enable = state.boost.isLeg1Enabled();
@@ -259,5 +266,6 @@ ControlOutputs controlStep(ControlState &state, const Measurements &meas,
     if (state.relay_command_latched && !was_latched) state.inverter.notifyRelayCommand(app::relay_close_delay);
     out.relay_close = state.relay_command_latched;
     out.bench_trip = state.bench_tripped;
+    TIMING_PROBE(6);
     return out;
 }
