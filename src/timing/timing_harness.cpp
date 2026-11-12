@@ -29,6 +29,9 @@
 #include "timing/timing_report.h"
 #include "inverterTiming.h"
 
+/* Task API proxy probes (owntech_task_api uninterruptible_synchronous_task.cpp, TIMING builds only). */
+extern volatile uint32_t timing_proxy_cycles[3];
+
 namespace timing {
 volatile uint32_t probe_cycles[probe_count];
 volatile uint32_t tick_cycles[tick_probe_count];
@@ -84,6 +87,30 @@ enum Section : uint8_t {
     SEC_T2_DUTY_MODE_FF,
     SEC_T2_DUTY_CURRENT_PI,
     SEC_T2_DUTY_OUTPUT,
+    /* L0-TIM-03: the critical task's whole tick (its load bookkeeping included) with the background tasks running,
+     * the same parts and sections (rows "3:…"), and the gap between two task starts. */
+    SEC_T3_TICK,
+    SEC_T3_TICK_SENSORS,
+    SEC_T3_TICK_CONTROL,
+    SEC_T3_TICK_APPLY,
+    SEC_T3_TICK_SCOPE,
+    SEC_T3_BOOST_COLD,
+    SEC_T3_BOOST_HOT,
+    SEC_T3_INV_STAGE,
+    SEC_T3_INV_DUTY,
+    SEC_T3_OBSERVER,
+    SEC_T3_OUTPUTS,
+    SEC_T3_DUTY_PLL,
+    SEC_T3_DUTY_SOGI,
+    SEC_T3_DUTY_PARK,
+    SEC_T3_DUTY_SYNCWIN,
+    SEC_T3_DUTY_MODE_FF,
+    SEC_T3_DUTY_CURRENT_PI,
+    SEC_T3_DUTY_OUTPUT,
+    SEC_T3_GAP,           ///< Time between this task start and the previous one (period 100 µs).
+    SEC_T3_HARNESS,       ///< What the harness itself adds in the interrupt (inputs, recording), outside the task tick.
+    SEC_T3_SAFETY,        ///< Task API proxy: the safety check (CONFIG_OWNTECH_SAFETY_API), same interrupt, before the task.
+    SEC_T3_DISPATCH,      ///< Task API proxy: spin.data.doFullDispatch() (ADC data), same interrupt, before the task.
     SEC_COUNT
 };
 const char *const section_names[SEC_COUNT] = {
@@ -91,10 +118,18 @@ const char *const section_names[SEC_COUNT] = {
     "duty_pll", "duty_sogi", "duty_park", "duty_syncwin", "duty_mode_ff", "duty_current_pi", "duty_output",
     "tick", "tick_sensors", "tick_control", "tick_apply", "tick_scope",
     "2:boost_cold", "2:boost_hot", "2:inv_stage", "2:inv_duty", "2:observer", "2:outputs",
-    "2:duty_pll", "2:duty_sogi", "2:duty_park", "2:duty_syncwin", "2:duty_mode_ff", "2:duty_current_pi", "2:duty_output"
+    "2:duty_pll", "2:duty_sogi", "2:duty_park", "2:duty_syncwin", "2:duty_mode_ff", "2:duty_current_pi", "2:duty_output",
+    "3:tick", "3:tick_sensors", "3:tick_control", "3:tick_apply", "3:tick_scope",
+    "3:boost_cold", "3:boost_hot", "3:inv_stage", "3:inv_duty", "3:observer", "3:outputs",
+    "3:duty_pll", "3:duty_sogi", "3:duty_park", "3:duty_syncwin", "3:duty_mode_ff", "3:duty_current_pi", "3:duty_output",
+    "3:gap", "3:harness", "3:safety", "3:dispatch"
 };
 static_assert(SEC_T2_OUTPUTS - SEC_T2_BOOST_COLD + 2U == timing::probe_count, "TIM-02 controlStep sections");
 static_assert(SEC_T2_DUTY_OUTPUT - SEC_T2_DUTY_PLL + 2U == INV_TIMING_PROBE_COUNT, "TIM-02 library sections");
+static_assert(SEC_TICK_SCOPE - SEC_TICK + 1U == timing::tick_probe_count && SEC_T2_DUTY_PLL == SEC_T2_OUTPUTS + 1U,
+              "tick rows then sections, contiguous (recordTickRows)");
+static_assert(SEC_T3_TICK_SCOPE - SEC_T3_TICK + 1U == timing::tick_probe_count && SEC_T3_DUTY_PLL == SEC_T3_OUTPUTS + 1U &&
+              SEC_T3_BOOST_COLD == SEC_T3_TICK_SCOPE + 1U, "TIM-03 rows mirror TIM-02's");
 static_assert(SEC_DUTY_OUTPUT - SEC_DUTY_PLL + 2U == INV_TIMING_PROBE_COUNT, "one section per library probe interval");
 
 /** @brief Scenario phases; repeated labels share a bucket. */
@@ -168,16 +203,27 @@ int findBucket(const char *name, boost_mode mode)
 }
 
 /** @brief Synthetic measurements of scenario tick @p tick (both tests use the same signals). */
+/* One grid period is exactly 200 ticks (50 Hz at 10 kHz): the synthetic sine comes from a table, so the harness
+ * adds no sinf/fmodf to the critical task (L0-TIM-03 measures that task's start timing). */
+constexpr uint32_t grid_period_ticks = 200U;
+static_assert(1000000U / app::control_task_period == 50U * grid_period_ticks, "200 ticks per 50 Hz period");
+float32_t sine_table[grid_period_ticks];
+
+void fillSineTable()
+{
+    for (uint32_t i = 0U; i < grid_period_ticks; ++i)
+        sine_table[i] = sinf(2.0F * PI * static_cast<float32_t>(i) / static_cast<float32_t>(grid_period_ticks));
+}
+
 Measurements synthetic(uint32_t tick, bool relay_closed)
 {
-    const float32_t angle = fmodf(app::grid_angular_frequency * static_cast<float32_t>(tick) * app::hot_loop_period,
-                                  2.0F * PI);
+    const float32_t s = sine_table[tick % grid_period_ticks];
     Measurements meas{};
     meas.i_low_1 = 2.0F;
     meas.v_low = 36.0F;
     meas.v_dc_bus = 400.0F;
-    meas.v_ac = app::grid_voltage_peak * sinf(angle);
-    meas.i_ac = 0.05F * sinf(angle);
+    meas.v_ac = app::grid_voltage_peak * s;
+    meas.i_ac = 0.05F * s;
     meas.v_ac_updated = true;
     meas.relay_closed = relay_closed;
     return meas;
@@ -260,9 +306,29 @@ int eventRow(uint32_t bucket, uint8_t type, uint8_t arg)
     return static_cast<int>(row);
 }
 
+inline void recordRow(uint32_t row, uint32_t c, uint32_t tick);
+
+/** @brief Records the tick parts and the controlStep and calculateDuty sections of the last tick from row
+ * @p first (tick, 4 parts, 6 controlStep sections, 7 calculateDuty sections, as SEC_TICK… and SEC_T2_…). */
+void recordTickRows(uint32_t base, uint8_t tick_row, uint8_t section_row, uint32_t tick_cycles_total,
+                    bool duty_fresh, uint32_t tick)
+{
+    recordRow(base + tick_row, tick_cycles_total, tick);
+    for (uint8_t i = 0U; i + 1U < timing::tick_probe_count; ++i)
+        recordRow(base + tick_row + 1U + i, timing::tick_cycles[i + 1U] - timing::tick_cycles[i], tick);
+    for (uint8_t i = 0U; i < timing::probe_count - 1U; ++i)
+        recordRow(base + section_row + i, timing::probe_cycles[i + 1U] - timing::probe_cycles[i], tick);
+    if (duty_fresh)
+    {
+        for (uint8_t i = 0U; i < INV_TIMING_PROBE_COUNT - 1U; ++i)
+            recordRow(base + section_row + (timing::probe_count - 1U) + i, inv_timing_cycles[i + 1U] - inv_timing_cycles[i], tick);
+    }
+}
+
 inline void recordRow(uint32_t row, uint32_t c, uint32_t tick)
 {
-    volatile TimingRow &x = g_timing_report.rows[row];
+    /* Only the critical task writes these rows; plain stores keep the harness light (the host reads RAM as is). */
+    TimingRow &x = const_cast<TimingRow &>(g_timing_report.rows[row]);
     x.calls = x.calls + 1U;
     x.sum_cycles = x.sum_cycles + c;
     if (c < x.min_cycles) x.min_cycles = c;
@@ -322,6 +388,7 @@ void timingHarnessRun(ControlState &state, TimingScopeHook scope_sample)
             return;
         }
     }
+    fillSineTable();
     printk("timing: L0-TIM-01 scenario started\n");
     /* Hardware-loop models, as in loop_critical_task(). */
     bool relay_command = false;
@@ -438,18 +505,7 @@ void timingTim02Tick()
     const uint32_t c1 = cycles();
 
     const uint32_t base = bucket * SEC_COUNT;
-    recordRow(base + SEC_TICK, c1 - c0, t2.tick);
-    recordRow(base + SEC_TICK_SENSORS, timing::tick_cycles[1] - timing::tick_cycles[0], t2.tick);
-    recordRow(base + SEC_TICK_CONTROL, timing::tick_cycles[2] - timing::tick_cycles[1], t2.tick);
-    recordRow(base + SEC_TICK_APPLY, timing::tick_cycles[3] - timing::tick_cycles[2], t2.tick);
-    recordRow(base + SEC_TICK_SCOPE, timing::tick_cycles[4] - timing::tick_cycles[3], t2.tick);
-    for (uint8_t i = 0U; i < timing::probe_count - 1U; ++i)
-        recordRow(base + SEC_T2_BOOST_COLD + i, timing::probe_cycles[i + 1U] - timing::probe_cycles[i], t2.tick);
-    if (inv_timing_seq != seq_before)
-    {
-        for (uint8_t i = 0U; i < INV_TIMING_PROBE_COUNT - 1U; ++i)
-            recordRow(base + SEC_T2_DUTY_PLL + i, inv_timing_cycles[i + 1U] - inv_timing_cycles[i], t2.tick);
-    }
+    recordTickRows(base, SEC_TICK, SEC_T2_BOOST_COLD, c1 - c0, inv_timing_seq != seq_before, t2.tick);
 
     /* Events of this tick: each one's row gets the whole tick. */
     const uint8_t vsi = static_cast<uint8_t>(t2.state->inverter.getMode());
@@ -489,6 +545,98 @@ void timingTim02Tick()
 }
 
 bool timingTim02Done() { return t2.done; }
+
+namespace {
+struct Tim03 {
+    volatile bool active = false;
+    volatile bool done = false;
+    uint32_t tick = 0U;
+    uint32_t phase = 0U;
+    uint32_t in_phase = 0U;
+    bool started = false;
+    uint32_t prev_start = 0U;
+    int32_t lag = 0;         // accumulated (gap - period), cycles: how late the starts run against the 10 kHz grid
+};
+Tim03 t3;
+constexpr uint32_t period_cycles = 170U * app::control_task_period;  // at 170 MHz
+}
+
+void timingTim03Begin()
+{
+    t3.tick = g_timing_report.total_ticks;
+    t3.phase = 0U;
+    t3.in_phase = 0U;
+    t3.started = false;
+    t3.lag = 0;
+    t3.done = false;
+    g_timing_report.state = TIMING_TIM03_RUNNING;
+    printk("timing: L0-TIM-03 scenario started (critical task, background tasks running)\n");
+    t3.active = true;
+}
+
+bool timingTim03Done() { return t3.done; }
+
+namespace {
+void tim03Tick()
+{
+    const uint32_t start = cycles();
+    volatile TimingReport &r = g_timing_report;
+    const Phase &phase = phases[t3.phase];
+    const uint32_t bucket = static_cast<uint32_t>(bucket_of_phase[t3.phase]);
+    const uint32_t base = bucket * SEC_COUNT;
+    if (t3.started)
+    {
+        const uint32_t gap = start - t3.prev_start;
+        recordRow(base + SEC_T3_GAP, gap, t3.tick);
+        /* Lost periods from the accumulated time, so steadily late starts count even when no single gap reaches
+         * 1.5 periods: each period of accumulated lateness is one period without a task start. */
+        t3.lag += static_cast<int32_t>(gap) - static_cast<int32_t>(period_cycles);
+        while (t3.lag >= static_cast<int32_t>(period_cycles / 2U))
+        {
+            r.buckets[bucket].tim03_lost = r.buckets[bucket].tim03_lost + 1U;
+            t3.lag -= static_cast<int32_t>(period_cycles);
+        }
+    }
+    t3.prev_start = start;
+    t3.started = true;
+    if (t3.in_phase == 0U) t2.hooks.stage_start();
+
+    const Measurements meas = synthetic(t3.tick, false);
+    OperatorCommands cmd;
+    cmd.mode = phase.mode;
+    cmd.inverter_stage = phase.stage;
+    cmd.inject_current = app::inject_current_max;
+    const uint32_t seq_before = inv_timing_seq;
+    const uint32_t c0 = cycles();
+    (void)t2.hooks.task_tick(meas, cmd);
+    const uint32_t c1 = cycles();
+    recordTickRows(base, SEC_T3_TICK, SEC_T3_BOOST_COLD, c1 - c0, inv_timing_seq != seq_before, t3.tick);
+
+    const uint8_t vsi = static_cast<uint8_t>(t2.state->inverter.getMode());
+    recordRow(base + SEC_T3_SAFETY, timing_proxy_cycles[1] - timing_proxy_cycles[0], t3.tick);
+    recordRow(base + SEC_T3_DISPATCH, timing_proxy_cycles[2] - timing_proxy_cycles[1], t3.tick);
+    recordRow(base + SEC_T3_HARNESS, (cycles() - start) - (c1 - c0), t3.tick);
+    r.buckets[bucket].tim03_vsi_seen_mask = r.buckets[bucket].tim03_vsi_seen_mask | (1UL << vsi);
+    r.buckets[bucket].tim03_ticks = r.buckets[bucket].tim03_ticks + 1U;
+    ++t3.tick;
+    r.total_ticks = t3.tick;
+    if (++t3.in_phase >= phase.ticks)
+    {
+        t3.in_phase = 0U;
+        if (++t3.phase >= sizeof(phases) / sizeof(phases[0]))
+        {
+            t3.active = false;
+            t3.done = true;
+        }
+    }
+}
+}  // namespace
+
+void timingCriticalTick()
+{
+    if (t2.active) timingTim02Tick();
+    else if (t3.active) tim03Tick();
+}
 
 void timingFinish()
 {

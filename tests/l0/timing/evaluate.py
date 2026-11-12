@@ -33,9 +33,18 @@ FAULT = 7
 
 
 def is_tim02(name):
-    """@brief Rows of L0-TIM-02: the whole-tick sections and the event rows."""
+    """@brief Rows of L0-TIM-02: the whole-tick parts, the event rows and the sections in the tick ('2:')."""
     sec = name.split('/', 1)[1]
     return sec.startswith(('tick', 'ev:', '2:'))
+
+
+def is_tim03(name):
+    """@brief Rows of L0-TIM-03 ('3:')."""
+    return name.split('/', 1)[1].startswith('3:')
+
+
+def is_later(name):
+    return is_tim02(name) or is_tim03(name)
 
 
 def event_label(sec):
@@ -196,6 +205,163 @@ def tim02(rep, rows, buckets, hz, base):
     return fails
 
 
+GAP_LIMIT_US = 150.0      # L0-TIM-03: largest gap between two task starts (catalogue)
+SILENCE_LIMIT_S = 0.5     # L0-TIM-03.f: full telemetry is due every ~100 ms; 0.5 s of silence means the task starved
+
+
+def console_stats(path):
+    """@brief What the host received on the USB console during the run. @return dict (bytes, telemetry lines,
+    scope downloads, menu prints), or None without a log."""
+    if not path or not os.path.exists(path):
+        return None
+    text = open(path, 'rb').read().decode('utf-8', 'replace')
+    # Only what happened while L0-TIM-03 ran (the last boot's window): later output does not count.
+    start = text.rfind('L0-TIM-03 scenario started')
+    end = text.find('timing: done', start) if start >= 0 else -1
+    window = text[start:end] if start >= 0 and end > start else ''
+    # Largest silence between two telemetry lines, outside scope downloads (the application task prints nothing
+    # while it sends one), from the reader's host timestamps ("  12.345 | line").
+    times, silence, in_dump, last = [], 0.0, False, None
+    for ln in window.splitlines():
+        stamp, _, body = ln.partition(' | ')
+        try:
+            t = float(stamp)
+        except ValueError:
+            continue
+        if 'begin record' in body:
+            in_dump = True
+        elif 'end record' in body:
+            in_dump, last = False, t
+        elif 'load us:' in body:
+            if last is not None and not in_dump:
+                silence = max(silence, t - last)
+            last = t
+            times.append(t)
+    gaps = sorted(b - a for a, b in zip(times, times[1:]))
+    return {'telemetry_silence_s': silence, 'telemetry_median_s': gaps[len(gaps) // 2] if gaps else None,'bytes': len(window.encode()), 'telemetry_lines': window.count('load us:'),
+            'scope_downloads': window.count('end record'), 'scope_requests': window.count('[console_reader: sent r]'),
+            'menus': window.count('press l'), 'menu_requests': window.count('[console_reader: sent h]'),
+            'window_found': bool(window)}
+
+
+def tim03(rep, rows, buckets, hz, base, console):
+    """@brief L0-TIM-03 verdicts. @return number of failed criteria."""
+    if not any(b.get('tim03_ticks') for b in rep['buckets']):
+        line('L0-TIM-03', 'BLOCKED', 'Critical task in the running firmware', 'on target',
+             'no L0-TIM-03 ticks in the report (older TIMING firmware?)')
+        return 0
+    fails = 0
+    problems = []
+    for b in rep['buckets']:
+        if b['tim03_ticks'] != b['ticks']:
+            problems.append(f"{b['name']} ran {b['tim03_ticks']} of {b['ticks']} ticks")
+        if FAULT in b['tim03_vsi_seen']:
+            problems.append(f"{b['name']} faulted")
+        for m in REQUIRED.get(b['name'], []):
+            if m not in b['tim03_vsi_seen']:
+                problems.append(f"{b['name']} never reached {VSI[m]}")
+    line('L0-TIM-03.a', 'FAIL' if problems else 'PASS',
+         'Scenario ran to its end in the running firmware and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault',
+         'all ticks, all reached, no FAULT', '; '.join(problems) if problems else
+         f"{sum(b['tim03_ticks'] for b in rep['buckets'])} ticks at 10 kHz")
+    fails += bool(problems)
+    # .f: were the background tasks served? Full telemetry is one line per 100 ms; each 'r' sent asks a download.
+    seconds = sum(b['tim03_ticks'] for b in rep['buckets']) / 10000
+    if console is None or not console['window_found']:
+        line('L0-TIM-03.f', 'FAIL', 'Background tasks served while the critical task ran (telemetry, menu, scope downloads)',
+             '≥ 90 % of telemetry lines, every request answered', 'no console log of the L0-TIM-03 window')
+        fails += 1
+    else:
+        ok = (console['telemetry_lines'] > 0 and console['telemetry_silence_s'] <= SILENCE_LIMIT_S
+              and console['scope_downloads'] >= console['scope_requests'] - 1 and console['menus'] >= console['menu_requests'] - 1)
+        fails += not ok
+        med = console['telemetry_median_s']
+        line('L0-TIM-03.f', 'PASS' if ok else 'FAIL', 'Background tasks served while the critical task ran (telemetry, menu, scope downloads)',
+             f'telemetry never silent > {SILENCE_LIMIT_S:g} s outside downloads; every request answered (the last may be in progress)',
+             f"{console['telemetry_lines']} telemetry lines in {seconds:g} s (median interval {med * 1000:.0f} ms, longest silence "
+             f"{console['telemetry_silence_s']:.2f} s) ; {console['menus']} menus for {console['menu_requests']} h; "
+             f"{console['scope_downloads']} downloads for {console['scope_requests']} r; {console['bytes']} bytes" if med is not None else
+             f"{console['telemetry_lines']} telemetry lines; {console['scope_downloads']} downloads for {console['scope_requests']} r")
+    # INFO: the period's load without the harness (what the production firmware would use).
+    for b in buckets:
+        need = sum(us(rows[f'{b}/{k}']['sum_cycles'] / max(rows[f'{b}/{k}']['calls'], 1), hz) for k in ('3:safety', '3:dispatch', '3:tick'))
+        harness = us(rows[f'{b}/3:harness']['sum_cycles'] / max(rows[f'{b}/3:harness']['calls'], 1), hz)
+        line(f'L0-TIM-03.g-{b.lower()}', 'INFO', f'{b}: interrupt time per period without the harness (safety + data dispatch + task tick)',
+             f'period {PERIOD_US:.0f} µs', f'{need:.1f} µs = {need / PERIOD_US * 100:.0f} % (the harness adds {harness:.1f} µs in this test)')
+    limit = BUDGET_US * hz / 1e6
+    for b in buckets:
+        t = rows[f'{b}/3:tick']
+        ok = t['max_cycles'] <= limit
+        fails += not ok
+        line(f'L0-TIM-03.b-{b.lower()}', 'PASS' if ok else 'FAIL', f'{b}: critical task tick worst case within the budget, firmware running',
+             f'≤ {BUDGET_US:.0f} µs', f"worst {us(t['max_cycles'], hz):.1f} µs (mean {us(t['sum_cycles'] / max(t['calls'], 1), hz):.1f})")
+    lost = {bk['name']: bk.get('tim03_lost', 0) for bk in rep['buckets']}
+    total = sum(lost.values())
+    fails += total != 0
+    line('L0-TIM-03.c', 'PASS' if total == 0 else 'FAIL', 'No lost control period (periods elapsed since the first start minus ticks run)', '0',
+         f'{total} lost' + ('' if total == 0 else ': ' + ', '.join(f'{k} {v}' for k, v in lost.items() if v)))
+    gaps = {b: us(rows[f'{b}/3:gap']['max_cycles'], hz) for b in buckets}
+    worst_b = max(gaps, key=gaps.get)
+    ok = gaps[worst_b] <= GAP_LIMIT_US
+    fails += not ok
+    line('L0-TIM-03.d', 'PASS' if ok else 'FAIL', 'Largest gap between two task starts', f'≤ {GAP_LIMIT_US:.0f} µs',
+         f"{gaps[worst_b]:.1f} µs in {worst_b}; " + ', '.join(f'{b} {v:.1f}' for b, v in gaps.items()))
+    if base:
+        over, new = [], 0
+        for n, r in rows.items():
+            if not is_tim03(n) or n.endswith(('/3:gap', '/3:harness')):
+                continue
+            ref = base['rows'].get(n)
+            if ref is None:
+                new += 1
+            elif r['max_cycles'] > ref * (1.0 + base.get('tolerance', TOLERANCE)) + SLACK_CYCLES:
+                over.append(f"{n} {us(r['max_cycles'], hz):.1f} µs")
+        if new and not over and new == sum(1 for n in rows if is_tim03(n) and not n.endswith(('/3:gap', '/3:harness'))):
+            line('L0-TIM-03.e', 'INFO', 'No tick part or section slower than the baseline (no baseline yet)', '-', f'{new} rows to baseline')
+        else:
+            fails += bool(over)
+            line('L0-TIM-03.e', 'FAIL' if over else 'PASS', 'No tick part or section slower than the baseline',
+                 f"baseline {base.get('commit', '?')} +{int(100 * base.get('tolerance', TOLERANCE))} %", '; '.join(over) if over else 'all within')
+    return fails
+
+
+def manifest3(repo, rep, base, console, env):
+    """@brief L0-TIM-03 test-case manifest (review page, figures 'tim03')."""
+    m = manifest(repo, rep, base)
+    phases = ', '.join(f"{b['name']} {b['tim03_ticks'] / 10000:g} s" for b in rep['buckets'])
+    load = (f"during L0-TIM-03: {console['bytes']} bytes, {console['telemetry_lines']} telemetry lines, {console['menus']} of "
+            f"{console['menu_requests']} menus, {console['scope_downloads']} of {console['scope_requests']} scope downloads")\
+        if console and console['window_found'] else 'no console log of the L0-TIM-03 window'
+    m.update({
+        'test': 'L0-TIM-03', 'figures': 'tim03',
+        'title': 'L0-TIM-03 · Critical task in the running firmware',
+        'purpose': 'Check that the critical task still fits in the budget, never loses a control period and starts '
+                   'on time while the firmware runs as on the bench: application and communication tasks, full '
+                   'telemetry, the USB console, scope downloads.',
+        'criteria': ['L0-TIM-03'],
+        'conditions': [
+            ['What runs', 'the critical task\'s tick (main.cpp criticalTaskTick: its load bookkeeping, then the tick body) '
+                          'at 10 kHz on the HRTIM interrupt, ADC and PWM running on the bare Spin; the application task '
+                          'with full telemetry every 100 ms (key l), the communication task; the host reads the console as a '
+                          'bench terminal and sends the menu key h every 5 s and the scope download key r every 10 s'],
+            ['Firmware', f"env {env}" + (' (reference build: 8 flash wait states, before the RM0440 correction)'
+                                          if env == 'TIMING_WS8' else ' (4 flash wait states, RM0440 Table 9)')],
+            ['Console load observed', load],
+            ['Inputs (synthetic)', 'as L0-TIM-02: sensors read, then replaced by the synthetic signals; relay and bridge '
+                                   'models of the task; scope re-armed at each stage'],
+            ['Stage sequence', phases + ' (the L0-TIM-01 sequence, continued in time)'],
+            ['Measurement', 'DWT cycle counter: the task tick (nothing preempts it), the gap between two task starts '
+                            '(delays from interrupt-locked sections in other threads show here), lost periods (periods elapsed since the first start minus ticks run), and what the harness itself adds in the interrupt'],
+            ['Objectives', f'a: ran to its end and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault, with the '
+                           f'console load present; b: task tick ≤ {BUDGET_US:.0f} µs in every stage; c: no lost period; '
+                           f'd: gap ≤ {GAP_LIMIT_US:.0f} µs; e: no part or section slower than the baseline + {int(100 * TOLERANCE)} %; '
+                           f'f: the background tasks served (telemetry never silent > {SILENCE_LIMIT_S:g} s outside downloads, every request answered); g: INFO, '
+                           f'interrupt time per period without the harness'],
+        ],
+    })
+    return m
+
+
 def manifest2(repo, rep, base):
     """@brief L0-TIM-02 test-case manifest (review page, figures 'tim02')."""
     m = manifest(repo, rep, base)
@@ -234,6 +400,9 @@ def main():
     ap.add_argument('--update-baseline', metavar='PATH', help='write this run as the new baseline')
     ap.add_argument('--out', help='L0-TIM-01 test-case folder (timing_tim01.md, target_manifest.json, report)')
     ap.add_argument('--out2', help='L0-TIM-02 test-case folder (timing_tim02.md, target_manifest.json, report)')
+    ap.add_argument('--out3', help='L0-TIM-03 test-case folder (timing_tim03.md, target_manifest.json, report)')
+    ap.add_argument('--console', help='USB console log captured during the run (L0-TIM-03 load evidence)')
+    ap.add_argument('--env', default='TIMING', help='PlatformIO env that was flashed (TIMING or TIMING_WS8)')
     a = ap.parse_args()
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
     rep = json.load(open(a.report))
@@ -265,7 +434,7 @@ def main():
         base = json.load(open(a.baseline))
     fails = 0
     for b in buckets:
-        sec = [r for n, r in rows.items() if n.startswith(b + '/') and not is_tim02(n)]
+        sec = [r for n, r in rows.items() if n.startswith(b + '/') and not is_later(n)]
         cid = f'L0-TIM-01.b-{b.lower()}'
         desc = f'{b}: no section slower than the baseline'
         if base is None:
@@ -296,6 +465,24 @@ def main():
              f'context: budget {BUDGET_US:.0f} µs (L0-TIM-02/03)', f'{total:.1f} µs = {total / PERIOD_US * 100:.0f} % of the period')
 
     fails += tim02(rep, rows, buckets, hz, base)
+    console = console_stats(a.console)
+    fails += tim03(rep, rows, buckets, hz, base, console)
+    if a.out3:
+        os.makedirs(a.out3, exist_ok=True)
+        with open(os.path.join(a.out3, 'timing_report.json'), 'w') as f:
+            json.dump(rep, f, indent=1)
+        with open(os.path.join(a.out3, 'target_manifest.json'), 'w') as f:
+            json.dump(manifest3(repo, rep, base, console, a.env), f, indent=1, ensure_ascii=False)
+        md = ['# L0-TIM-03: critical task in the running firmware', '',
+              f"Core {hz / 1e6:.0f} MHz, env {a.env}, commit {git_commit(repo)}. Worst case (mean) in µs.", '',
+              '| Bucket | task tick | gap | lost ticks |', '|---|---|---|---|']
+        for bk in rep['buckets']:
+            b = bk['name']
+            t, g = rows[f'{b}/3:tick'], rows[f'{b}/3:gap']
+            md.append(f"| {b} | {us(t['max_cycles'], hz):.1f} ({us(t['sum_cycles'] / max(t['calls'], 1), hz):.1f}) | "
+                      f"{us(g['max_cycles'], hz):.1f} ({us(g['sum_cycles'] / max(g['calls'], 1), hz):.1f}) | {bk.get('tim03_lost', 0)} |")
+        with open(os.path.join(a.out3, 'timing_tim03.md'), 'w') as f:
+            f.write('\n'.join(md) + '\n')
 
     if a.out2:
         os.makedirs(a.out2, exist_ok=True)
@@ -328,12 +515,12 @@ def main():
               f"Core {hz / 1e6:.0f} MHz, {rep['total_ticks']} ticks, commit {git_commit(repo)}, "
               f"{datetime.datetime.now().isoformat(timespec='seconds')}. Worst case and mean in µs; "
               'interrupts locked, so no ISR time is included.', '',
-              '| Bucket | ' + ' | '.join(n.split('/')[1] for n in rows if n.startswith(buckets[0] + '/') and not is_tim02(n)) + ' |',
-              '|---|' + '---|' * sum(1 for n in rows if n.startswith(buckets[0] + '/') and not is_tim02(n))]
+              '| Bucket | ' + ' | '.join(n.split('/')[1] for n in rows if n.startswith(buckets[0] + '/') and not is_later(n)) + ' |',
+              '|---|' + '---|' * sum(1 for n in rows if n.startswith(buckets[0] + '/') and not is_later(n))]
         for b in buckets:
             cells = []
             for n, r in rows.items():
-                if n.startswith(b + '/') and not is_tim02(n):
+                if n.startswith(b + '/') and not is_later(n):
                     mean = r['sum_cycles'] / max(r['calls'], 1)
                     cells.append(f"{us(r['max_cycles'], hz):.1f} ({us(mean, hz):.1f})")
             md.append(f'| {b} | ' + ' | '.join(cells) + ' |')

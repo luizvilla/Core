@@ -20,16 +20,17 @@
 /** @brief "TIM1" in little-endian: the report is valid. */
 #define TIMING_MAGIC 0x314D4954UL
 /** @brief Bumped on any layout change. */
-#define TIMING_LAYOUT_VERSION 4UL
+#define TIMING_LAYOUT_VERSION 5UL
 #define TIMING_MAX_BUCKETS 16U
-#define TIMING_MAX_ROWS 400U
+#define TIMING_MAX_ROWS 640U
 
 /** @brief Run state of the harness. */
 enum TimingState : uint32_t {
     TIMING_RUNNING = 0U,  ///< Scenario in progress.
     TIMING_DONE = 1U,     ///< Every row final.
     TIMING_ERROR = 2U,    ///< Stopped; error_code says why.
-    TIMING_TIM01_DONE = 3U ///< L0-TIM-01 rows final, L0-TIM-02 running.
+    TIMING_TIM01_DONE = 3U, ///< L0-TIM-01 rows final, L0-TIM-02 running.
+    TIMING_TIM03_RUNNING = 4U ///< L0-TIM-02 rows final, L0-TIM-03 running.
 };
 
 /** @brief Cost of one code section in one scenario bucket. */
@@ -52,6 +53,9 @@ struct TimingBucket {
     uint8_t pad[2];
     uint32_t tim02_ticks;          ///< L0-TIM-02 ticks in this bucket.
     uint32_t tim02_vsi_seen_mask;  ///< Inverter modes seen during L0-TIM-02.
+    uint32_t tim03_ticks;          ///< L0-TIM-03 ticks in this bucket.
+    uint32_t tim03_vsi_seen_mask;  ///< Inverter modes seen during L0-TIM-03.
+    uint32_t tim03_lost;           ///< L0-TIM-03 control periods without a task start (gap ≥ 1.5 periods).
 };
 
 /** @brief Everything the host reads. */
@@ -69,8 +73,8 @@ struct TimingReport {
 };
 
 static_assert(sizeof(TimingRow) == 56, "TimingRow layout");
-static_assert(sizeof(TimingBucket) == 36, "TimingBucket layout");
+static_assert(sizeof(TimingBucket) == 48, "TimingBucket layout");
 static_assert(offsetof(TimingReport, buckets) == 32, "TimingReport header layout");
-static_assert(offsetof(TimingReport, rows) == 32 + 36 * TIMING_MAX_BUCKETS, "TimingReport rows offset");
+static_assert(offsetof(TimingReport, rows) == 32 + 48 * TIMING_MAX_BUCKETS, "TimingReport rows offset");
 
 #endif  // TIMING_REPORT_H

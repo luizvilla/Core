@@ -1489,12 +1489,13 @@
    "id": "L0-TIM-03",
    "tab": "timing",
    "level": "L0",
-   "title": "Full critical task in the running firmware: worst case within the budget, no lost tick",
-   "criterion": "Worst-case run time ≤ 80 µs; lost ticks = 0; gap between starts ≤ 150 µs; sensors read with the ADC acquisition running",
-   "conditions": "TIMING build with the tasks running, synthetic measurements in place of the sensors, stages driven over SWD, console printing and a scope download in progress",
-   "source": "ADR 0005; critical task `load` and `lost` telemetry",
-   "status": "planned",
-   "status_note": "Defined 2026-11-12"
+   "title": "Critical task in the running firmware: within the budget, no lost period, background tasks served",
+   "criterion": ".a the scenario runs to its end and reaches PWM_SETTLE, GRID_CONNECTED and RUN without a fault; .b-<bucket> critical task tick (its load bookkeeping and the tick body) worst case ≤ 80 µs; .c no lost period (accumulated lateness of a period); .d gap between two task starts ≤ 150 µs; .e no part or section slower than the baseline + 10 % + 50 cycles; .f background tasks served (telemetry never silent > 0.5 s outside scope downloads, every h and r answered); .g-<bucket> INFO interrupt time per period without the harness (task API safety check + ADC data dispatch + task tick)",
+   "conditions": "TIMING firmware after L0-TIM-02: the critical task runs criticalTaskTick with synthetic inputs at 10 kHz on the bare Spin (ADC and PWM running), the application task with full telemetry every 100 ms and the communication task; the host reads the USB console and sends h every 5 s and r every 10 s (console_reader.py). Reference build TIMING_WS8 (8 flash wait states) for before/after",
+   "source": "ADR 0005; catalogue limits 80 µs, 150 µs, no lost period",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-12",
+   "harness": "tests/l0/timing/run.sh --run [--flash-ws8]"
   },
   {
    "id": "L0-TIM-04",

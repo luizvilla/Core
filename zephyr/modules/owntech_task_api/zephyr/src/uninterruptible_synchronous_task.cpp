@@ -104,13 +104,24 @@ void thread_error(void *, void *, void *)
 }
 #endif
 
+#ifdef TIMING_HARNESS
+/* Core2 on-target timing tests (L0-TIM-03, ADR 0005): cycle counter at the proxy's entry, after the safety
+ * check, after the data dispatch. Absent from every other build. */
+volatile uint32_t timing_proxy_cycles[3];
+#define TIMING_PROXY_PROBE(i) (timing_proxy_cycles[(i)] = *reinterpret_cast<volatile const uint32_t *>(0xE0001004UL))
+#else
+#define TIMING_PROXY_PROBE(i) ((void)0)
+#endif
+
 void user_task_proxy()
 {
+	TIMING_PROXY_PROBE(0);
 #ifdef CONFIG_OWNTECH_SAFETY_API
 
 	if (safety_task() != 0) safety_alert = true;
 
 #endif
+	TIMING_PROXY_PROBE(1);
 
 	if (user_periodic_task == NULL) return;
 
@@ -118,6 +129,7 @@ void user_task_proxy()
 	{
 		spin.data.doFullDispatch();
 	}
+	TIMING_PROXY_PROBE(2);
 
 	user_periodic_task();
 }

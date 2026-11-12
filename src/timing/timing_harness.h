@@ -32,6 +32,7 @@ using TimingTickHook = ControlOutputs (*)(const Measurements &meas, const Operat
 /** @brief What the L0-TIM-02 harness needs from main.cpp. */
 struct TimingTim02Hooks {
     TimingTickHook tick = nullptr;       ///< The critical tick body.
+    TimingTickHook task_tick = nullptr;  ///< The critical task's tick (its load bookkeeping, then the body), TIM-03.
     bool (*relay_closed)() = nullptr;    ///< The critical task's relay feedback.
     void (*stage_start)() = nullptr;     ///< What a bench key does at a stage start (re-arm the scope).
 };
@@ -42,6 +43,12 @@ void timingTim02Begin(ControlState &state, const TimingTim02Hooks &hooks);
 void timingTim02Tick();
 /** @brief True once the L0-TIM-02 scenario has run to its end. */
 bool timingTim02Done();
+/** @brief The critical-task callback of env TIMING: L0-TIM-02's tick, then L0-TIM-03's once begun. */
+void timingCriticalTick();
+/** @brief Starts L0-TIM-03 (call once the application and communication tasks run). */
+void timingTim03Begin();
+/** @brief True once the L0-TIM-03 scenario has run to its end. */
+bool timingTim03Done();
 /** @brief Marks the report DONE (after the outputs are stopped). */
 void timingFinish();
 

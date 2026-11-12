@@ -44,16 +44,22 @@
 #include "timing/timing_probe.h"
 #ifdef TIMING_HARNESS
 #include "timing/timing_harness.h"
+#ifdef TIMING_FLASH_WS_HAL
+#include <stm32_ll_utils.h>
+#endif
 #endif
 
 /* Scope snapshot and acquisition of one sampled critical tick. */
 static void scopeSample(ControlState &state, const ControlOutputs &out);
+/* The critical task's tick: load bookkeeping, then criticalTickBody(). */
+static ControlOutputs criticalTaskTick(const Measurements *meas_in, const OperatorCommands *cmd_in);
 /* One critical tick (sensors, control step, PWM and relay, scope); inputs override the sensors in env TIMING. */
 static ControlOutputs criticalTickBody(uint32_t critical_start, const Measurements *meas_in,
                                        const OperatorCommands *cmd_in);
 #ifdef TIMING_HARNESS
 static void timingScopeSample(ControlState &state, const ControlOutputs &out, const Measurements &meas);
 static ControlOutputs timingTick(const Measurements &meas, const OperatorCommands &cmd);
+static ControlOutputs timingTaskTick(const Measurements &meas, const OperatorCommands &cmd);
 static bool timingRelayClosed();
 static void timingStageStart();
 #endif
@@ -321,19 +327,34 @@ void setup_routine()
     scope.start();
 
 #ifdef TIMING_HARNESS
-    /* TIMING env (ADR 0005), bare Spin only: L0-TIM-01 in this thread (no tasks), then L0-TIM-02 in the critical
-     * task (ADC and PWM running on the Spin's pins; never with a powered shield), then every output stopped.
-     * The application and communication tasks are not started. */
+    /* TIMING env (ADR 0005), bare Spin only: L0-TIM-01 in this thread (no tasks); L0-TIM-02 in the critical task
+     * (ADC and PWM running on the Spin's pins; never with a powered shield), without the background tasks;
+     * L0-TIM-03 in the critical task with the application and communication tasks running as in production
+     * (full telemetry; the host terminal reads the console and sends the keys h and r); then every output stopped. */
+#ifdef TIMING_FLASH_WS_HAL
+    /* Env TIMING_WS8: the flash wait states the clock driver sets (8 at 170 MHz), as before the RM0440 correction
+     * in the Spin API, for a before/after reference run. */
+    LL_SetFlashLatency(sys_clock_hw_cycles_per_sec());
+#endif
     timingHarnessRun(control, timingScopeSample);
     {
         TimingTim02Hooks hooks;
         hooks.tick = timingTick;
+        hooks.task_tick = timingTaskTick;
         hooks.relay_closed = timingRelayClosed;
         hooks.stage_start = timingStageStart;
         timingTim02Begin(control, hooks);
-        task.createCritical(timingTim02Tick, app::control_task_period);
+        task.createCritical(timingCriticalTick, app::control_task_period);
         task.startCritical();
         while (!timingTim02Done()) k_msleep(50);
+
+        telemetry_verbose = true;  /* the heaviest console load the bench uses (key l) */
+        uint32_t app_task_number = task.createBackground(loop_application_task);
+        uint32_t com_task_number = task.createBackground(loop_communication_task);
+        task.startBackground(app_task_number);
+        task.startBackground(com_task_number);
+        timingTim03Begin();
+        while (!timingTim03Done()) k_msleep(50);  /* the host terminal sends h and r (console_reader.py) */
         task.stopCritical();
         shield.power.stop(LEG1_LOW);
         shield.power.stop(LEG1_HIGH);
@@ -712,6 +733,10 @@ static ControlOutputs timingTick(const Measurements &meas, const OperatorCommand
 {
     return criticalTickBody(k_cycle_get_32(), &meas, &cmd);
 }
+static ControlOutputs timingTaskTick(const Measurements &meas, const OperatorCommands &cmd)
+{
+    return criticalTaskTick(&meas, &cmd);
+}
 static bool timingRelayClosed() { return relay_closed; }
 static void timingStageStart() { scope.start(); }
 #endif
@@ -727,6 +752,15 @@ static void timingStageStart() { scope.start(); }
  */
 void loop_critical_task()
 {
+    criticalTaskTick(nullptr, nullptr);
+}
+
+/**
+ * The critical task's tick: its load bookkeeping (start gaps, lost ticks), then the tick body. Called by
+ * loop_critical_task() and, in env TIMING, by the L0-TIM-03 harness with synthetic inputs.
+ */
+static ControlOutputs criticalTaskTick(const Measurements *meas_in, const OperatorCommands *cmd_in)
+{
     const uint32_t critical_start = k_cycle_get_32();
     if (critical_calls != 0U)
     {
@@ -737,7 +771,7 @@ void loop_critical_task()
     }
     critical_prev_start = critical_start;
     ++critical_calls;
-    criticalTickBody(critical_start, nullptr, nullptr);
+    return criticalTickBody(critical_start, meas_in, cmd_in);
 }
 
 /**

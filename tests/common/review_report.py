@@ -418,6 +418,8 @@ WRITE_GROUP = ('PWM + relay writes', '#6250d6', [('tick_apply', 'PWM + relay wri
 # What the probes do not cover (calls, struct copies, the task's own load bookkeeping): neutral grey, last in the bar,
 # so every bar adds up to its measured total (TIM-01: controlStep + scope; TIM-02: the whole tick).
 REST_GROUP = ('not in a section', '#b9b7b0', [('_rest', 'calls + timing bookkeeping')])
+# L0-TIM-03: work the task API does in the same interrupt before the task (low-chroma blue-grey, apart from the rest).
+TASKAPI_GROUP = ('task API (same interrupt)', '#4a5a6a', [('3:safety', 'safety check'), ('3:dispatch', 'ADC data dispatch')])
 TIMING_SHORT.update({'tick_sensors': 'sensors', 'tick_apply': 'writes', 'tick_scope': 'scope', '_rest': 'rest',
                      'tick_control': 'controlStep'})
 
@@ -429,14 +431,18 @@ def series_groups(rows, bucket, kind):
     base = timing_groups(rows, bucket)
     if kind == 'tim01':
         return base + [REST_GROUP]
-    out = [SENSOR_GROUP]
-    if f'{bucket}/2:boost_cold' in rows:
+    p = '3:' if kind == 'tim03' else ''   # tick-part keys: 'tick_*' (TIM-02) or '3:tick_*' (TIM-03)
+    sp = '3:' if kind == 'tim03' else '2:'
+    out = [TASKAPI_GROUP] if kind == 'tim03' else []
+    out.append((SENSOR_GROUP[0], SENSOR_GROUP[1], [(p + 'tick_sensors', 'sensor reads')]))
+    if f'{bucket}/{sp}boost_cold' in rows:
         for gname, hue, secs in base:
             if gname != 'scope':
-                out.append((gname, hue, [('2:' + k, t) for k, t in secs]))
+                out.append((gname, hue, [(sp + k, t) for k, t in secs]))
     else:  # a run recorded before TIM-02 kept the sections: controlStep as one block, never dropped
-        out.append(('controlStep', '#1baf7a', [('tick_control', 'controlStep (not split in this run)')]))
-    out += [WRITE_GROUP, ('scope', '#e87ba4', [('tick_scope', 'snapshot + acquire')]), REST_GROUP]
+        out.append(('controlStep', '#1baf7a', [(p + 'tick_control', 'controlStep (not split in this run)')]))
+    out += [(WRITE_GROUP[0], WRITE_GROUP[1], [(p + 'tick_apply', 'PWM + relay writes')]),
+            ('scope', '#e87ba4', [(p + 'tick_scope', 'snapshot + acquire')]), REST_GROUP]
     return out
 
 
@@ -452,6 +458,10 @@ def bar_rows(rep, kind, tag=''):
         if kind == 'tim01':
             total = mean_of('controlStep') + mean_of('scope')
             worst = u(rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles'])
+        elif kind == 'tim03':  # the interrupt's work per period without the harness: task API + task tick
+            api = mean_of('3:safety') + mean_of('3:dispatch')
+            total = api + mean_of('3:tick')
+            worst = api + u(rows[f'{b}/3:tick']['max_cycles'])
         else:
             total = mean_of('tick')
             worst = u(rows[f'{b}/tick']['max_cycles'])
@@ -473,7 +483,8 @@ def bar_rows(rep, kind, tag=''):
 def timing_xmax(rep, period_us=100.0):
     """@brief Common time axis of every timing figure of a report, so TIM-01 and TIM-02 read on the same scale."""
     worst = max([r['worst'] for r in bar_rows(rep, 'tim01')] +
-                ([r['worst'] for r in bar_rows(rep, 'tim02')] if any(n['name'].endswith('/tick') for n in rep['rows']) else []))
+                ([r['worst'] for r in bar_rows(rep, 'tim02')] if any(n['name'].endswith('/tick') for n in rep['rows']) else []) +
+                ([r['worst'] for r in bar_rows(rep, 'tim03')] if any(n['name'].endswith('/3:tick') and n['calls'] for n in rep['rows']) else []))
     return max(period_us, 10 * (int((worst + 6) / 10) + 1))
 
 
@@ -605,10 +616,49 @@ def timing_detail(bars, groups, xmax, budget_us=80.0, period_us=100.0, px_per_us
             + _labels_svg(bars, ys, bar, H, label_w, True) + body + '</div>')
 
 
-def paired_bars(rep):
-    """@brief Per bucket, the L0-TIM-01 bar then the L0-TIM-02 bar."""
-    a, b = bar_rows(rep, 'tim01', 'TIM-01'), bar_rows(rep, 'tim02', 'TIM-02')
+def paired_bars(rep, first='tim01', second='tim02'):
+    """@brief Per bucket, the bar of the earlier test then the bar of the later one."""
+    a, b = bar_rows(rep, first, first.upper().replace('TIM', 'TIM-')), bar_rows(rep, second, second.upper().replace('TIM', 'TIM-'))
     return [x for pair in zip(a, b) for x in pair]
+
+
+def tim03_gap_figure(rep, limit_us=150.0, period_us=100.0):
+    """@brief Inline SVG: per bucket, the mean and worst gap between two task starts, against the period and the
+    150 µs limit, with the lost periods written at the end."""
+    e = html.escape
+    hz = rep['core_hz']
+    rows = {r['name']: r for r in rep['rows']}
+    u = lambda c: c * 1e6 / hz
+    buckets = rep['buckets']
+    W, left, right, top, bar, gap = 960, 130, 220, 30, 18, 10
+    worst_all = max(u(rows[f"{b['name']}/3:gap"]['max_cycles']) for b in buckets)
+    xmax = max(limit_us + 20, 10 * (int(worst_all / 10) + 2))
+    H = top + len(buckets) * (bar + gap) + 30
+    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Gap between task starts" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">']
+    for v in range(0, int(xmax) + 1, 10):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 26}" stroke="{GRID}"/>'
+                   + (f'<text x="{x(v):.1f}" y="{H - 10}" fill="{MUTED}" text-anchor="middle">{v} µs</text>' if v % 20 == 0 else ''))
+    for v, label in ((period_us, f'period {period_us:g} µs'), (limit_us, f'limit {limit_us:g} µs')):
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 26}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+    for i, bk in enumerate(buckets):
+        b = bk['name']
+        y = top + i * (bar + gap)
+        g = rows[f'{b}/3:gap']
+        mean, worst = u(g['sum_cycles'] / max(g['calls'], 1)), u(g['max_cycles'])
+        lost = bk.get('tim03_lost', 0)
+        col = CRITICAL if worst > limit_us or lost else SERIES[0]
+        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>'
+                   f'<rect x="{left}" y="{y}" width="{max(x(worst) - left, 1):.1f}" height="{bar}" rx="2" fill="{col}" opacity="0.35">'
+                   f'<title>{e(b)}: worst gap {worst:.1f} µs</title></rect>'
+                   f'<rect x="{left}" y="{y}" width="{max(x(mean) - left, 1):.1f}" height="{bar}" rx="2" fill="{col}">'
+                   f'<title>{e(b)}: mean gap {mean:.1f} µs</title></rect>'
+                   f'<text x="{x(max(worst, limit_us)) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">mean {mean:.1f} · worst {worst:.1f} µs · '
+                   f'{"<tspan font-weight=\"600\">" + str(lost) + " lost</tspan>" if lost else "0 lost"}</text>')
+    svg.append('</svg>')
+    return ''.join(svg)
 
 
 def timing_table(rep, cols, states_key='vsi_seen'):
@@ -635,6 +685,9 @@ TIM01_COLS = [('boost_cold', 'boost_cold'), ('boost_hot', 'boost_hot'), ('inv_st
               ('duty_pll', 'duty_pll'), ('duty_sogi', 'duty_sogi'), ('duty_park', 'duty_park'), ('duty_syncwin', 'duty_syncwin'),
               ('duty_mode_ff', 'duty_mode_ff'), ('duty_current_pi', 'duty_current_pi'), ('duty_output', 'duty_output'),
               ('observer', 'observer'), ('outputs', 'outputs'), ('controlStep', 'controlStep'), ('scope', 'scope')]
+TIM03_COLS = ([('3:gap', 'gap'), ('3:safety', 'safety'), ('3:dispatch', 'data dispatch'), ('3:tick', 'task tick'),
+               ('3:tick_sensors', 'sensors')] + [('3:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
+              + [('3:tick_control', 'controlStep'), ('3:tick_apply', 'writes'), ('3:tick_scope', 'scope'), ('3:harness', 'harness (test)')])
 TIM02_COLS = ([('tick', 'whole tick'), ('tick_sensors', 'sensors')] + [('2:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
               + [('tick_control', 'controlStep'), ('tick_apply', 'writes'), ('tick_scope', 'scope')])
 
@@ -901,6 +954,29 @@ def main(out):
             xmax = timing_xmax(rep_t)
             groups_hint = ('One hue per group (blue boost, orange inverter logic, green calculateDuty, yellow observer, '
                            'pink scope), its sections in shades of it in code order, darkest first')
+            if c.get('figures') == 'tim03':
+                p.append(timing_table(rep_t, TIM03_COLS, 'tim03_vsi_seen'))
+                p.append('<p class="sub">Lost periods per bucket: ' + ', '.join(f"{e(b['name'])} {b.get('tim03_lost', 0)}" for b in rep_t['buckets'])
+                         + '. The harness row is the test\'s own cost in the interrupt; the figures leave it out.</p>')
+                p.append('<h3>4 · Figures</h3>')
+                rows_t = {r['name']: r for r in rep_t['rows']}
+                groups = series_groups(rows_t, rep_t['buckets'][0]['name'], 'tim03')
+                bars = paired_bars(rep_t, 'tim02', 'tim03')
+                p.append('<figure><div><b>Overview: L0-TIM-02 against L0-TIM-03</b></div>' + timing_overview(bars, groups, xmax)
+                         + '<figcaption>Per bucket, the L0-TIM-02 bar (the tick body alone in the critical task) above the '
+                         'L0-TIM-03 bar (the interrupt\'s work per period in the running firmware: the task API\'s safety check '
+                         'and ADC data dispatch in blue-grey, then the task tick with its own load bookkeeping in grey at the '
+                         f'end). {groups_hint}; sensor reads dark green, writes violet. The test harness\'s own time is left out '
+                         '(table above). Black mark: worst (TIM-02: whole tick; TIM-03: mean task API + worst task tick). '
+                         'Dashed: the 80 µs budget and the 100 µs period.</figcaption></figure>')
+                p.append('<figure><div><b>Detailed view: L0-TIM-02 against L0-TIM-03</b></div>' + timing_detail(bars, groups, xmax)
+                         + '<figcaption>The same bars at 40 px per µs, every segment labelled; scroll right, bucket names '
+                         'pinned.</figcaption></figure>')
+                p.append('<figure><div><b>Gap between two task starts</b></div>' + tim03_gap_figure(rep_t) + '<figcaption>Solid: '
+                         'mean gap, light: worst gap, per bucket; the lost periods (accumulated lateness of one period each) '
+                         'at the end. A mean above the period means the task cannot keep up: periods are lost even when no '
+                         'single gap reaches the limit. Red: over the limit or periods lost.</figcaption></figure>')
+                continue
             if c.get('figures') == 'tim02':
                 p.append(tim02_tables(rep_t))
                 p.append('<h3>4 · Figures</h3>')

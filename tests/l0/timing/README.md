@@ -44,10 +44,11 @@ flowchart LR
 | File | Role |
 |---|---|
 | [`src/timing/timing_probe.h`](../../../src/timing/timing_probe.h) | `TIMING_PROBE(i)` in `controlStep`; empty unless `TIMING_HARNESS` |
-| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 3) |
+| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 5) |
 | [`src/timing/timing_harness.cpp`](../../../src/timing/timing_harness.cpp) | Scenario and measurement on the target |
 | [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
 | [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
+| [`console_reader.py`](console_reader.py) | L0-TIM-03: reads the USB console as a bench terminal (timestamps), sends `h` and `r` |
 | [`read_report.py`](read_report.py) | Finds `g_timing_report` in the ELF, waits for DONE, dumps it over SWD |
 | [`evaluate.py`](evaluate.py) | Verdicts, the table and `target_manifest.json` (conditions and target snapshot for the review page) |
 | [`baseline.json`](baseline.json) | Committed worst case per section, in cycles |
@@ -96,6 +97,22 @@ After L0-TIM-01, the same firmware starts the **critical task** on `timingTim02T
 
 Criteria: `.a` the scenario ran to its end and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault; `.b-<bucket>` whole tick ≤ 80 µs, with the events of the worst tick named; `.c-<bucket>` every event tick ≤ 80 µs; `.d` no tick part or event slower than the baseline + 10 % + 50 cycles. The review page shows its own test case (`l0_tim02/`): conditions, target snapshot, the tick and event tables, a tick-composition figure and an event figure.
 
+## L0-TIM-03: critical task in the running firmware
+
+After L0-TIM-02, the same firmware starts the application task (full telemetry every 100 ms, as key `l`) and the communication task, and the critical task runs the same stage sequence through `criticalTaskTick` (the production task's load bookkeeping, then the tick body) with synthetic inputs. On the host, `console_reader.py` reads the USB console as a bench terminal does, timestamps every line, and sends the menu key `h` every 5 s and the scope download key `r` every 10 s.
+
+| Row | What |
+|---|---|
+| `3:tick`, `3:tick_*`, `3:<section>` | the task tick, its parts and every controlStep and calculateDuty section (same detail as TIM-01/02) |
+| `3:safety`, `3:dispatch` | what the task API does in the same interrupt before the task: the safety check (`CONFIG_OWNTECH_SAFETY_API`) and `spin.data.doFullDispatch()` (probes in `owntech_task_api`, TIMING builds only) |
+| `3:gap` | time between two task starts |
+| `3:harness` | the test's own cost in the interrupt (inputs, recording); reported, left out of the figures |
+| bucket `tim03_lost` | lost periods: accumulated lateness of one period each, so steadily late starts count even when no single gap reaches 1.5 periods |
+
+Criteria: `.a` coverage; `.b-<bucket>` task tick ≤ 80 µs; `.c` no lost period; `.d` gap ≤ 150 µs; `.e` baseline; `.f` background tasks served (telemetry never silent more than 0.5 s outside scope downloads, every `h` and `r` answered); `.g-<bucket>` INFO, the interrupt's time per period without the harness.
+
+**Before/after reference.** `run.sh --run --flash-ws8` builds env `TIMING_WS8`, which puts the flash back to the clock driver's 8 wait states at boot. Its campaign carries `reference.json`: the control center lists it in the Runs tab and never takes it as a test's current result, and it is not judged against the baseline.
+
 ## Reporting
 
 How the review page (`tests/common/review_report.py`) shows the timing tests. Keep these rules when adding L0-TIM-03/04 or changing a figure.
@@ -115,7 +132,6 @@ How the review page (`tests/common/review_report.py`) shows the timing tests. Ke
 
 | ID | What |
 |---|---|
-| L0-TIM-03 | The full critical task in the running firmware with synthetic inputs, console and scope download active: worst case ≤ 80 µs, no lost ticks, gap ≤ 150 µs |
 | L0-TIM-04 | Start delay of the critical task (other threads' interrupt locks) |
 
 Sensor reads (`getLatestValue`) need the ADC acquisition running, so they are measured in L0-TIM-03, not in L0-TIM-01.

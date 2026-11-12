@@ -539,3 +539,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | USB and TIMING build. On the bare Spin: **L0-TIM-02.b and .c PASS in every stage**. Whole tick mean 71.0 → 45.0 µs (OFF, boost IDLE), 99.2 → 60.9 µs (INJECT); worst 80.3–109.0 → 50.3–67.0 µs. Every part shrinks by about 38 %: controlStep 52.9 → 31.8 µs and calculateDuty 26.4 → 16.1 µs (CONNECT), sensor reads 10.8 → 8.1 µs, PWM and relay writes 17.9 → 10.5 µs, scope at 10 kHz 11.9 → 7.1 µs. Baseline rewritten from the clean run |
 | Follow-up | Propose the same correction upstream (OwnTech Core, Jean Alinei, Clément Foucher), and check whether a newer STM32CubeG4 LL or Zephyr already fixes the table |
 | Hardware check | Pending: flash the USB env and repeat steps 1 and 2b on the bench; the `load` field should drop by about 38 % |
+
+## 2026-11-12 — L0-TIM-03; task tick extracted; task API probes
+
+| Field | Value |
+|---|---|
+| Commit | the `test(timing): …` commit that adds this entry |
+| Files | `src/main.cpp`, `src/timing/*`, `src/app.ini` (env `TIMING_WS8`), `zephyr/modules/owntech_task_api/zephyr/src/uninterruptible_synchronous_task.cpp`, `tests/l0/timing/*`, `tests/common/{review_report,control_center}.py` |
+| Reason | L0-TIM-03 as planned with Luiz: the critical task in the running firmware, and a before/after with the previous flash setting |
+| Behaviour change | None in the USB firmware: `loop_critical_task()` calls `criticalTaskTick()`, which holds its unchanged load bookkeeping and the tick body; three `TIMING_PROXY_PROBE` points in the task API's `user_task_proxy()` compile only under `TIMING_HARNESS` |
+| Evidence | On the bare Spin, 4 wait states: task tick worst 52.0–68.7 µs, **0 lost periods**, gap ≤ 118.5 µs, interrupt time per period 56–72 % without the harness, all scope downloads answered. 8 wait states (reference): 4 000–8 000 lost periods per stage with the bridge on, interrupt time 86 % (OFF_IDLE) to 112 % (G), the console dead during the run — the bench's "call rate 9916 Hz" symptom. New: the task API spends about 2 µs (safety check) and 9–11 µs (ADC data dispatch) in the same interrupt before the task, every period |
+| Lead, not acted on | The data dispatch (9.4 µs at 4 WS) costs more than the five sensor reads (8.2 µs): together about 18 µs per period on the ADC path |
+| Hardware check | Not needed |

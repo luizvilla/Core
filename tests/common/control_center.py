@@ -45,7 +45,9 @@ def campaigns(out):
         when=max(l.stat().st_mtime for l in logs)
         m=re.match(r'\d{4}-\d\d-\d\d_([0-9a-f]{7,})(-dirty)?',d.name)
         found.append({'dir':d,'rows':rows,'when':when,'commit':(m.group(1)+(m.group(2) or '')) if m else '',
-                      'report':(d/'report.html').exists()})
+                      'report':(d/'report.html').exists(),
+                      # A reference run (e.g. tests/l0/timing/run.sh --flash-ws8) is kept for comparison, never a result.
+                      'reference':json.loads((d/'reference.json').read_text()).get('reference','') if (d/'reference.json').exists() else ''})
     return sorted(found,key=lambda c:-c['when'])
 
 
@@ -66,6 +68,7 @@ def latest_results(camps):
     and shown on the row. A case that never ran keeps its newest BLOCKED result."""
     latest,blocked={},{}
     for c in camps:  # newest first
+        if c.get('reference'):continue
         by={}
         for r in c['rows']:by.setdefault(r['id'].split('.')[0],[]).append(r)
         for cid,rows in by.items():
@@ -81,7 +84,7 @@ def latest_results(camps):
 
 def newest_of_level(camps,level):
     """@brief Newest campaign that ran any criterion of a level (L0/L1), or None."""
-    return next((c for c in camps if any(r['id'][:2]==level for r in c['rows'])),None)
+    return next((c for c in camps if not c.get('reference') and any(r['id'][:2]==level for r in c['rows'])),None)
 
 
 def state_of(test,result,findings):
@@ -273,7 +276,8 @@ regenerate: <code>python3 tests/common/control_center.py</code></div>
     for c in camps[:30]:
         v={k:sum(r['verdict']==k for r in c['rows']) for k in ('PASS','FAIL','INFO','BLOCKED')}
         link=f'{e(c["dir"].name)}/report.html' if c['report'] else f'{e(c["dir"].name)}/record.md'
-        p.append(f'<tr><td><a href="{link}">{e(c["dir"].name)}</a></td><td>{dt.datetime.fromtimestamp(c["when"]).strftime("%Y-%m-%d %H:%M")}</td>'
+        ref=f'<div class="sub">reference run, never a current result: {e(c["reference"])}</div>' if c.get('reference') else ''
+        p.append(f'<tr><td><a href="{link}">{e(c["dir"].name)}</a>{ref}</td><td>{dt.datetime.fromtimestamp(c["when"]).strftime("%Y-%m-%d %H:%M")}</td>'
                  f'<td>{v["PASS"]} PASS · {v["FAIL"]} FAIL · {v["INFO"]} INFO · {v["BLOCKED"]} BLOCKED</td></tr>')
     p.append('</table></div><h2>Studies (exploratory)</h2><div class="wrap"><table><tr><th>Study</th><th>Started</th><th>Cases</th></tr>')
     for s in studs:
