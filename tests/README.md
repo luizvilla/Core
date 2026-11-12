@@ -69,6 +69,8 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
    | On target (L0-TIM) | `target_manifest.json` + its report JSON | target (board, MCU, flash, firmware, probe) | built from the report: overview fitted to the page (`timing_figure_overview`) and detailed view with every segment labelled (`timing_figure`) |
 
    A new kind of test case gets its own branch in `review_report.py` with the same four parts, and its figure follows the dataviz rules already used there (fixed palette order, legend, hover, a table view).
+
+   Tests that measure the same thing at successive levels (for example L0-TIM-01 → 02 → 03) report at the **same level of detail**, sit **next to each other in test order**, and the later one shows the earlier one beside it on the **same scale and colours**, so a change reads section by section. The timing tests' rules are in [l0/timing/README.md](l0/timing/README.md#reporting).
 7. A new catalogue tab appears by itself; a new kind of level (as on-target L0) gets its heading in `common/control_center.py`.
 8. **Done means visible.** Run the test through a campaign, then `python3 tests/common/control_center.py` and open `tests/out/control-center.html`: the test is in its tab with its newest result, and the result's link opens `report.html` showing its four parts. A campaign where the test is only BLOCKED (for example an on-target test without `--target`) does not hide the newest run; the row says *not run since*.
 

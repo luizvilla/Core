@@ -20,9 +20,9 @@
 /** @brief "TIM1" in little-endian: the report is valid. */
 #define TIMING_MAGIC 0x314D4954UL
 /** @brief Bumped on any layout change. */
-#define TIMING_LAYOUT_VERSION 3UL
+#define TIMING_LAYOUT_VERSION 4UL
 #define TIMING_MAX_BUCKETS 16U
-#define TIMING_MAX_ROWS 320U
+#define TIMING_MAX_ROWS 400U
 
 /** @brief Run state of the harness. */
 enum TimingState : uint32_t {

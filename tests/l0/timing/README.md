@@ -96,6 +96,20 @@ After L0-TIM-01, the same firmware starts the **critical task** on `timingTim02T
 
 Criteria: `.a` the scenario ran to its end and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault; `.b-<bucket>` whole tick ≤ 80 µs, with the events of the worst tick named; `.c-<bucket>` every event tick ≤ 80 µs; `.d` no tick part or event slower than the baseline + 10 % + 50 cycles. The review page shows its own test case (`l0_tim02/`): conditions, target snapshot, the tick and event tables, a tick-composition figure and an event figure.
 
+## Reporting
+
+How the review page (`tests/common/review_report.py`) shows the timing tests. Keep these rules when adding L0-TIM-03/04 or changing a figure.
+
+| Rule | Why | How |
+|---|---|---|
+| **Same level of detail in every timing test** | A change shows up section by section, not only as a larger total | Each test reports every `controlStep` section and the seven `calculateDuty` sections. L0-TIM-02 records them again inside the critical tick (`2:` rows) and adds its own parts around them (sensor reads, PWM and relay writes, scope at the production rate). A later test (TIM-03) does the same, plus what it adds |
+| **Related tests stay together, in test order** | Before/after reads top to bottom | The on-target test cases form one block in the page, TIM-01 then TIM-02 (then TIM-03), whatever their verdicts; the block comes first when any of them fails |
+| **Each later test compares with the earlier one in its own figures** | No scrolling between sections to compare | TIM-02's figures pair, per bucket, the TIM-01 bar (above) with the TIM-02 bar (below) |
+| **Same scale, same colours** | Lengths and colours mean the same thing everywhere | One time axis for every timing figure of a report (`timing_xmax`: at least the period, past the worst tick). One hue per group, fixed: blue boost, orange inverter logic, aqua/green calculateDuty, yellow observer, pink scope; TIM-02 adds dark green sensor reads and violet PWM + relay writes (dataviz palette slots 6 and 7; the seven-group order passes `validate_palette.js`). Sections of a group in shades of its hue, in code order, darkest first |
+| **Two views of the same data** | An overview to see the whole period; a detailed view to read every value without hovering | *Overview*: fitted to the page width, values where they fit. *Detailed view*: 40 px per µs, every segment labelled with its name (or a short name) and mean, horizontal scroll, bucket names pinned. White text on dark fills |
+| **Always a table view** | Some fills are below 3:1 contrast (palette check); numbers to copy | Section 3 holds the worst case (mean) per section and bucket, and for TIM-02 every event row |
+| **Worst case marked** | The budget is a worst-case limit, the bars are means | Black mark per bar: TIM-01 worst controlStep + worst scope; TIM-02 worst whole tick. Dashed lines: the 80 µs budget and the 100 µs period |
+
 ## Not yet implemented
 
 | ID | What |

@@ -69,13 +69,32 @@ enum Section : uint8_t {
     SEC_TICK_CONTROL,     ///< controlStep().
     SEC_TICK_APPLY,       ///< PWM duties, enables, burst, relay.
     SEC_TICK_SCOPE,       ///< Scope sampling as in production (every 5th tick at 2 kHz, every tick around the relay).
+    /* L0-TIM-02: the controlStep and calculateDuty sections again, measured inside the critical tick (rows "2:…"),
+     * so the two tests compare section by section. Same order as SEC_BOOST_COLD…SEC_OUTPUTS, SEC_DUTY_PLL…OUTPUT. */
+    SEC_T2_BOOST_COLD,
+    SEC_T2_BOOST_HOT,
+    SEC_T2_INV_STAGE,
+    SEC_T2_INV_DUTY,
+    SEC_T2_OBSERVER,
+    SEC_T2_OUTPUTS,
+    SEC_T2_DUTY_PLL,
+    SEC_T2_DUTY_SOGI,
+    SEC_T2_DUTY_PARK,
+    SEC_T2_DUTY_SYNCWIN,
+    SEC_T2_DUTY_MODE_FF,
+    SEC_T2_DUTY_CURRENT_PI,
+    SEC_T2_DUTY_OUTPUT,
     SEC_COUNT
 };
 const char *const section_names[SEC_COUNT] = {
     "boost_cold", "boost_hot", "inv_stage", "inv_duty", "observer", "outputs", "controlStep", "scope",
     "duty_pll", "duty_sogi", "duty_park", "duty_syncwin", "duty_mode_ff", "duty_current_pi", "duty_output",
-    "tick", "tick_sensors", "tick_control", "tick_apply", "tick_scope"
+    "tick", "tick_sensors", "tick_control", "tick_apply", "tick_scope",
+    "2:boost_cold", "2:boost_hot", "2:inv_stage", "2:inv_duty", "2:observer", "2:outputs",
+    "2:duty_pll", "2:duty_sogi", "2:duty_park", "2:duty_syncwin", "2:duty_mode_ff", "2:duty_current_pi", "2:duty_output"
 };
+static_assert(SEC_T2_OUTPUTS - SEC_T2_BOOST_COLD + 2U == timing::probe_count, "TIM-02 controlStep sections");
+static_assert(SEC_T2_DUTY_OUTPUT - SEC_T2_DUTY_PLL + 2U == INV_TIMING_PROBE_COUNT, "TIM-02 library sections");
 static_assert(SEC_DUTY_OUTPUT - SEC_DUTY_PLL + 2U == INV_TIMING_PROBE_COUNT, "one section per library probe interval");
 
 /** @brief Scenario phases; repeated labels share a bucket. */
@@ -413,6 +432,7 @@ void timingTim02Tick()
     cmd.inverter_stage = phase.stage;
     cmd.inject_current = app::inject_current_max;
 
+    const uint32_t seq_before = inv_timing_seq;
     const uint32_t c0 = cycles();
     const ControlOutputs out = t2.hooks.tick(meas, cmd);
     const uint32_t c1 = cycles();
@@ -423,6 +443,13 @@ void timingTim02Tick()
     recordRow(base + SEC_TICK_CONTROL, timing::tick_cycles[2] - timing::tick_cycles[1], t2.tick);
     recordRow(base + SEC_TICK_APPLY, timing::tick_cycles[3] - timing::tick_cycles[2], t2.tick);
     recordRow(base + SEC_TICK_SCOPE, timing::tick_cycles[4] - timing::tick_cycles[3], t2.tick);
+    for (uint8_t i = 0U; i < timing::probe_count - 1U; ++i)
+        recordRow(base + SEC_T2_BOOST_COLD + i, timing::probe_cycles[i + 1U] - timing::probe_cycles[i], t2.tick);
+    if (inv_timing_seq != seq_before)
+    {
+        for (uint8_t i = 0U; i < INV_TIMING_PROBE_COUNT - 1U; ++i)
+            recordRow(base + SEC_T2_DUTY_PLL + i, inv_timing_cycles[i + 1U] - inv_timing_cycles[i], t2.tick);
+    }
 
     /* Events of this tick: each one's row gets the whole tick. */
     const uint8_t vsi = static_cast<uint8_t>(t2.state->inverter.getMode());

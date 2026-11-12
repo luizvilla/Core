@@ -35,7 +35,7 @@ FAULT = 7
 def is_tim02(name):
     """@brief Rows of L0-TIM-02: the whole-tick sections and the event rows."""
     sec = name.split('/', 1)[1]
-    return sec.startswith('tick') or sec.startswith('ev:')
+    return sec.startswith(('tick', 'ev:', '2:'))
 
 
 def event_label(sec):

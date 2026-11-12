@@ -340,8 +340,6 @@ def timing_groups(rows, bucket):
 
 VSI_NAMES = ['OFF', 'VOLTAGE_SYNC', 'GRID_CONNECT', 'GRID_CONNECTED', 'RUN', 'STOPPING', 'DISCONNECT', 'FAULT',
              'PWM_SETTLE', 'PWM_WAIT']
-TICK_PARTS = [('tick_sensors', 'sensor reads', '#2a78d6'), ('tick_control', 'controlStep', '#1baf7a'),
-              ('tick_apply', 'PWM + relay writes', '#eda100'), ('tick_scope', 'scope', '#e87ba4')]
 
 
 def event_text(sec):
@@ -354,20 +352,13 @@ def event_text(sec):
 
 
 def tim02_tables(rep, budget_us=80.0):
-    """@brief L0-TIM-02 table views: tick parts per bucket, then every event row."""
+    """@brief L0-TIM-02 table views: every section per bucket (as L0-TIM-01, plus the tick parts), then every event."""
     e = html.escape
     hz = rep['core_hz']
     rows = {r['name']: r for r in rep['rows']}
     u = lambda c: c * 1e6 / hz
     mean = lambda r: u(r['sum_cycles'] / max(r['calls'], 1))
-    buckets = [b['name'] for b in rep['buckets']]
-    p = ['<div class="wrap"><table><tr><th>Bucket</th><th>whole tick</th>' + ''.join(f'<th>{e(t)}</th>' for _, t, _ in TICK_PARTS) + '</tr>']
-    for b in buckets:
-        t = rows[f'{b}/tick']
-        flag = ' <b>over</b>' if u(t['max_cycles']) > budget_us else ''
-        p.append(f'<tr><td>{e(b)}</td><td>{u(t["max_cycles"]):.1f}{flag} <span class="sub">({mean(t):.1f})</span></td>' + ''.join(
-            f'<td>{u(rows[f"{b}/{k}"]["max_cycles"]):.1f} <span class="sub">({mean(rows[f"{b}/{k}"]):.1f})</span></td>' for k, _, _ in TICK_PARTS) + '</tr>')
-    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs.</p>')
+    p = [timing_table(rep, TIM02_COLS, 'tim02_vsi_seen')]
     p.append('<div class="wrap"><table><tr><th>Bucket</th><th>Event</th><th>Ticks</th><th>Worst tick</th><th>Mean tick</th></tr>')
     for n, r in rows.items():
         if '/ev:' not in n:
@@ -377,51 +368,6 @@ def tim02_tables(rep, budget_us=80.0):
         p.append(f'<tr><td>{e(b)}</td><td>{e(event_text(sec))}</td><td>{r["calls"]}</td><td>{u(r["max_cycles"]):.1f}{flag}</td><td>{mean(r):.1f}</td></tr>')
     p.append('</table></div>')
     return '\n'.join(p)
-
-
-def tim02_tick_figure(rep, budget_us=80.0, period_us=100.0):
-    """@brief Inline SVG: mean whole tick per bucket stacked by part, worst tick marked, budget and period."""
-    e = html.escape
-    hz = rep['core_hz']
-    rows = {r['name']: r for r in rep['rows']}
-    u = lambda c: c * 1e6 / hz
-    buckets = [b['name'] for b in rep['buckets']]
-    W, left, right, top, bar, gap = 960, 130, 60, 56, 24, 10
-    worst_all = max(u(rows[f'{b}/tick']['max_cycles']) for b in buckets)
-    xmax = max(period_us, 10 * (int(worst_all / 10) + 2))
-    H = top + len(buckets) * (bar + gap) + 34
-    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
-    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Whole critical tick per bucket" '
-           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">']
-    lx = 0
-    for _, text, col in TICK_PARTS:
-        svg.append(f'<rect x="{lx}" y="8" width="12" height="12" rx="2" fill="{col}"/><text x="{lx + 16}" y="18" fill="{INK2}">{e(text)}</text>')
-        lx += 30 + 7 * len(text)
-    svg.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="6" y2="22" stroke="{INK}" stroke-width="2"/><text x="{lx + 10}" y="18" fill="{INK2}">worst whole tick</text>')
-    for v in range(0, int(xmax) + 1, 10):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
-                   f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
-    for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 30}" stroke="{INK2}" stroke-dasharray="6 4"/>'
-                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
-    for i, b in enumerate(buckets):
-        y = top + i * (bar + gap)
-        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
-        acc = 0.0
-        for key, text, col in TICK_PARTS:
-            r = rows[f'{b}/{key}']
-            m = u(r['sum_cycles'] / max(r['calls'], 1))
-            x0, x1 = x(acc), x(acc + m)
-            svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{col}" stroke="{SURFACE}" stroke-width="2">'
-                       f'<title>{e(b)} · {e(text)}: mean {m:.2f} µs, worst {u(r["max_cycles"]):.2f} µs</title></rect>')
-            if x1 - x0 >= 26:
-                svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(col)}" font-size="11" text-anchor="middle" pointer-events="none">{m:.1f}</text>')
-            acc += m
-        wc = u(rows[f'{b}/tick']['max_cycles'])
-        svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2"/>'
-                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{wc:.1f}</text>')
-    svg.append('</svg>')
-    return ''.join(svg)
 
 
 def tim02_event_figure(rep, budget_us=80.0, period_us=100.0):
@@ -465,37 +411,60 @@ def tim02_event_figure(rep, budget_us=80.0, period_us=100.0):
     return ''.join(svg)
 
 
-def timing_section_table(rep):
-    """@brief Table view of an L0-TIM report: worst case (mean) per section and bucket, in µs."""
-    e = html.escape
-    hz = rep['core_hz']
-    rows = {r['name']: r for r in rep['rows']}
-    buckets = [b['name'] for b in rep['buckets']]
-    secs = [n.split('/', 1)[1] for n in rows if n.startswith(buckets[0] + '/')
-            and not n.split('/', 1)[1].startswith(('tick', 'ev:'))]
-    p = ['<div class="wrap"><table><tr><th>Bucket</th>' + ''.join(f'<th>{e(x)}</th>' for x in secs) + '</tr>']
-    for b in buckets:
-        cells = []
-        for x in secs:
-            r = rows[f'{b}/{x}']
-            cells.append(f"<td>{r['max_cycles'] * 1e6 / hz:.1f} <span class=\"sub\">({r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz:.1f})</span></td>")
-        p.append(f'<tr><td>{e(b)}</td>' + ''.join(cells) + '</tr>')
-    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs. Inverter states reached: '
-             + '; '.join(f"{e(b['name'])} {e(', '.join(str(m) for m in b['vsi_seen']))}" for b in rep['buckets'])
-             + ' (vsi_mode_t: 3 GRID_CONNECTED, 4 RUN, 7 FAULT, 8 PWM_SETTLE).</p>')
-    return '\n'.join(p)
+# L0-TIM-02 adds the shield I/O around controlStep: two more groups (dataviz slots 6 and 7; the 7-group order
+# sensors, boost, inverter logic, calculateDuty, observer, writes, scope passes the palette validator).
+SENSOR_GROUP = ('sensor reads', '#008300', [('tick_sensors', 'sensor reads')])
+WRITE_GROUP = ('PWM + relay writes', '#6250d6', [('tick_apply', 'PWM + relay writes')])
+TIMING_SHORT.update({'tick_sensors': 'sensors', 'tick_apply': 'writes', 'tick_scope': 'scope'})
 
 
-def timing_figure_overview(rep, budget_us=80.0, period_us=100.0):
-    """@brief Overview, fitted to the page width (values only where they fit). Inline SVG: per bucket, the mean cost of each section stacked (group hue, section shade), the worst
-    case marked, against the budget and the period. Hover a segment for its values. @return html."""
-    e = html.escape
+def series_groups(rows, bucket, kind):
+    """@brief Groups of one test, with the row keys it reports. L0-TIM-01: the controlStep sections and the scope.
+    L0-TIM-02: sensor reads, the same sections measured in the critical tick ('2:' rows), PWM and relay writes,
+    scope, in the order the tick runs them. Shared groups keep their hue and shades in both tests."""
+    base = timing_groups(rows, bucket)
+    if kind == 'tim01':
+        return base
+    out = [SENSOR_GROUP]
+    for gname, hue, secs in base:
+        if gname != 'scope':
+            out.append((gname, hue, [('2:' + k, t) for k, t in secs]))
+    out += [WRITE_GROUP, ('scope', '#e87ba4', [('tick_scope', 'snapshot + acquire')])]
+    return out
+
+
+def bar_rows(rep, kind, tag=''):
+    """@brief One bar per bucket: segments (group, hue, shade index, shade count, key, text, mean µs, worst µs) and
+    the worst total (L0-TIM-01: worst controlStep + worst scope; L0-TIM-02: worst whole tick)."""
     hz = rep['core_hz']
     rows = {r['name']: r for r in rep['rows']}
-    buckets = [b['name'] for b in rep['buckets']]
-    W, left, right, bar, gap = 960, 130, 70, 24, 10
-    # Legend: one cluster per group (name, then a swatch per section), wrapped onto rows.
-    groups = timing_groups(rows, buckets[0])
+    u = lambda c: c * 1e6 / hz
+    out = []
+    for b in [x['name'] for x in rep['buckets']]:
+        segs = []
+        for gname, hue, secs in series_groups(rows, b, kind):
+            for k, (key, text) in enumerate(secs):
+                r = rows.get(f'{b}/{key}')
+                if r and r['calls']:
+                    segs.append((gname, hue, k, len(secs), key, text, u(r['sum_cycles'] / r['calls']), u(r['max_cycles'])))
+        if kind == 'tim01':
+            worst = u(rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles'])
+        else:
+            worst = u(rows[f'{b}/tick']['max_cycles'])
+        out.append({'bucket': b, 'tag': tag, 'segs': segs, 'worst': worst, 'mean': sum(s[6] for s in segs)})
+    return out
+
+
+def timing_xmax(rep, period_us=100.0):
+    """@brief Common time axis of every timing figure of a report, so TIM-01 and TIM-02 read on the same scale."""
+    worst = max([r['worst'] for r in bar_rows(rep, 'tim01')] +
+                ([r['worst'] for r in bar_rows(rep, 'tim02')] if any(n['name'].endswith('/tick') for n in rep['rows']) else []))
+    return max(period_us, 10 * (int((worst + 6) / 10) + 1))
+
+
+def legend_svg(groups, W=960):
+    """@brief Legend, fixed width: one cluster per group (name, a swatch per section), wrapped, then the worst mark."""
+    e = html.escape
     legend, lx, ly = [], 0, 16
     for gname, hue, secs in groups:
         width = 8 + 7 * len(gname) + sum(22 + 6.3 * len(t) for _, t in secs)
@@ -508,131 +477,150 @@ def timing_figure_overview(rep, budget_us=80.0, period_us=100.0):
                           f'<text x="{sx + 16:.0f}" y="{ly}" fill="{INK2}">{e(text)}</text>')
             sx += 22 + 6.3 * len(text)
         lx += width + 18
-    if lx + 240 > W - 10:
+    if lx + 200 > W - 10:
         lx, ly = 0, ly + 20
     legend.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="{ly - 12}" y2="{ly + 3}" stroke="{INK}" stroke-width="2"/>'
-                  f'<text x="{lx + 10}" y="{ly}" fill="{INK2}">worst case (controlStep + scope)</text>')
-    top = ly + 46
-    H = top + len(buckets) * (bar + gap) + 34
-    xmax = period_us
-    x = lambda v: left + (W - left - right) * min(v, xmax) / xmax
-    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Mean cost per section and worst case per bucket" '
-           f'style="font:12px system-ui,sans-serif;background:{SURFACE}">'] + legend
-    for v in range(0, int(xmax) + 1, 20):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 30}" stroke="{GRID}"/>'
-                   f'<text x="{x(v):.1f}" y="{H - 14}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
+                  f'<text x="{lx + 10}" y="{ly}" fill="{INK2}">worst case</text>')
+    return (f'<svg viewBox="0 0 {W} {ly + 10}" width="100%" style="font:12px system-ui,sans-serif;background:{SURFACE}">'
+            + ''.join(legend) + '</svg>')
+
+
+def _layout(bars):
+    """@brief y of each bar; paired bars (a tag) sit close, buckets apart. @return (ys, bar height, total height)."""
+    paired = any(b['tag'] for b in bars)
+    bar, inner, outer, top = (20, 3, 14, 30) if paired else (24, 10, 10, 30)
+    ys, y, prev = [], top, None
+    for b in bars:
+        if prev is not None:
+            y += bar + (inner if paired and b['bucket'] == prev else outer)
+        ys.append(y)
+        prev = b['bucket']
+    return ys, bar, ys[-1] + bar + 30
+
+
+def _segment_label(width, text, short, mean, size_full=11):
+    """@brief Direct label of a segment: name and value, short name and value, value, or nothing."""
+    full, sh = f'{text} {mean:.1f}', f'{short} {mean:.1f}'
+    if width >= 6.3 * len(full) + 8:
+        return full, size_full
+    if width >= 6.3 * len(sh) + 6:
+        return sh, size_full
+    if width >= 22:
+        return f'{mean:.1f}', 11
+    if width >= 14:
+        return f'{mean:.1f}', 9
+    return '', 0
+
+
+def _bars_svg(bars, x, ys, bar, H, width, xmax, budget_us, period_us, label_mode, worst_text):
+    """@brief Plot body shared by the overview and the detailed view (no bucket labels)."""
+    e = html.escape
+    svg = [f'<svg width="{width}" height="{H}" viewBox="0 0 {width} {H}" role="img" aria-label="Mean cost per section and worst case" '
+           f'style="font:12px system-ui,sans-serif;background:{SURFACE};flex:none">']
+    step = 1 if label_mode == 'detail' else 10
+    for v in range(0, int(xmax) + 1, step):
+        major = v % (5 if label_mode == 'detail' else 10) == 0
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="24" y2="{H - 26}" stroke="{GRID}" stroke-width="{1 if major else 0.5}"'
+                   f'{"" if major else " stroke-dasharray=\"2 3\""}/>')
+        if major:
+            svg.append(f'<text x="{x(v):.1f}" y="{H - 10}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
     for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 10}" y2="{H - 30}" stroke="{INK2}" stroke-dasharray="6 4"/>'
-                   f'<text x="{x(v) - 4:.1f}" y="{top - 14}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
-    for i, b in enumerate(buckets):
-        y = top + i * (bar + gap)
-        svg.append(f'<text x="{left - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
+        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="20" y2="{H - 26}" stroke="{INK2}" stroke-dasharray="6 4"/>'
+                   f'<text x="{x(v) - 4:.1f}" y="16" fill="{INK2}" text-anchor="end">{e(label)}</text>')
+    for b, y in zip(bars, ys):
         acc = 0.0
-        for gname, hue, secs in groups:
-            for k, (key, text) in enumerate(secs):
-                r = rows[f'{b}/{key}']
-                mean = r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz
-                worst = r['max_cycles'] * 1e6 / hz
-                x0, x1 = x(acc), x(acc + mean)
-                svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k, len(secs))}" '
-                           f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(gname)} · {e(text)} ({e(key)}): '
-                           f'mean {mean:.2f} µs, worst {worst:.2f} µs</title></rect>')
-                if x1 - x0 >= 30:  # direct label on the segments wide enough to hold one
-                    svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(shade(hue, k, len(secs)))}" font-size="11" '
-                               f'text-anchor="middle" pointer-events="none">{mean:.1f}</text>')
-                acc += mean
-        wc = (rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles']) * 1e6 / hz
-        svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2">'
-                   f'<title>{e(b)}: worst case {wc:.1f} µs</title></line>'
-                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{wc:.1f}</text>')
+        for gname, hue, k, n, key, text, mean, worst in b['segs']:
+            fill = shade(hue, k, n)
+            x0, x1 = x(acc), x(acc + mean)
+            svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{fill}" stroke="{SURFACE}" '
+                       f'stroke-width="2"><title>{e(b["bucket"])} {e(b["tag"])} · {e(gname)} · {e(text)}: mean {mean:.2f} µs, '
+                       f'worst {worst:.2f} µs</title></rect>')
+            if label_mode == 'detail':
+                lbl, size = _segment_label(x1 - x0, text, TIMING_SHORT.get(key.split(':')[-1], key), mean)
+            else:
+                lbl, size = (f'{mean:.1f}', 11) if x1 - x0 >= 26 else ('', 0)
+            if lbl:
+                svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(fill)}" font-size="{size}" '
+                           f'text-anchor="middle" pointer-events="none">{e(lbl)}</text>')
+            acc += mean
+        svg.append(f'<line x1="{x(b["worst"]):.1f}" x2="{x(b["worst"]):.1f}" y1="{y - 2}" y2="{y + bar + 2}" stroke="{INK}" stroke-width="2">'
+                   f'<title>{e(b["bucket"])} {e(b["tag"])}: worst {b["worst"]:.1f} µs</title></line>'
+                   f'<text x="{x(b["worst"]) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">{e(worst_text(b))}</text>')
     svg.append('</svg>')
     return ''.join(svg)
 
 
-def timing_figure(rep, budget_us=80.0, period_us=100.0, px_per_us=40):
-    """@brief Per bucket, the mean cost of each section stacked (group hue, section shade), the worst case marked,
-    against the budget and the period. Drawn at px_per_us so every segment carries its name and value; the plot
-    scrolls horizontally, the bucket names stay pinned on the left and the legend stays above. @return html."""
+def _labels_svg(bars, ys, bar, H, label_w, sticky):
+    e = html.escape
+    style = f'font:12px system-ui,sans-serif;flex:none;background:{SURFACE}' + (';position:sticky;left:0;z-index:1' if sticky else '')
+    out = [f'<svg width="{label_w}" height="{H}" style="{style}">']
+    prev = None
+    for b, y in zip(bars, ys):
+        name = b['bucket'] if b['bucket'] != prev else ''
+        tag = f' <tspan fill="{INK2}" font-size="11">{e(b["tag"])}</tspan>' if b['tag'] else ''
+        out.append(f'<text x="{label_w - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(name)}{tag}</text>')
+        prev = b['bucket']
+    out.append('</svg>')
+    return ''.join(out)
+
+
+def timing_overview(bars, groups, xmax, budget_us=80.0, period_us=100.0):
+    """@brief Overview, fitted to the page: every bar on one screen, values where they fit."""
+    ys, bar, H = _layout(bars)
+    label_w = 170 if any(b['tag'] for b in bars) else 130
+    W, right = 960, 60
+    x = lambda v: label_w + 8 + (W - label_w - 8 - right) * min(v, xmax) / xmax
+    body = _bars_svg(bars, x, ys, bar, H, W, xmax, budget_us, period_us, 'overview', lambda b: f'{b["worst"]:.1f}')
+    labels = _labels_svg(bars, ys, bar, H, label_w, False)
+    labels = labels[labels.index('>') + 1:-len('</svg>')]
+    body = body.replace(f'<svg width="{W}" height="{H}"', '<svg width="100%"', 1)
+    return legend_svg(groups) + body[:-len('</svg>')] + labels + '</svg>'
+
+
+def timing_detail(bars, groups, xmax, budget_us=80.0, period_us=100.0, px_per_us=40):
+    """@brief Detailed view at px_per_us: every segment labelled (name and mean); scrolls, bucket names pinned."""
+    ys, bar, H = _layout(bars)
+    label_w = 170 if any(b['tag'] for b in bars) else 130
+    plot_w = int(xmax * px_per_us) + 8 + 180
+    x = lambda v: 8 + px_per_us * min(v, xmax)
+    body = _bars_svg(bars, x, ys, bar, H, plot_w, xmax, budget_us, period_us, 'detail',
+                     lambda b: f'worst {b["worst"]:.1f} µs (mean {b["mean"]:.1f})')
+    return (legend_svg(groups) + f'<div class="wrap" style="display:flex;overflow-x:auto;border:1px solid {GRID};border-radius:6px">'
+            + _labels_svg(bars, ys, bar, H, label_w, True) + body + '</div>')
+
+
+def paired_bars(rep):
+    """@brief Per bucket, the L0-TIM-01 bar then the L0-TIM-02 bar."""
+    a, b = bar_rows(rep, 'tim01', 'TIM-01'), bar_rows(rep, 'tim02', 'TIM-02')
+    return [x for pair in zip(a, b) for x in pair]
+
+
+def timing_table(rep, cols, states_key='vsi_seen'):
+    """@brief Table view: worst case (mean) in µs per bucket for the given (row key, header) columns."""
     e = html.escape
     hz = rep['core_hz']
     rows = {r['name']: r for r in rep['rows']}
-    buckets = [b['name'] for b in rep['buckets']]
-    groups = timing_groups(rows, buckets[0])
-    # Legend (fixed above the scrolling plot): one cluster per group, wrapped onto rows.
-    W = 960
-    legend, lx, ly = [], 0, 16
-    for gname, hue, secs in groups:
-        width = 8 + 7 * len(gname) + sum(22 + 6.3 * len(t) for _, t in secs)
-        if lx and lx + width > W - 10:
-            lx, ly = 0, ly + 20
-        legend.append(f'<text x="{lx}" y="{ly}" fill="{INK}" font-weight="600">{e(gname)}</text>')
-        sx = lx + 8 + 7 * len(gname)
-        for k, (_, text) in enumerate(secs):
-            legend.append(f'<rect x="{sx:.0f}" y="{ly - 10}" width="12" height="12" rx="2" fill="{shade(hue, k, len(secs))}"/>'
-                          f'<text x="{sx + 16:.0f}" y="{ly}" fill="{INK2}">{e(text)}</text>')
-            sx += 22 + 6.3 * len(text)
-        lx += width + 18
-    if lx + 240 > W - 10:
-        lx, ly = 0, ly + 20
-    legend.append(f'<line x1="{lx + 4}" x2="{lx + 4}" y1="{ly - 12}" y2="{ly + 3}" stroke="{INK}" stroke-width="2"/>'
-                  f'<text x="{lx + 10}" y="{ly}" fill="{INK2}">worst case (controlStep + scope)</text>')
-    legend_svg = (f'<svg viewBox="0 0 {W} {ly + 10}" width="100%" style="font:12px system-ui,sans-serif;background:{SURFACE}">'
-                  + ''.join(legend) + '</svg>')
+    u = lambda c: c * 1e6 / hz
+    p = ['<div class="wrap"><table><tr><th>Bucket</th>' + ''.join(f'<th>{e(h)}</th>' for _, h in cols) + '</tr>']
+    for bk in rep['buckets']:
+        b = bk['name']
+        cells = []
+        for key, _ in cols:
+            r = rows.get(f'{b}/{key}')
+            cells.append('<td>—</td>' if not r or not r['calls'] else
+                         f"<td>{u(r['max_cycles']):.1f} <span class=\"sub\">({u(r['sum_cycles'] / r['calls']):.1f})</span></td>")
+        p.append(f'<tr><td>{e(b)}</td>' + ''.join(cells) + '</tr>')
+    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs. Inverter states reached: '
+             + '; '.join(f"{e(b['name'])} {e(', '.join(VSI_NAMES[m] for m in b.get(states_key, [])))}" for b in rep['buckets']) + '.</p>')
+    return '\n'.join(p)
 
-    label_w, pad, right, bar, gap, top = 130, 8, 90, 30, 10, 30
-    H = top + len(buckets) * (bar + gap) + 30
-    plot_w = int(period_us * px_per_us) + pad + right
-    x = lambda v: pad + px_per_us * min(v, period_us)
-    labels = [f'<svg width="{label_w}" height="{H}" style="font:12px system-ui,sans-serif;flex:none;position:sticky;left:0;'
-              f'background:{SURFACE};z-index:1">']
-    svg = [f'<svg width="{plot_w}" height="{H}" role="img" aria-label="Mean cost per section and worst case per bucket" '
-           f'style="font:12px system-ui,sans-serif;background:{SURFACE};flex:none">']
-    for v in range(0, int(period_us) + 1):
-        major = v % 5 == 0
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 6}" y2="{H - 26}" stroke="{GRID}" '
-                   f'stroke-width="{1 if major else 0.5}"{"" if major else " stroke-dasharray=\"2 3\""}/>')
-        if major:
-            svg.append(f'<text x="{x(v):.1f}" y="{H - 10}" fill="{MUTED}" text-anchor="middle">{v} µs</text>')
-    for v, label in ((budget_us, f'budget {budget_us:g} µs'), (period_us, f'period {period_us:g} µs')):
-        svg.append(f'<line x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{top - 12}" y2="{H - 26}" stroke="{INK2}" stroke-dasharray="6 4"/>'
-                   f'<text x="{x(v) - 4:.1f}" y="{top - 16}" fill="{INK2}" text-anchor="end">{e(label)}</text>')
-    for i, b in enumerate(buckets):
-        y = top + i * (bar + gap)
-        labels.append(f'<text x="{label_w - 8}" y="{y + bar / 2 + 4}" fill="{INK}" text-anchor="end">{e(b)}</text>')
-        acc = 0.0
-        for gname, hue, secs in groups:
-            for k, (key, text) in enumerate(secs):
-                r = rows[f'{b}/{key}']
-                mean = r['sum_cycles'] / max(r['calls'], 1) * 1e6 / hz
-                worst = r['max_cycles'] * 1e6 / hz
-                x0, x1 = x(acc), x(acc + mean)
-                svg.append(f'<rect x="{x0:.1f}" y="{y}" width="{max(x1 - x0, 1):.1f}" height="{bar}" fill="{shade(hue, k, len(secs))}" '
-                           f'stroke="{SURFACE}" stroke-width="2"><title>{e(b)} · {e(gname)} · {e(text)} ({e(key)}): '
-                           f'mean {mean:.2f} µs, worst {worst:.2f} µs</title></rect>')
-                # Direct label: name and value when they fit, else the value alone (smaller type for narrow ones).
-                full, short = f'{text} {mean:.1f}', f'{TIMING_SHORT.get(key, key)} {mean:.1f}'
-                if x1 - x0 >= 6.3 * len(full) + 8:
-                    lbl, size = full, 11
-                elif x1 - x0 >= 6.3 * len(short) + 6:
-                    lbl, size = short, 11
-                elif x1 - x0 >= 22:
-                    lbl, size = f'{mean:.1f}', 11
-                elif x1 - x0 >= 14:
-                    lbl, size = f'{mean:.1f}', 9
-                else:
-                    lbl = ''
-                if lbl:
-                    svg.append(f'<text x="{(x0 + x1) / 2:.1f}" y="{y + bar / 2 + 4}" fill="{text_on(shade(hue, k, len(secs)))}" font-size="{size}" '
-                               f'text-anchor="middle" pointer-events="none">{e(lbl)}</text>')
-                acc += mean
-        wc = (rows[f'{b}/controlStep']['max_cycles'] + rows[f'{b}/scope']['max_cycles']) * 1e6 / hz
-        svg.append(f'<line x1="{x(wc):.1f}" x2="{x(wc):.1f}" y1="{y - 3}" y2="{y + bar + 3}" stroke="{INK}" stroke-width="2">'
-                   f'<title>{e(b)}: worst case {wc:.1f} µs</title></line>'
-                   f'<text x="{x(wc) + 6:.1f}" y="{y + bar / 2 + 4}" fill="{INK}">worst {wc:.1f} µs (mean {acc:.1f})</text>')
-    labels.append('</svg>')
-    svg.append('</svg>')
-    return (legend_svg + f'<div class="wrap" style="display:flex;overflow-x:auto;border:1px solid {GRID};border-radius:6px">'
-            + ''.join(labels) + ''.join(svg) + '</div>')
+
+TIM01_COLS = [('boost_cold', 'boost_cold'), ('boost_hot', 'boost_hot'), ('inv_stage', 'inv_stage'), ('inv_duty', 'inv_duty'),
+              ('duty_pll', 'duty_pll'), ('duty_sogi', 'duty_sogi'), ('duty_park', 'duty_park'), ('duty_syncwin', 'duty_syncwin'),
+              ('duty_mode_ff', 'duty_mode_ff'), ('duty_current_pi', 'duty_current_pi'), ('duty_output', 'duty_output'),
+              ('observer', 'observer'), ('outputs', 'outputs'), ('controlStep', 'controlStep'), ('scope', 'scope')]
+TIM02_COLS = ([('tick', 'whole tick'), ('tick_sensors', 'sensors')] + [('2:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
+              + [('tick_control', 'controlStep'), ('tick_apply', 'writes'), ('tick_scope', 'scope')])
 
 
 def verdict_badge(r):
@@ -835,7 +823,11 @@ def main(out):
                 fig_html, notes = None, f'plot failed: {ex}'
             figs.append((r, fig_html, notes))
         figures_for[c['folder'].name] = figs
-    cases.sort(key=lambda c: (not any(r['verdict'] == 'FAIL' for r in c['rows']), c['order']))
+    # On-target cases stay together in test order (TIM-01 before TIM-02, so a section reads before/after);
+    # the block goes first when any of them fails. Other cases: failures first.
+    target_fail = any(r['verdict'] == 'FAIL' for c in cases if c.get('kind') == 'target' for r in c['rows'])
+    cases.sort(key=lambda c: ((not target_fail, 0, c['folder'].name) if c.get('kind') == 'target' else
+                              (not any(r['verdict'] == 'FAIL' for r in c['rows']), 1, c['order'])))
 
     p = []
     p.append(page_head('Campaign review') + f'''<h1>Campaign review</h1><div class="sub">{e(out.name)}{f" · compared with {e(prev.name)}" if prev else " · no earlier campaign to compare"}</div>''')
@@ -884,41 +876,50 @@ def main(out):
         for r in sorted(c['rows'], key=sort_key):
             p.append(f'<tr><td>{e(r["id"])}</td><td>{verdict_badge(r)}</td><td>{e(r["measured"])}</td></tr>')
         p.append('</table>')
-        if c.get('kind') == 'target' and c.get('figures') == 'tim02':
+        if c.get('kind') == 'target':
+            # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
-            if rep_t and rep_t.get('rows'):
+            if not (rep_t and rep_t.get('rows')):
+                p.append(f'<p class="sub">No report in {e(f.name)}/.</p>')
+                continue
+            xmax = timing_xmax(rep_t)
+            groups_hint = ('One hue per group (blue boost, orange inverter logic, green calculateDuty, yellow observer, '
+                           'pink scope), its sections in shades of it in code order, darkest first')
+            if c.get('figures') == 'tim02':
                 p.append(tim02_tables(rep_t))
                 p.append('<h3>4 · Figures</h3>')
-                p.append('<figure><div><b>Tick composition</b></div>' + tim02_tick_figure(rep_t) + '<figcaption>Each bar: '
-                         'the mean whole critical tick in that bucket, split into sensor reads, controlStep, PWM and relay '
-                         'writes, and scope sampling (values in µs). Black mark: the worst whole tick. Dashed: the 80 µs '
-                         'budget and the 100 µs period; a tick past the period delays the next one.</figcaption></figure>')
+                rows_t = {r['name']: r for r in rep_t['rows']}
+                groups = series_groups(rows_t, rep_t['buckets'][0]['name'], 'tim02')
+                bars = paired_bars(rep_t)
+                p.append('<figure><div><b>Overview: L0-TIM-01 against L0-TIM-02</b></div>' + timing_overview(bars, groups, xmax)
+                         + '<figcaption>Per bucket, the L0-TIM-01 bar (controlStep sections and scope, main thread, '
+                         'interrupts locked, scope on every tick) above the L0-TIM-02 bar (the whole tick in the critical '
+                         'task: sensor reads in dark green, the same sections, PWM and relay writes in violet, scope at its '
+                         f'production rate). {groups_hint}. Same scale and colours as the L0-TIM-01 figures. Black mark: '
+                         'the worst case (TIM-01: worst controlStep + worst scope; TIM-02: worst whole tick). Dashed: the '
+                         '80 µs budget and the 100 µs period.</figcaption></figure>')
+                p.append('<figure><div><b>Detailed view: L0-TIM-01 against L0-TIM-02</b></div>' + timing_detail(bars, groups, xmax)
+                         + '<figcaption>The same bars at 40 px per µs: every segment carries its name and mean in µs, so '
+                         'a section reads directly against its L0-TIM-01 value just above it; scroll right, the bucket '
+                         'names stay pinned. Hover a segment for its worst case.</figcaption></figure>')
                 p.append('<figure><div><b>Event ticks</b></div>' + tim02_event_figure(rep_t) + '<figcaption>The worst '
                          'whole tick on which each event happened, per bucket (several events can share one tick). Red '
                          'with "over": above the 80 µs budget. The event table above is the same data.</figcaption></figure>')
-            else:
-                p.append(f'<p class="sub">No report in {e(f.name)}/.</p>')
-            continue
-        if c.get('kind') == 'target':
-            rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
-            if rep_t and rep_t.get('rows'):
-                p.append(timing_section_table(rep_t))
+                continue
+            p.append(timing_table(rep_t, TIM01_COLS))
             p.append('<h3>4 · Figures</h3>')
-            if rep_t and rep_t.get('rows'):
-                p.append('<figure><div><b>Overview</b></div>' + timing_figure_overview(rep_t) + '<figcaption>The whole '
-                         'period at a glance: each bar is the mean cost of one tick in that bucket, one segment per code '
-                         'section (one hue per group: blue boost, orange inverter logic, green calculateDuty, yellow '
-                         'observer, pink scope; its sections in shades of it in code order, darkest first). Values where '
-                         'they fit; the detailed view below labels every segment. Black mark: the worst controlStep plus '
-                         'the worst scope sampling of the bucket. Dashed: the 80 µs budget (L0-TIM-02/03) and the 100 µs '
-                         'period.</figcaption></figure>')
-                p.append('<figure><div><b>Detailed view</b></div>' + timing_figure(rep_t) + '<figcaption>The same data at '
-                         '40 px per µs: every segment carries its name and mean in µs; scroll right for the rest of the '
-                         'period, the bucket names stay pinned. Hover a segment for its worst case. Interrupts locked, no '
-                         'sensors or PWM: the running task costs more (L0-TIM-03). The table above is the same data.'
-                         '</figcaption></figure>')
-            else:
-                p.append(f'<p class="sub">No report in {e(f.name)}/.</p>')
+            rows_t = {r['name']: r for r in rep_t['rows']}
+            groups = series_groups(rows_t, rep_t['buckets'][0]['name'], 'tim01')
+            bars = bar_rows(rep_t, 'tim01')
+            p.append('<figure><div><b>Overview</b></div>' + timing_overview(bars, groups, xmax) + '<figcaption>Each bar: '
+                     f'the mean cost of one tick in that bucket, one segment per code section. {groups_hint}. Values '
+                     'where they fit; the detailed view labels every segment. Black mark: the worst controlStep plus the '
+                     'worst scope sampling of the bucket. Dashed: the 80 µs budget and the 100 µs period. The time axis '
+                     'is the one of the L0-TIM-02 figures below.</figcaption></figure>')
+            p.append('<figure><div><b>Detailed view</b></div>' + timing_detail(bars, groups, xmax) + '<figcaption>The '
+                     'same data at 40 px per µs: every segment carries its name and mean in µs; scroll right, the bucket '
+                     'names stay pinned. Hover a segment for its worst case. Interrupts locked, no sensors or PWM: L0-TIM-02 '
+                     'measures the whole tick. The table above is the same data.</figcaption></figure>')
             continue
         p.append('<h3>4 · Figures</h3>')
         figs = figures_for[f.name]

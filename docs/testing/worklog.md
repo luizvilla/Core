@@ -504,3 +504,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | USB and TIMING build; host L0 125 pass, 7 known, 0 new. On the bare Spin: L0-TIM-01 unchanged (all sections within the baseline); L0-TIM-02.a PASS; **.b and .c FAIL in every bucket**: whole tick mean 72 µs (OFF, boost IDLE) to 100 µs (INJECT), worst 82–110 µs. Mean parts with the bridge on: sensor reads 10.6 µs, controlStep 53–58 µs, PWM and relay writes 18 µs (4.4 µs with nothing switching, 12 µs with the boost alone), scope 5.5 µs at 2 kHz and 12 µs at 10 kHz (g, n, G) |
 | Lead, not acted on | Outside controlStep, the tick spends about 29 µs on the shield API every tick with the bridge on: 18 µs to rewrite duties, enables and burst settings that mostly did not change, and 10.6 µs for five sensor reads. Writing PWM only on change and reading the sensors through a cheaper path are the largest savings measured so far, before the flash wait states and the repeated sine/cosine |
 | Hardware check | The bench `load` (74–75 µs idle, 82–88 µs with the bridge, boost IDLE) is consistent with OFF_IDLE (72 µs mean, 82 µs worst); the grid buckets here also run the boost in BUSREG |
+
+## 2026-11-12 — L0-TIM-02 reports every section; TIM-01 and TIM-02 compared side by side
+
+| Field | Value |
+|---|---|
+| Commit | the `test(timing): …` commit that adds this entry |
+| Files | `src/timing/timing_harness.cpp`, `src/timing/timing_report.h` (layout 4, 400 rows), `tests/common/review_report.py`, `tests/l0/timing/README.md` ("Reporting") |
+| Reason | Luiz Villa: TIM-02 showed controlStep as one block and sat above TIM-01, so before/after could not be read section by section |
+| Behaviour change | None in the USB firmware (TIMING only). TIM-02 records the controlStep and calculateDuty sections inside the critical tick (`2:` rows) |
+| Evidence | On the bare Spin, the sections inside the critical tick match TIM-01 within about 0.1 µs; the difference between the two tests is the sensor reads (10.5–10.9 µs), the PWM and relay writes (up to 18.1 µs) and the scope at its production rate |
+| Hardware check | Not needed |
