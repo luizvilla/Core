@@ -175,8 +175,9 @@ static uint32_t critical_prev_start = 0U;
 static volatile uint32_t vac_stale_count = 0U;
 static uint32_t rate_prev_calls = 0U;
 static int64_t rate_prev_ms = 0;
-/* Menu 'v': 10 kHz capture in CONNECT/INJECT (default) or 2 kHz as in the other stages. */
-static bool scope_fast_connect = true;
+/* Menu 'v': 10 kHz capture in CONNECT/INJECT/FOLLOW_CONNECT, or 2 kHz as in the other stages (default: a scope
+ * sample every tick costs about 3 µs per period, docs/testing/timing-optimization.md, change 2). */
+static bool scope_fast_connect = false;
 /* Menu 'e': step 1 with the library's settle counter running (diagnostic for the fault after 'g'). */
 static bool settle_count_test = false;
 /* Menu 'z': protection test, one control period sees an artificial AC current above the bench trip
@@ -967,7 +968,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
     TIMING_TICK_PROBE(3);
     const uint32_t t_applied = k_cycle_get_32();
     notePart(2, t_controlled, t_applied);
-    /* Grid stages: 10 kHz around the relay closing (25.6 ms window); otherwise 2 kHz. */
+    /* Grid stages: 10 kHz around the relay closing (25.6 ms window) when asked with 'v'; otherwise 2 kHz. */
     const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT || inverter_stage == INV_FOLLOW_CONNECT)) ?
                              1U : scope_sample_divider;
     /* Snapshot only on the ticks the scope samples (it also evaluates the trigger then): the other ticks
