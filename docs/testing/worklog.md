@@ -527,3 +527,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Re-rendered `380fe65`, `20f27df-dirty`, `4bb564b`: drawn = measured for every bar. Unprobed time in TIM-02, every stage: 3.9 µs inside the control part (struct copies, the call, `k_cycle_get_32` and `notePart` around controlStep) and 3.0 µs around the four parts (entry/exit, the end-of-tick `k_cycle_get_32`, `notePart`, `critical_max_us`); 0.6–0.7 µs in TIM-01 (probe overhead) |
 | Lead, not acted on | About 7 µs per tick go to the critical task's own `load` bookkeeping: five `k_cycle_get_32` calls and five `k_cyc_to_us_floor32` conversions (64-bit division). Keeping raw cycle counts in the task and converting in the telemetry thread would save most of it |
 | Hardware check | Not needed |
+
+## 2026-11-12 — Flash wait states 8 → 4 (RM0440 Table 9)
+
+| Field | Value |
+|---|---|
+| Commit | the `perf(spin): …` commit that adds this entry |
+| Files | `zephyr/modules/owntech_spin_api/zephyr/src/hardware_auto_configuration.cpp` (OwnTech Spin API, every firmware built from this repo) |
+| Reason | L0-TIM-02 failed the 80 µs budget in every stage. `FLASH_ACR` read 8 wait states: Zephyr's clock driver uses STM32CubeG4 LL v1.5.1 `LL_SetFlashLatency()`, whose table (20 MHz per wait state) follows an early RM0440 revision. The current RM0440 Table 9 gives 34 MHz per wait state in Range 1 boost mode (4 WS at 170 MHz) and 30 MHz in normal mode; the RM0440 revision history and an ST answer on the ST community confirm the reduction from 8 to 4. Range 1 boost mode is on (`PWR_CR5` = 0) |
+| Behaviour change | Speed only: a `SYS_INIT` (PRE_KERNEL_1, priority 50, after the clock driver at 1) sets the wait states from the RM0440 table for the current voltage range and HCLK, only lowering them, only in Range 1 with HCLK = SYSCLK. `FLASH_ACR` now reads `0x00040704`. Timing bases (HRTIM, SysTick) are unchanged |
+| Evidence | USB and TIMING build. On the bare Spin: **L0-TIM-02.b and .c PASS in every stage**. Whole tick mean 71.0 → 45.0 µs (OFF, boost IDLE), 99.2 → 60.9 µs (INJECT); worst 80.3–109.0 → 50.3–67.0 µs. Every part shrinks by about 38 %: controlStep 52.9 → 31.8 µs and calculateDuty 26.4 → 16.1 µs (CONNECT), sensor reads 10.8 → 8.1 µs, PWM and relay writes 17.9 → 10.5 µs, scope at 10 kHz 11.9 → 7.1 µs. Baseline rewritten from the clean run |
+| Follow-up | Propose the same correction upstream (OwnTech Core, Jean Alinei, Clément Foucher), and check whether a newer STM32CubeG4 LL or Zephyr already fixes the table |
+| Hardware check | Pending: flash the USB env and repeat steps 1 and 2b on the bench; the `load` field should drop by about 38 % |
