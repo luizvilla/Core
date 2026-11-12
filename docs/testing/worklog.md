@@ -573,3 +573,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | None in the control: the same code runs from another address. **Memory map:** `sram0` 128 KB → 96 KB (SRAM1 + SRAM2; 40 % used); the CCM's I-bus alias `0x10000000` (31 KB) is Zephyr's `zephyr,itcm`, filled from flash at boot by `z_data_copy`; the retained boot-mode byte stays at `0x2001FFFF`. 11.2 KB of per-period functions are tagged; the library forks stay in flash (5b) |
 | Evidence | L0-TIM-01/02/03 pass on the bare Spin; interrupt time per period −8.02 µs on average (−5.7 µs OFF_IDLE to −9.1 µs INJECT), worst task tick 38.8–47.5 µs, 0 lost periods; two runs agree within 0.1 µs. Host L0: 125 pass, 7 known, 0 new. USB build has no timing symbol |
 | Hardware check | Pending: bench with the USB firmware (boot through MCUboot, steps 1 and 2b); the board holds the TIMING firmware |
+
+## 2026-11-12 — Library per-period functions in CCM SRAM (optimization 5b)
+
+| Field | Value |
+|---|---|
+| Commit | `6de51b9` on branch `perf/timing-5-ccm`; libraries `luizvilla/single_phase_inverter` `5662004` (branch `fix/sync-period-average`) and `luizvilla/control_library` `d1449a4` (new branch `perf/fast-code`); baseline and this entry in the `docs(timing): …` commit that follows |
+| Files | `src/app.ini`, `tests/l1/dependencies.lock.json` (both libraries pinned by hash; control_library followed `#PID_update` before); library `src/inverterFastCode.h` (new), `singlePhaseInverterFollowing.cpp`, `sogi.cpp`; control_library `src/ctlFastCode.h` (new), `pid.cpp`, `transform.cpp`, `trigo.cpp`; `tests/l0/timing/baseline.json` |
+| Reason | Second half of optimization 5 (Luiz Villa): after 5a, `calculateDuty` (14–16 µs, still in flash) was the largest part left. [timing-optimization.md](timing-optimization.md) section 5 |
+| Behaviour change | None in the control. The library functions called every period run from CCM SRAM when the Core provides `owntech_fast_code.h`; the macros are empty otherwise (older Core, host). ITCM 16.5 KB of 31 KB |
+| Evidence | L0-TIM-01/02/03 pass; 5b alone −6.62 µs, 5a + 5b **−14.64 µs** mean interrupt time per period against `5fcf14b`; worst task tick 32.7–40.1 µs, 0 lost periods; local and pinned libraries agree to 0.00 µs. Host L0: 125 pass, 7 known, 0 new. USB build has no timing symbol. Baseline rewritten from this code |
+| Hardware check | Pending: bench with the USB firmware (boot through MCUboot, steps 1 and 2b); the board holds the TIMING firmware |

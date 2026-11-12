@@ -36,7 +36,7 @@ Tracks the changes that bring the critical task's time down, measured with the o
 | 3 | PWM and relay writes: probe each call, then send the state commands only on change | `src/main.cpp` | Measured alone: **−2.1 to −2.3 µs with the boost running**, 0 in OFF_IDLE (branch `perf/timing-3-writes`, `fb07a70`); bridge duty API: proposal 3b below |
 | 4 | Modulos (Jean Alinei's feedback): `fmodf` of θ every tick → conditional subtraction; integer `%` of the sync window → conditional wrap | `single_phase_inverter` fork `ac3dbc6` | Measured alone: **−0.4 to −0.5 µs** in every stage (branch `perf/timing-4-modulo`, `c664d8d`) |
 | All | 1–4 together: final verdict | merge `5fcf14b` | **−10.15 µs** mean over the stages (−6.3 to −13.2 µs per stage), every test passes |
-| 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | 5a measured: **−8.02 µs** mean (−5.7 to −9.1 µs per stage; branch `perf/timing-5-ccm`, `2b3a893`); 5b to do. [Section 5](#5--hot-path-in-ccm-sram) |
+| 5 | Hot path executed from CCM SRAM (0 wait states, I-bus): 5a own sources and OwnTech modules, 5b library forks | `spin.dts`, `src/`, `zephyr/modules/`, library forks | 5a **−8.02 µs** (`2b3a893`), 5b **−6.62 µs** more (`6de51b9`); together **−14.64 µs** mean against `5fcf14b`, every test passes (branch `perf/timing-5-ccm`). [Section 5](#5--hot-path-in-ccm-sram) |
 
 Then: the ADC path (data dispatch 9.4 µs + sensor reads 8.2 µs per period), with Jean.
 
@@ -144,7 +144,7 @@ The float modulo is worth replacing (0.41 µs); the integer ones are not worth m
 | 4 Modulos | −0.44 µs | every stage |
 | **All** | **−10.15 µs** | |
 
-**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément; proposal 5 (hot path in CCM SRAM, every part of the tick), no API change: 5a done (−8.02 µs), 5b next.
+**Next, by size:** the ADC path (task API data dispatch 9.4 µs + sensor reads 8.1 µs per period), with Jean; proposal 3b (bridge duty API, about 3 µs in every bridge stage), with Jean and Clément; change 5 done (hot path in CCM SRAM, −14.64 µs); left in flash: CMSIS `arm_sin_f32`/`arm_cos_f32` and their table (Park section), `ScopeMimicry::acquire` (upstream library).
 
 ### 5 · Hot path in CCM SRAM
 
@@ -242,4 +242,60 @@ Parts in µs (mean, L0-TIM-03): tick sensors, control (controlStep), apply (PWM 
 - `inv_duty` does not move (14.4–15.6 µs): it is the largest part left, and it is 5b.
 - The ADC path gains least (sensors −0.8 µs, dispatch −0.7 µs): its time is mostly peripheral and memory accesses, not instruction fetches. A cheaper path there is still Jean's topic.
 - Worst task tick 38.8–47.5 µs (budget 80 µs). L0-TIM-01/02/03 pass. Host L0: 125 pass, 7 known, 0 new (campaign `2026-11-12_2b3a893_162801_p1MFbA`). The USB ELF builds and has no timing symbol.
+
+#### 5b · Library forks (`6de51b9`, campaign `2026-11-12_6de51b9_164042_B0kRJZ`, against `2b3a893`)
+
+What was done:
+- **single_phase_inverter** `5662004` (branch `fix/sync-period-average`): `INV_FAST_CODE` (`inverterFastCode.h`) on `calculateDuty`, `updateSyncWindow`, `updateMode`, `synchronizationAligned`, `Sogi::calc` and the getters and setters called every period. The fault and init paths stay in flash.
+- **control_library** `d1449a4` (new branch `perf/fast-code`, so `PID_update` is untouched): `CTL_FAST_CODE` (`ctlFastCode.h`) on `Pid::calculate`, `Pid::setKp`, `Transform::rotation_to_dqo/rotation_to_clarke`, `ot_sin/ot_cos`.
+- **Macros:** both are empty unless the Core provides `owntech_fast_code.h` (`__has_include`), so the libraries still build on an older Core and on the host.
+- **Pins:** Core2 now pins both libraries by commit hash (`app.ini`, `tests/l1/dependencies.lock.json`). Before, control_library followed its branch.
+
+Link: ITCM 16.5 KB of 31 KB (43 library functions added). Still in flash: CMSIS `arm_sin_f32`/`arm_cos_f32` and their 2 KB table, `lroundf`, `ScopeMimicry::acquire` (upstream scopemimicry, not a fork).
+
+| Stage | Interrupt / period (mean) | Task tick worst | Lost | Control | inv_duty | PLL | SOGI | Park | Output | Observer |
+|---|---|---|---|---|---|---|---|---|---|---|
+| OFF_IDLE | 44.7 → 38.4 (−6.3) | 38.8 → 32.7 | 0 → 0 | 24.70 → 18.63 | 14.40 → 10.04 | 1.68 → 1.01 | 2.41 → 1.75 | 3.10 → 2.81 | 3.02 → 1.70 | 2.79 → 2.15 |
+| OFF_BUSREG | 46.7 → 40.4 (−6.3) | 42.0 → 35.6 | 0 → 0 | 25.17 → 19.10 | 14.37 → 10.03 | 1.66 → 1.00 | 2.41 → 1.75 | 3.10 → 2.81 | 3.03 → 1.70 | 2.79 → 2.15 |
+| OFF_MPPT | 47.5 → 41.1 (−6.4) | 41.5 → 34.7 | 0 → 0 | 25.98 → 19.83 | 14.18 → 10.07 | 1.47 → 0.98 | 2.40 → 1.75 | 3.10 → 2.81 | 3.02 → 1.70 | 2.79 → 2.15 |
+| SETTLE_c | 49.4 → 42.6 (−6.8) | 43.7 → 36.3 | 0 → 0 | 25.89 → 19.38 | 15.08 → 10.31 | 1.66 → 1.00 | 2.41 → 1.75 | 3.10 → 2.81 | 2.99 → 1.70 | 2.79 → 2.15 |
+| CONNECT_g | 49.8 → 43.0 (−6.8) | 45.0 → 37.5 | 0 → 0 | 26.26 → 19.77 | 15.46 → 10.69 | 1.66 → 1.00 | 2.41 → 1.75 | 3.10 → 2.81 | 3.01 → 1.70 | 2.79 → 2.15 |
+| INJECT_n | 50.7 → 44.0 (−6.6) | 44.7 → 37.6 | 0 → 0 | 27.15 → 20.75 | 15.42 → 10.75 | 1.66 → 1.00 | 2.23 → 1.75 | 3.10 → 2.81 | 3.00 → 1.70 | 2.79 → 2.15 |
+| VAC_FOLLOW_a | 51.5 → 44.8 (−6.7) | 45.2 → 38.0 | 0 → 0 | 27.60 → 21.13 | 14.37 → 10.03 | 1.66 → 1.00 | 2.41 → 1.75 | 3.10 → 2.81 | 3.03 → 1.70 | 2.79 → 2.15 |
+| FOLLOW_CONN_G | 50.4 → 43.4 (−7.0) | 47.5 → 39.5 | 0 → 0 | 26.84 → 20.09 | 15.64 → 10.80 | 1.65 → 1.00 | 2.40 → 1.75 | 3.10 → 2.81 | 3.19 → 1.81 | 2.79 → 2.15 |
+| OPEN_LOOP_o | 52.5 → 45.8 (−6.7) | 47.4 → 40.1 | 0 → 0 | 28.92 → 22.47 | 14.37 → 10.03 | 1.66 → 1.00 | 2.41 → 1.75 | 3.10 → 2.81 | 3.02 → 1.70 | 2.79 → 2.15 |
+
+Parts in µs (mean, L0-TIM-03): controlStep, `calculateDuty` and its sections, grid observer (its PI and filters come from control_library).
+
+**Reading.**
+- `calculateDuty` loses about 30 % (−4.4 to −4.8 µs).
+- Park gains only 0.3 µs: its rotations still call `arm_sin_f32`/`arm_cos_f32`, which stay in flash with their table. Computing sine and cosine once per tick (lead of 2026-11-12), or moving CMSIS into RAM, is what is left there.
+- The run with the libraries edited locally and the run with the pushed, pinned commits agree to 0.00 µs.
+
+#### 5 · Verdict (5a + 5b, `6de51b9`, against `5fcf14b`)
+
+| Stage | Interrupt / period (mean) | Task tick worst | Gap worst | Lost |
+|---|---|---|---|---|
+| OFF_IDLE | 50.4 → 38.4 (−12.0) | 45.1 → 32.7 | 121.1 → 118.1 | 0 → 0 |
+| OFF_BUSREG | 53.9 → 40.4 (−13.5) | 50.7 → 35.6 | 111.5 → 113.4 | 0 → 0 |
+| OFF_MPPT | 54.8 → 41.1 (−13.7) | 48.6 → 34.7 | 110.0 → 109.7 | 0 → 0 |
+| SETTLE_c | 57.8 → 42.6 (−15.2) | 51.6 → 36.3 | 112.7 → 112.1 | 0 → 0 |
+| CONNECT_g | 58.2 → 43.0 (−15.2) | 53.1 → 37.5 | 111.9 → 116.5 | 0 → 0 |
+| INJECT_n | 59.8 → 44.0 (−15.7) | 53.5 → 37.7 | 116.3 → 117.7 | 0 → 0 |
+| VAC_FOLLOW_a | 60.2 → 44.8 (−15.4) | 53.5 → 38.0 | 113.5 → 112.8 | 0 → 0 |
+| FOLLOW_CONN_G | 59.0 → 43.4 (−15.7) | 56.1 → 39.5 | 112.4 → 111.3 | 0 → 0 |
+| OPEN_LOOP_o | 61.1 → 45.8 (−15.3) | 55.3 → 40.1 | 121.3 → 123.3 | 0 → 0 |
+
+**Verdict.**
+- **−14.64 µs** mean interrupt time per period, more than optimizations 1–4 together (−10.15 µs).
+- The interrupt now takes 38–46 % of the period. The worst task tick is 32.7–40.1 µs: 40 µs of margin against the 80 µs budget.
+- L0-TIM-01/02/03 pass, with no lost period and the background tasks served. Host L0: 125 pass, 7 known, 0 new (campaign `2026-11-12_6de51b9_164326_JtuLVr`).
+- Baseline rewritten from `6de51b9` (campaign `2026-11-12_6de51b9-dirty_164438_apsFEg`; dirty only through the `baseline.json` that run wrote).
+- Against the 8-wait-state code of the start of the day: L0-TIM-02 whole tick in OFF_IDLE, mean 71.0 µs then, 28.6 µs now (worst 80.3 → 32.3 µs).
+
+| Change | Alone (mean over stages) | Where it shows |
+|---|---|---|
+| 5a Core2 and OwnTech modules in CCM | −8.02 µs | every part moved (writes −2.5 µs with the bridge on, controlStep −3 to −4 µs) |
+| 5b Library forks in CCM | −6.62 µs | `calculateDuty` −4.4 to −4.8 µs, observer −0.6 µs |
+| **5** | **−14.64 µs** | |
 
