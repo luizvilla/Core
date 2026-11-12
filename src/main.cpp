@@ -202,6 +202,13 @@ static inline void notePart(int part, uint32_t from, uint32_t to)
 
 /* The burst generator is running on leg 1. */
 static bool burst_running = false;
+/* Burst settings last sent to the burst generator (sent again only when they change). */
+static uint16_t burst_skip_applied = 0U;
+static uint16_t burst_period_applied = 0U;
+/* Boost leg 1 outputs started by the critical task: start/stop are sent on change only (docs/testing/
+ * timing-optimization.md, change 3). A stop from elsewhere (safety API) therefore holds until the next mode change,
+ * as it already did for the bridge. */
+static bool boost_leg1_on = false;
 /* Stage neutral bridge duty for one control tick before enabling PWM. */
 static bool inverter_pwm_staged = false;
 /* Bridge outputs started (start/stop are applied on changes only, not every tick). */
@@ -885,6 +892,7 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
     {
         shield.power.stop(LEG1_LOW);
         // shield.power.stop(LEG2_LOW);
+        boost_leg1_on = false;
     }
 
     if (out.boost_pwm_update)
@@ -892,8 +900,12 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
         shield.power.setDutyCycle(LEG1_LOW, out.boost_duty.leg1);
         // shield.power.setDutyCycle(LEG2_LOW, out.boost_duty.leg2);
         TIMING_APPLY_PROBE(1);
-        if (out.leg1_enable) shield.power.start(LEG1_LOW);
-        else shield.power.stop(LEG1_LOW);
+        if (out.leg1_enable != boost_leg1_on)
+        {
+            if (out.leg1_enable) shield.power.start(LEG1_LOW);
+            else shield.power.stop(LEG1_LOW);
+            boost_leg1_on = out.leg1_enable;
+        }
         // if (out.leg2_enable) shield.power.start(LEG2_LOW);
         // else shield.power.stop(LEG2_LOW);
     }
@@ -908,7 +920,12 @@ static ControlOutputs criticalTickBody(uint32_t critical_start, const Measuremen
     /* Leg 1 burst: skip out.burst_skip of every out.burst_period PWM periods. */
     if (out.boost_pwm_update && out.leg1_enable && out.burst_skip > 0U)
     {
-        shield.power.setBurstMode(out.burst_skip, out.burst_period);
+        if (!burst_running || out.burst_skip != burst_skip_applied || out.burst_period != burst_period_applied)
+        {
+            shield.power.setBurstMode(out.burst_skip, out.burst_period);
+            burst_skip_applied = out.burst_skip;
+            burst_period_applied = out.burst_period;
+        }
         if (!burst_running)
         {
             shield.power.startBurstMode();
