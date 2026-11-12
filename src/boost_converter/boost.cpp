@@ -27,9 +27,10 @@
 
 #include <math.h>
 #include <errno.h>
+#include "fast_code.h"
 
 namespace {
-float32_t clamp(float32_t value, float32_t lower, float32_t upper) {
+FAST_CODE float32_t clamp(float32_t value, float32_t lower, float32_t upper) {
     return value < lower ? lower : (value > upper ? upper : value);
 }
 
@@ -110,7 +111,7 @@ void BoostConverter::reset() {
     _mppt_has_previous_power = false;
 }
 
-float32_t BoostConverter::coldLoop() {
+FAST_CODE float32_t BoostConverter::coldLoop() {
     if (!_initialized || _mode == IDLE) {
         reset();
         return _ILow_ref;
@@ -127,7 +128,7 @@ float32_t BoostConverter::coldLoop() {
     return _ILow_ref;
 }
 
-bool BoostConverter::checkProtection() {
+FAST_CODE bool BoostConverter::checkProtection() {
     if (_tripped) return true;
     if (_protection_enabled &&
         (_VBus > _trip_V || _ILow1 > _trip_A || _ILow2 > _trip_A)) {
@@ -138,7 +139,7 @@ bool BoostConverter::checkProtection() {
     return _tripped;
 }
 
-void BoostConverter::runLeg1() {
+FAST_CODE void BoostConverter::runLeg1() {
     const bool burst = _burst_period > 0U;
     if (burst && _ILow2_ref > 0.0F) _burst_skip = 0U;  // no burst while leg 2 has demand
     if (burst && _protection_enabled && _VBus > _full_burst_V) {
@@ -161,7 +162,7 @@ void BoostConverter::runLeg1() {
     }
 }
 
-BoostDutyCycles BoostConverter::hotLoop() {
+FAST_CODE BoostDutyCycles BoostConverter::hotLoop() {
     if (!_initialized || _mode == IDLE) {
         reset();
         return _duty;
@@ -178,7 +179,7 @@ BoostDutyCycles BoostConverter::hotLoop() {
     return _duty;
 }
 
-void BoostConverter::Mppt() {
+FAST_CODE void BoostConverter::Mppt() {
     if (!_initialized || _mode != MPPT || _VLow <= 0.0F || _tripped) return;
 
     const float32_t power = getPower();
@@ -207,16 +208,16 @@ float32_t BoostConverter::getILow2() const { return _ILow2; }
 float32_t BoostConverter::getILowTotal() const { return _ILow1 + _ILow2; }
 float32_t BoostConverter::getVLow() const { return _VLow; }
 float32_t BoostConverter::getVBus() const { return _VBus; }
-void BoostConverter::setILow1(float32_t ILow1) {
+FAST_CODE void BoostConverter::setILow1(float32_t ILow1) {
     if (isfinite(ILow1)) _ILow1 = ILow1;
 }
-void BoostConverter::setILow2(float32_t ILow2) {
+FAST_CODE void BoostConverter::setILow2(float32_t ILow2) {
     if (isfinite(ILow2)) _ILow2 = ILow2;
 }
-void BoostConverter::setVLow(float32_t VLow) {
+FAST_CODE void BoostConverter::setVLow(float32_t VLow) {
     if (isfinite(VLow) && VLow >= 0.0F) _VLow = VLow;
 }
-void BoostConverter::setVBus(float32_t VBus) {
+FAST_CODE void BoostConverter::setVBus(float32_t VBus) {
     if (isfinite(VBus) && VBus >= 0.0F) _VBus = VBus;
 }
 
@@ -227,8 +228,8 @@ int8_t BoostConverter::setBurst(uint16_t period) {
     return 0;
 }
 bool BoostConverter::isBurstEnabled() const { return _burst_period > 0U; }
-uint16_t BoostConverter::getBurstPeriod() const { return _burst_period; }
-uint16_t BoostConverter::getBurstSkip() const { return _burst_skip; }
+FAST_CODE uint16_t BoostConverter::getBurstPeriod() const { return _burst_period; }
+FAST_CODE uint16_t BoostConverter::getBurstSkip() const { return _burst_skip; }
 bool BoostConverter::isBurstActive() const { return _burst_skip > 0U; }
 
 int8_t BoostConverter::setProtection(float32_t fullBurstV, float32_t tripV, float32_t tripA) {
@@ -242,7 +243,7 @@ int8_t BoostConverter::setProtection(float32_t fullBurstV, float32_t tripV, floa
     _protection_enabled = true;
     return 0;
 }
-bool BoostConverter::isTripped() const { return _tripped; }
+FAST_CODE bool BoostConverter::isTripped() const { return _tripped; }
 
 int8_t BoostConverter::setVoltageGainSchedule(float32_t gain, float32_t vinMin, float32_t vinMax,
                                               float32_t vbusMin, float32_t vbusMax) {
@@ -261,7 +262,7 @@ int8_t BoostConverter::setVoltageGainSchedule(float32_t gain, float32_t vinMin, 
 }
 float32_t BoostConverter::getVoltageKp() const { return _voltage_pid.getKp(); }
 
-void BoostConverter::scheduleVoltageGain() {
+FAST_CODE void BoostConverter::scheduleVoltageGain() {
     if (!_gain_schedule_enabled) return;
     _voltage_pid.setKp(_gain * clamp(_VBus_ref, _vbus_min, _vbus_max) /
                        clamp(_VLow, _vin_min, _vin_max));
@@ -271,10 +272,10 @@ float32_t BoostConverter::getILowRef() const { return _ILow_ref; }
 float32_t BoostConverter::getILow1Ref() const { return _ILow1_ref; }
 float32_t BoostConverter::getILow2Ref() const { return _ILow2_ref; }
 float32_t BoostConverter::getLeg1CurrentLimit() const { return _leg1_current_limit; }
-bool BoostConverter::isLeg1Enabled() const {
+FAST_CODE bool BoostConverter::isLeg1Enabled() const {
     return _initialized && _mode != IDLE && !_tripped;
 }
-bool BoostConverter::isLeg2Enabled() const {
+FAST_CODE bool BoostConverter::isLeg2Enabled() const {
     return _initialized && _mode != IDLE && !_tripped && _ILow2_ref > 0.0F;
 }
 float32_t BoostConverter::getVBusRef() const { return _VBus_ref; }
@@ -285,7 +286,7 @@ void BoostConverter::setStartupCurrentMax(float32_t currentMax) {
     if (_mode == STARTUP) splitCurrentReference();
 }
 float32_t BoostConverter::getStartupCurrentMax() const { return _startup_current_max; }
-void BoostConverter::setILowRef(float32_t ILowRef) {
+FAST_CODE void BoostConverter::setILowRef(float32_t ILowRef) {
     if (isfinite(ILowRef)) {
         _ILow_ref = clamp(ILowRef, _current_ref_min, _current_ref_max);
         if (_mode == MPPT) {
@@ -296,7 +297,7 @@ void BoostConverter::setILowRef(float32_t ILowRef) {
         splitCurrentReference();
     }
 }
-void BoostConverter::setVBusRef(float32_t VBusRef) {
+FAST_CODE void BoostConverter::setVBusRef(float32_t VBusRef) {
     if (isfinite(VBusRef) && VBusRef >= 0.0F) _VBus_ref = VBusRef;
 }
 float32_t BoostConverter::getDutyLeg1() const { return _duty.leg1; }
@@ -319,7 +320,7 @@ void BoostConverter::setMode(boost_mode mode) {
     splitCurrentReference();
 }
 
-void BoostConverter::splitCurrentReference() {
+FAST_CODE void BoostConverter::splitCurrentReference() {
     if (_mode == STARTUP) {
         _ILow_ref = clamp(_ILow_ref, 0.0F, _startup_current_max);
         _ILow1_ref = _ILow_ref;
@@ -336,7 +337,7 @@ void BoostConverter::splitCurrentReference() {
     }
 }
 
-float32_t BoostConverter::calculateVoltageCurrent(float32_t reference, float32_t measurement) {
+FAST_CODE float32_t BoostConverter::calculateVoltageCurrent(float32_t reference, float32_t measurement) {
     const float32_t upper = _mode == STARTUP ? _startup_current_max : _current_ref_max;
     const float32_t lower = clamp(_current_ref_min, 0.0F, upper);
     if (lower == upper) {

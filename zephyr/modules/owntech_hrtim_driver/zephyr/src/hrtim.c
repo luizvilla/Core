@@ -33,6 +33,7 @@
 #include "assert.h"
 #include "hrtim.h"
 #include <errno.h>
+#include "owntech_fast_code.h"
 
 
 /** @brief Defines the HRTIM IRQ Number */
@@ -373,7 +374,7 @@ static inline uint32_t _period_ckpsc(uint32_t freq, timer_hrtim_t *tu)
  * - Executes the user-defined callback if it is not `NULL`.
  *
  */
-void _hrtim_callback()
+OWNTECH_FAST_CODE void _hrtim_callback()
 {
     if (LL_HRTIM_GetSyncInSrc(HRTIM1) == LL_HRTIM_SYNCIN_SRC_NONE)
     {
@@ -820,7 +821,7 @@ void hrtim_tu_gpio_init(hrtim_tu_number_t tu_number)
                            tu_channel[tu_number]->pwm_conf.period);
 }
 
-void hrtim_out_dis(hrtim_tu_number_t tu_number)
+OWNTECH_FAST_CODE void hrtim_out_dis(hrtim_tu_number_t tu_number)
 {
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
@@ -837,7 +838,7 @@ void hrtim_out_dis_single(hrtim_output_units_t PWM_OUT)
     LL_HRTIM_DisableOutput(HRTIM1, PWM_OUT);
 }
 
-void hrtim_out_en_single(hrtim_output_units_t PWM_OUT)
+OWNTECH_FAST_CODE void hrtim_out_en_single(hrtim_output_units_t PWM_OUT)
 {
     LL_HRTIM_EnableOutput(HRTIM1, PWM_OUT);
 }
@@ -1147,7 +1148,7 @@ void hrtim_dt_set(hrtim_tu_number_t tu_number, uint16_t rise_ns, uint16_t fall_n
                                rise_dt);
 }
 
-void hrtim_duty_cycle_set(hrtim_tu_number_t tu_number, uint16_t value)
+OWNTECH_FAST_CODE void hrtim_duty_cycle_set(hrtim_tu_number_t tu_number, uint16_t value)
 {
     timer_hrtim_t *tu = tu_channel[tu_number];
     uint16_t minimum = tu->pwm_conf.duty_min;
@@ -1172,7 +1173,7 @@ void hrtim_duty_cycle_set(hrtim_tu_number_t tu_number, uint16_t value)
     }
 }
 
-int hrtim_duty_cycle_pair_set(hrtim_tu_number_t tu_a, uint16_t value_a,
+OWNTECH_FAST_CODE int hrtim_duty_cycle_pair_set(hrtim_tu_number_t tu_a, uint16_t value_a,
                             hrtim_tu_number_t tu_b, uint16_t value_b)
 {
     /* Validate both indices before accessing the timer configuration array. */
@@ -1460,7 +1461,7 @@ void hrtim_burst_mode_init(hrtim_tu_number_t tu_number){
     LL_HRTIM_BM_Enable(HRTIM1);
 }
 
-void hrtim_burst_set(int bm_cmp, int bm_per){
+OWNTECH_FAST_CODE void hrtim_burst_set(int bm_cmp, int bm_per){
     /* Set the number of period inactive in burst mode*/
     LL_HRTIM_BM_SetCompare(HRTIM1, bm_cmp - 1 );
     /* Set the number of period of the burst pattern
@@ -1468,13 +1469,13 @@ void hrtim_burst_set(int bm_cmp, int bm_per){
     LL_HRTIM_BM_SetPeriod(HRTIM1, bm_per - 1);
 }
 
-void hrtim_burst_start(void){
+OWNTECH_FAST_CODE void hrtim_burst_start(void){
     LL_HRTIM_BM_EnablePreload(HRTIM1);
     /* Software trigger starting burst mode*/
     LL_HRTIM_BM_Start(HRTIM1);
 }
 
-void hrtim_burst_stop(void){
+OWNTECH_FAST_CODE void hrtim_burst_stop(void){
     /* Software trigger stopping burst mode*/
     LL_HRTIM_BM_Stop(HRTIM1);
     LL_HRTIM_BM_DisablePreload(HRTIM1);
@@ -1811,7 +1812,7 @@ void hrtim_change_frequency(uint32_t new_frequency)
     }
 }
 
-void hrtim_output_hot_swap(hrtim_tu_number_t tu_number){
+OWNTECH_FAST_CODE void hrtim_output_hot_swap(hrtim_tu_number_t tu_number){
     
     hrtim_switch_convention_t convention = tu_channel[tu_number]->switch_conv.convention;
     uint8_t current_swap_state = tu_channel[tu_number]->pwm_conf.duty_swap;

@@ -26,6 +26,7 @@
 
 
 #include "GpioHAL.h"
+#include "owntech_fast_code.h"
 
 const struct device* const GPIO_A = DEVICE_DT_GET(DT_NODELABEL(gpioa));
 const struct device* const GPIO_B = DEVICE_DT_GET(DT_NODELABEL(gpiob));
@@ -47,7 +48,7 @@ void GpioHAL::configurePin(uint8_t pin, gpio_flags_t flags)
 	}
 }
 
-void GpioHAL::setPin(uint8_t pin)
+OWNTECH_FAST_CODE void GpioHAL::setPin(uint8_t pin)
 {
 	gpio_pin_t pin_number = this->getPinNumber(pin);
 	const struct device* port = this->getGpioDevice(pin);
@@ -57,7 +58,7 @@ void GpioHAL::setPin(uint8_t pin)
 	}
 }
 
-void GpioHAL::resetPin(uint8_t pin)
+OWNTECH_FAST_CODE void GpioHAL::resetPin(uint8_t pin)
 {
 	gpio_pin_t pin_number = this->getPinNumber(pin);
 	const struct device* port = this->getGpioDevice(pin);

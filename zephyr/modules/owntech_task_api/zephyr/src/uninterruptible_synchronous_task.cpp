@@ -35,6 +35,7 @@
 #ifdef CONFIG_OWNTECH_SAFETY_API
 #include "safety_internal.h"
 #include "SafetyAPI.h"
+#include "owntech_fast_code.h"
 
 /* Size of stack area used by error thread */
 #define STACKSIZE 512
@@ -113,7 +114,7 @@ volatile uint32_t timing_proxy_cycles[3];
 #define TIMING_PROXY_PROBE(i) ((void)0)
 #endif
 
-void user_task_proxy()
+OWNTECH_FAST_CODE void user_task_proxy()
 {
 	TIMING_PROXY_PROBE(0);
 #ifdef CONFIG_OWNTECH_SAFETY_API

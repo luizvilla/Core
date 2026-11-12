@@ -2,6 +2,7 @@
 #include "gridObserver.h"
 
 #include <math.h>
+#include "fast_code.h"
 
 bool GridObserver::init(const GridObserverConfig &config) {
     *this = GridObserver{};
@@ -33,7 +34,7 @@ bool GridObserver::init(const GridObserverConfig &config) {
     return true;
 }
 
-bool GridObserver::update(float voltage_alpha, float voltage_beta,
+FAST_CODE bool GridObserver::update(float voltage_alpha, float voltage_beta,
                           float angular_frequency, bool measurements_valid) {
     if (!_configured) return false;
     constexpr float inverse_sqrt_two = 0.7071067811865475F;
@@ -43,7 +44,7 @@ bool GridObserver::update(float voltage_alpha, float voltage_beta,
                            angular_frequency * inverse_two_pi, measurements_valid && finite);
 }
 
-bool GridObserver::updateEstimates(float voltage_rms, float frequency_hz, bool measurements_valid) {
+FAST_CODE bool GridObserver::updateEstimates(float voltage_rms, float frequency_hz, bool measurements_valid) {
     if (!_configured) return false;
     _voltage_rms = voltage_rms;
     _frequency_hz = frequency_hz;

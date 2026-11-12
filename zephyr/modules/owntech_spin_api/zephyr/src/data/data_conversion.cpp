@@ -35,6 +35,7 @@
 /* Current file header */
 #include "data_conversion.h"
 #include "nvs_storage.h"
+#include "owntech_fast_code.h"
 
 
 /**
@@ -126,7 +127,7 @@ void data_conversion_init()
 	}
 }
 
-float32_t data_conversion_convert_raw_value(uint8_t adc_num,
+OWNTECH_FAST_CODE float32_t data_conversion_convert_raw_value(uint8_t adc_num,
 											uint8_t channel_num,
 											uint16_t raw_value)
 {
@@ -228,7 +229,7 @@ void data_conversion_set_conversion_parameters_therm(
 	conversion_parameters[adc_index][channel_index][3] = t0;
 }
 
-conversion_type_t data_conversion_get_conversion_type(
+OWNTECH_FAST_CODE conversion_type_t data_conversion_get_conversion_type(
 					uint8_t adc_num,
 					uint8_t channel_num)
 {
@@ -238,7 +239,7 @@ conversion_type_t data_conversion_get_conversion_type(
 	return conversion_types[adc_index][channel_index];
 }
 
-float32_t data_conversion_get_parameter(
+OWNTECH_FAST_CODE float32_t data_conversion_get_parameter(
 			uint8_t adc_num,
 			uint8_t channel_num,
 			uint8_t parameter_num)

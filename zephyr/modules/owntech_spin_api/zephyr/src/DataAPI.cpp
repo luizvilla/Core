@@ -38,6 +38,7 @@
 
 /* Current module private functions */
 #include "./data/data_dispatch.h"
+#include "owntech_fast_code.h"
 
 /**
  *  Static class members
@@ -609,7 +610,7 @@ float32_t* DataAPI::getChannelValues(adc_t adc_number,
 	return DataAPI::converted_values_buffer[adc_index][channel_index];
 }
 
-float32_t DataAPI::peekChannel(adc_t adc_num, uint8_t channel_num)
+OWNTECH_FAST_CODE float32_t DataAPI::peekChannel(adc_t adc_num, uint8_t channel_num)
 {
 	if (DataAPI::is_started == false)
 	{
@@ -632,7 +633,7 @@ float32_t DataAPI::peekChannel(adc_t adc_num, uint8_t channel_num)
 	return data_conversion_convert_raw_value(adc_num, channel_num, raw_value);
 }
 
-float32_t DataAPI::getChannelLatest(adc_t adc_num,
+OWNTECH_FAST_CODE float32_t DataAPI::getChannelLatest(adc_t adc_num,
 									uint8_t channel_num,
 									uint8_t* dataValid)
 {
@@ -947,7 +948,7 @@ void DataAPI::setDispatchMethod(DispatchMethod_t dispatch_method)
 	DataAPI::dispatch_method = dispatch_method;
 }
 
-void DataAPI::doFullDispatch()
+OWNTECH_FAST_CODE void DataAPI::doFullDispatch()
 {
 	data_dispatch_do_full_dispatch();
 }

@@ -36,6 +36,7 @@
 
 /* Other modules public API */
 #include "SpinAPI.h"
+#include "owntech_fast_code.h"
 
 /**
  *  Device-tree related macros
@@ -217,7 +218,7 @@ float32_t* SensorsAPI::getValues(sensor_t sensor_name,
 									 number_of_values_acquired);
 }
 
-float32_t SensorsAPI::peekLatestValue(sensor_t sensor_name)
+OWNTECH_FAST_CODE float32_t SensorsAPI::peekLatestValue(sensor_t sensor_name)
 {
 	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
 
@@ -225,7 +226,7 @@ float32_t SensorsAPI::peekLatestValue(sensor_t sensor_name)
 								sensor_info.channel_num);
 }
 
-float32_t SensorsAPI::getLatestValue(sensor_t sensor_name, uint8_t* dataValid)
+OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValue(sensor_t sensor_name, uint8_t* dataValid)
 {
 	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
 

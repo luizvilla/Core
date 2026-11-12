@@ -28,6 +28,7 @@
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,boot-mode = &retention0;
+		zephyr,itcm = &ccm_code;
 		thingset,can = &fdcan2;
 	};
 
@@ -49,6 +50,18 @@
 	aliases {
 		led0 = &led;
 		sw0 = &btn;
+	};
+
+	/*
+	 * CCM SRAM through its I-bus alias: per-period code runs from here at 0 wait states
+	 * (OWNTECH_FAST_CODE, copied from flash at boot). The CCM's S-bus alias is 0x20018000-0x2001FFFF;
+	 * this area stops 1 KB below its end, so the retained boot-mode byte at 0x2001FFFF (read by
+	 * MCUboot) stays outside it.
+	 */
+	ccm_code: memory@10000000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x10000000 0x7C00>;
+		zephyr,memory-region = "ITCM";
 	};
 
 	sram@2001FFFF {
@@ -153,9 +166,10 @@
 	};
 };
 
-/* Reduce SRAM0 usage by 1 byte to account for retained memory */
+/* SRAM0 = SRAM1 + SRAM2 (96 KB). The CCM SRAM (0x20018000, 32 KB) is left out: it holds the fast
+ * code (ccm_code, I-bus alias) and the retained boot-mode byte (0x2001FFFF). */
 &sram0 {
-	reg = <0x20000000 0x1FFFF>;
+	reg = <0x20000000 0x18000>;
 };
 
 /*****************/

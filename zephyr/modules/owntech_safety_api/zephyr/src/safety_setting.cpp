@@ -40,6 +40,7 @@
 
 /* Zephyr */
 #include "zephyr/kernel.h"
+#include "owntech_fast_code.h"
 
 /* Defines */
 
@@ -111,7 +112,7 @@ static bool safety_enable = true;
  *        the low-side switch is closed. Can be used to
  *        brake DC motor for example.
  */
-void _short_circuit(void)
+OWNTECH_FAST_CODE void _short_circuit(void)
 {
     if(DT_LEG_NUMBER == 0) return;
 
@@ -130,7 +131,7 @@ void _short_circuit(void)
  *        i.e. the high-side switch is opened and
  *        the low-side switch is opened.
  */
-void _open_circuit(void)
+OWNTECH_FAST_CODE void _open_circuit(void)
 {
     if(DT_LEG_NUMBER == 0) return;
 
@@ -291,7 +292,7 @@ bool safety_get_sensor_error(sensor_t safety_sensor)
 /**
  * @brief Monitors measures that needs to be watched for safety purpose
  */
-int8_t safety_watch()
+OWNTECH_FAST_CODE int8_t safety_watch()
 {
     uint8_t status = 0;
 
@@ -356,7 +357,7 @@ void safety_disable_task()
  *        However, to avoid false triggering from transient phenomenon
  *        we wait for a delay with safety_alert_counter.
  */
-int8_t safety_task()
+OWNTECH_FAST_CODE int8_t safety_task()
 {
     int8_t status = 0;
 

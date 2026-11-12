@@ -29,6 +29,7 @@
 #include "timing/timing_probe.h"  /* L0-TIM probes: empty unless TIMING_HARNESS (ADR 0005) */
 
 #include <math.h>
+#include "fast_code.h"
 
 int8_t controlInit(ControlState &state)
 {
@@ -61,7 +62,7 @@ int8_t controlInit(ControlState &state)
     return 0;
 }
 
-ControlOutputs controlStep(ControlState &state, const Measurements &meas,
+FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &meas,
                            const OperatorCommands &cmd)
 {
     TIMING_PROBE(0);

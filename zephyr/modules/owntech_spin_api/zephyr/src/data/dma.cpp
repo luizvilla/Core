@@ -36,6 +36,7 @@
 
 /* Current module private functions */
 #include "data_dispatch.h"
+#include "owntech_fast_code.h"
 
 /**
  *  DT definition
@@ -192,7 +193,7 @@ void dma_configure_adc_acquisition(uint8_t adc_number,
 	dma_start(dma1, user_data[dma_index].channel);
 }
 
-uint32_t dma_get_retrieved_data_count(uint8_t adc_number)
+OWNTECH_FAST_CODE uint32_t dma_get_retrieved_data_count(uint8_t adc_number)
 {
 	/**
 	 * Permanent variable

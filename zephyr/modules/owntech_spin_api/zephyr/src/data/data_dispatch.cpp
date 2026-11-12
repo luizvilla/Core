@@ -40,6 +40,7 @@
 
 /* Current file header */
 #include "data_dispatch.h"
+#include "owntech_fast_code.h"
 
 /**
  *  Local variables
@@ -272,7 +273,7 @@ void data_dispatch_init(dispatch_t dispatch_method, uint32_t repetitions)
 	}
 }
 
-void data_dispatch_do_dispatch(uint8_t adc_num)
+OWNTECH_FAST_CODE void data_dispatch_do_dispatch(uint8_t adc_num)
 {
 	uint8_t adc_index = adc_num - 1;
 
@@ -350,7 +351,7 @@ void data_dispatch_do_dispatch(uint8_t adc_num)
 	}
 }
 
-void data_dispatch_do_full_dispatch()
+OWNTECH_FAST_CODE void data_dispatch_do_full_dispatch()
 {
 	for (uint8_t adc_num = 1 ; adc_num <= ADC_COUNT ; adc_num++)
 	{
@@ -362,7 +363,7 @@ void data_dispatch_do_full_dispatch()
  *  Accessors
  */
 
-uint16_t* data_dispatch_get_acquired_values(uint8_t adc_number,
+OWNTECH_FAST_CODE uint16_t* data_dispatch_get_acquired_values(uint8_t adc_number,
 											uint8_t channel_rank,
 											uint32_t& number_of_values_acquired)
 {
@@ -399,7 +400,7 @@ uint16_t* data_dispatch_get_acquired_values(uint8_t adc_number,
 	return active_buffer;
 }
 
-uint16_t data_dispatch_peek_acquired_value(uint8_t adc_number,
+OWNTECH_FAST_CODE uint16_t data_dispatch_peek_acquired_value(uint8_t adc_number,
 										   uint8_t channel_rank)
 {
 	uint8_t adc_index = adc_number-1;

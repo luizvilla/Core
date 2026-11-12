@@ -30,6 +30,7 @@
 #include "SpinAPI.h"
 #include <errno.h>
 #include <math.h>
+#include "owntech_fast_code.h"
 
 
 hrtim_tu_number_t PowerAPI::spinNumberToTu(uint16_t spin_number)
@@ -78,17 +79,17 @@ void PowerAPI::initBurstMode(leg_t leg)
     }
 }
 
-void PowerAPI::setBurstMode(int bm_cmp, int bm_per)
+OWNTECH_FAST_CODE void PowerAPI::setBurstMode(int bm_cmp, int bm_per)
 {
     spin.pwm.setBurstMode(bm_cmp, bm_per);
 }
 
-void PowerAPI::startBurstMode()
+OWNTECH_FAST_CODE void PowerAPI::startBurstMode()
 {
     spin.pwm.startBurstMode();
 }
 
-void PowerAPI::stopBurstMode()
+OWNTECH_FAST_CODE void PowerAPI::stopBurstMode()
 {
     spin.pwm.stopBurstMode();
 }
@@ -322,7 +323,7 @@ void PowerAPI::alignOwnFrequencyLegs()
 }
 
 
-void PowerAPI::setDutyCycle(leg_t leg, float32_t duty_value)
+OWNTECH_FAST_CODE void PowerAPI::setDutyCycle(leg_t leg, float32_t duty_value)
 {
     int8_t startIndex = 0;
     int8_t endIndex = 0;
@@ -347,7 +348,7 @@ void PowerAPI::setDutyCycle(leg_t leg, float32_t duty_value)
     }
 }
 
-void PowerAPI::setDutyCycleRaw(leg_t leg, uint16_t duty_value)
+OWNTECH_FAST_CODE void PowerAPI::setDutyCycleRaw(leg_t leg, uint16_t duty_value)
 {
     hrtim_tu_number_t leg_tu;
     uint16_t duty_cycle_max_raw;
@@ -392,7 +393,7 @@ void PowerAPI::setDutyCycleRaw(leg_t leg, uint16_t duty_value)
     }
 }
 
-void PowerAPI::start(leg_t leg)
+OWNTECH_FAST_CODE void PowerAPI::start(leg_t leg)
 {
     int8_t startIndex = 0;
     int8_t endIndex = 0;
@@ -434,7 +435,7 @@ void PowerAPI::start(leg_t leg)
     }
 }
 
-void PowerAPI::stop(leg_t leg)
+OWNTECH_FAST_CODE void PowerAPI::stop(leg_t leg)
 {
     int8_t startIndex = 0;
     int8_t endIndex = 0;
@@ -1212,7 +1213,7 @@ int PowerAPI::initInverter(leg_t leg_a, leg_t leg_b, bool bipolar)
     return 0;
 }
 
-int PowerAPI::setInverterDutyCycle(leg_t leg_a, float32_t duty)
+OWNTECH_FAST_CODE int PowerAPI::setInverterDutyCycle(leg_t leg_a, float32_t duty)
 {
     /* Reject ALL and invalid indices before looking up the pair. */
     if (static_cast<unsigned>(leg_a) >= dt_leg_count)

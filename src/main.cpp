@@ -48,6 +48,7 @@
 #include <stm32_ll_utils.h>
 #endif
 #endif
+#include "fast_code.h"
 
 /* Scope snapshot and acquisition of one sampled critical tick. */
 static void scopeSample(ControlState &state, const ControlOutputs &out);
@@ -238,7 +239,7 @@ static void applyBenchCalibration()
 /* Menu 'f': trigger the capture now, whatever the stage (e.g. a synchronization that never comes). */
 static volatile bool scope_force_trigger = false;
 
-bool scope_trigger()
+FAST_CODE bool scope_trigger()
 {
     if (scope_force_trigger)
     {
@@ -715,7 +716,7 @@ void loop_application_task()
 /**
  * Scope snapshot and acquisition of one sampled critical tick (also timed by the L0-TIM-01 harness).
  */
-static void scopeSample(ControlState &state, const ControlOutputs &out)
+static FAST_CODE void scopeSample(ControlState &state, const ControlOutputs &out)
 {
     const dqo_t grid_voltage_dq = state.inverter.getVdq();
     {
@@ -767,7 +768,7 @@ static void timingStageStart() { scope.start(); }
  *  - Boost leg 1 skips PWM periods with the burst generator when the controller asks
  *  - It updates the PWM signals
  */
-void loop_critical_task()
+FAST_CODE void loop_critical_task()
 {
     criticalTaskTick(nullptr, nullptr);
 }
@@ -776,7 +777,7 @@ void loop_critical_task()
  * The critical task's tick: its load bookkeeping (start gaps, lost ticks), then the tick body. Called by
  * loop_critical_task() and, in env TIMING, by the L0-TIM-03 harness with synthetic inputs.
  */
-static ControlOutputs criticalTaskTick(const Measurements *meas_in, const OperatorCommands *cmd_in)
+static FAST_CODE ControlOutputs criticalTaskTick(const Measurements *meas_in, const OperatorCommands *cmd_in)
 {
     const uint32_t critical_start = cpuCycles();
     if (critical_calls != 0U)
@@ -796,7 +797,7 @@ static ControlOutputs criticalTaskTick(const Measurements *meas_in, const Operat
  * loop_critical_task() and, in env TIMING, by the L0-TIM-02 harness with synthetic inputs (meas_in, cmd_in,
  * applied after the real sensor reads so their cost stays in the tick).
  */
-static ControlOutputs criticalTickBody(uint32_t critical_start, const Measurements *meas_in,
+static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const Measurements *meas_in,
                                        const OperatorCommands *cmd_in)
 {
     TIMING_TICK_PROBE(0);

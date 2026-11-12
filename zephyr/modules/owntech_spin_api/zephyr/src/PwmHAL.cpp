@@ -30,6 +30,7 @@
 #include "PwmHAL.h"
 /* PWM management layer by inverter leg interface */
 #include "hrtim.h"
+#include "owntech_fast_code.h"
 
 void PwmHAL::initUnit(hrtim_tu_number_t pwmX)
 {
@@ -41,12 +42,12 @@ void PwmHAL::startDualOutput(hrtim_tu_number_t pwmX)
 	hrtim_out_en(pwmX);
 }
 
-void PwmHAL::stopDualOutput(hrtim_tu_number_t pwmX)
+OWNTECH_FAST_CODE void PwmHAL::stopDualOutput(hrtim_tu_number_t pwmX)
 {
 	hrtim_out_dis(pwmX);
 }
 
-void PwmHAL::startSingleOutput(hrtim_tu_number_t tu,
+OWNTECH_FAST_CODE void PwmHAL::startSingleOutput(hrtim_tu_number_t tu,
 							   hrtim_output_number_t output)
 {
 	if (output == TIMING_OUTPUT1)
@@ -210,7 +211,7 @@ void PwmHAL::setDeadTime(hrtim_tu_number_t pwmX,
 	hrtim_dt_set(pwmX, rise_ns, fall_ns);
 }
 
-void PwmHAL::setDutyCycle(hrtim_tu_number_t pwmX, float32_t duty_cycle)
+OWNTECH_FAST_CODE void PwmHAL::setDutyCycle(hrtim_tu_number_t pwmX, float32_t duty_cycle)
 {
 	uint16_t period = tu_channel[pwmX]->pwm_conf.period;
 	uint16_t value = duty_cycle * period;
@@ -219,7 +220,7 @@ void PwmHAL::setDutyCycle(hrtim_tu_number_t pwmX, float32_t duty_cycle)
 
 }
 
-void PwmHAL::setDutyCycleRaw(hrtim_tu_number_t pwmX, uint16_t duty_cycle)
+OWNTECH_FAST_CODE void PwmHAL::setDutyCycleRaw(hrtim_tu_number_t pwmX, uint16_t duty_cycle)
 {
     /* The shared driver owns hardware limits and endpoint transitions. */
     hrtim_duty_cycle_set(pwmX, duty_cycle);
@@ -527,17 +528,17 @@ void PwmHAL::initBurstMode(hrtim_tu_number_t pwmX)
 	hrtim_burst_mode_init(pwmX);
 }
 
-void PwmHAL::setBurstMode(int bm_cmp, int bm_per)
+OWNTECH_FAST_CODE void PwmHAL::setBurstMode(int bm_cmp, int bm_per)
 {
 	hrtim_burst_set(bm_cmp, bm_per);
 }
 
-void PwmHAL::startBurstMode()
+OWNTECH_FAST_CODE void PwmHAL::startBurstMode()
 {
 	hrtim_burst_start();
 }
 
-void PwmHAL::stopBurstMode()
+OWNTECH_FAST_CODE void PwmHAL::stopBurstMode()
 {
 	hrtim_burst_stop();
 }
