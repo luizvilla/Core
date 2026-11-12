@@ -28,6 +28,7 @@
 #include "timing/timing_probe.h"
 #include "timing/timing_report.h"
 #include "inverterTiming.h"
+#include "owntech_timing_probe.h"  /* ADC data path probes (dispatch, latest-value reads) */
 
 /* Task API proxy probes (owntech_task_api uninterruptible_synchronous_task.cpp, TIMING builds only). */
 extern volatile uint32_t timing_proxy_cycles[3];
@@ -120,6 +121,14 @@ enum Section : uint8_t {
     SEC_T3_AP_BRIDGE_EN,    ///< Bridge staging and start/stop of both high legs.
     SEC_T3_AP_PWM_ACK,      ///< inverter.setPwmEnabled().
     SEC_T3_AP_RELAY,        ///< Relay command and contact model (GPIO 22 on change).
+    /* L0-TIM-03: the ADC data path (owntech_timing_probe.h). */
+    SEC_T3_DISP_ADC1,       ///< data_dispatch_do_dispatch(1): ADC1 samples copied to the channel buffers.
+    SEC_T3_DISP_ADC2,       ///< data_dispatch_do_dispatch(2).
+    SEC_T3_N_ADC1,          ///< Samples dispatched for ADC1 (a count, not cycles).
+    SEC_T3_N_ADC2,          ///< Samples dispatched for ADC2 (a count, not cycles).
+    SEC_T3_RD_SENSOR,       ///< The tick's getLatestValue() calls: sensor lookup and DataAPI checks (sum).
+    SEC_T3_RD_BUFFER,       ///< Same calls: buffer layer, get_acquired_values or peek (sum).
+    SEC_T3_RD_CONVERT,      ///< Same calls: raw-to-physical conversion (sum).
     SEC_COUNT
 };
 const char *const section_names[SEC_COUNT] = {
@@ -132,7 +141,8 @@ const char *const section_names[SEC_COUNT] = {
     "3:boost_cold", "3:boost_hot", "3:inv_stage", "3:inv_duty", "3:observer", "3:outputs",
     "3:duty_pll", "3:duty_sogi", "3:duty_park", "3:duty_syncwin", "3:duty_mode_ff", "3:duty_current_pi", "3:duty_output",
     "3:gap", "3:harness", "3:safety", "3:dispatch",
-    "3:ap_boost_duty", "3:ap_boost_en", "3:ap_burst", "3:ap_bridge_duty", "3:ap_bridge_en", "3:ap_pwm_ack", "3:ap_relay"
+    "3:ap_boost_duty", "3:ap_boost_en", "3:ap_burst", "3:ap_bridge_duty", "3:ap_bridge_en", "3:ap_pwm_ack", "3:ap_relay",
+    "3:disp_adc1", "3:disp_adc2", "3:n_adc1", "3:n_adc2", "3:rd_sensor", "3:rd_buffer", "3:rd_convert"
 };
 static_assert(SEC_T3_AP_RELAY - SEC_T3_AP_BOOST_DUTY + 2U == timing::apply_probe_count, "one row per apply interval");
 static_assert(SEC_T2_OUTPUTS - SEC_T2_BOOST_COLD + 2U == timing::probe_count, "TIM-02 controlStep sections");
@@ -618,6 +628,7 @@ void tim03Tick()
     cmd.inverter_stage = phase.stage;
     cmd.inject_current = app::inject_current_max;
     const uint32_t seq_before = inv_timing_seq;
+    for (uint8_t i = 0U; i < 3U; ++i) timing_read_cycles[i] = 0U;  // the tick's reads add their layers
     const uint32_t c0 = cycles();
     (void)t2.hooks.task_tick(meas, cmd);
     const uint32_t c1 = cycles();
@@ -628,6 +639,11 @@ void tim03Tick()
         recordRow(base + SEC_T3_AP_BOOST_DUTY + i, timing::apply_cycles[i + 1U] - timing::apply_cycles[i], t3.tick);
     recordRow(base + SEC_T3_SAFETY, timing_proxy_cycles[1] - timing_proxy_cycles[0], t3.tick);
     recordRow(base + SEC_T3_DISPATCH, timing_proxy_cycles[2] - timing_proxy_cycles[1], t3.tick);
+    recordRow(base + SEC_T3_DISP_ADC1, timing_dispatch_cycles[0], t3.tick);
+    recordRow(base + SEC_T3_DISP_ADC2, timing_dispatch_cycles[1], t3.tick);
+    recordRow(base + SEC_T3_N_ADC1, timing_dispatch_samples[0], t3.tick);
+    recordRow(base + SEC_T3_N_ADC2, timing_dispatch_samples[1], t3.tick);
+    for (uint8_t i = 0U; i < 3U; ++i) recordRow(base + SEC_T3_RD_SENSOR + i, timing_read_cycles[i], t3.tick);
     recordRow(base + SEC_T3_HARNESS, (cycles() - start) - (c1 - c0), t3.tick);
     r.buckets[bucket].tim03_vsi_seen_mask = r.buckets[bucket].tim03_vsi_seen_mask | (1UL << vsi);
     r.buckets[bucket].tim03_ticks = r.buckets[bucket].tim03_ticks + 1U;

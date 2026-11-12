@@ -37,6 +37,7 @@
 /* Other modules public API */
 #include "SpinAPI.h"
 #include "owntech_fast_code.h"
+#include "owntech_timing_probe.h"
 
 /**
  *  Device-tree related macros
@@ -228,6 +229,7 @@ OWNTECH_FAST_CODE float32_t SensorsAPI::peekLatestValue(sensor_t sensor_name)
 
 OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValue(sensor_t sensor_name, uint8_t* dataValid)
 {
+	OT_TIMING_READ_START();
 	sensor_info_t sensor_info = getEnabledSensorInfo(sensor_name);
 
 	return DataAPI::getChannelLatest(sensor_info.adc_num,

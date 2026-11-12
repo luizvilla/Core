@@ -39,6 +39,12 @@
 /* Current module private functions */
 #include "./data/data_dispatch.h"
 #include "owntech_fast_code.h"
+#include "owntech_timing_probe.h"
+
+#ifdef TIMING_HARNESS
+volatile uint32_t timing_read_t0;
+volatile uint32_t timing_read_cycles[3];
+#endif
 
 /**
  *  Static class members
@@ -657,9 +663,11 @@ OWNTECH_FAST_CODE float32_t DataAPI::getChannelLatest(adc_t adc_num,
 	}
 
 	uint32_t data_count;
+	OT_TIMING_MARK(t1);
 	uint16_t* buffer = data_dispatch_get_acquired_values(adc_num,
 														 channel_rank,
 														 data_count);
+	OT_TIMING_MARK(t2);
 
 	if (data_count > 0)
 	{
@@ -668,14 +676,17 @@ OWNTECH_FAST_CODE float32_t DataAPI::getChannelLatest(adc_t adc_num,
 		{
 			*dataValid = DATA_IS_OK;
 		}
-		return data_conversion_convert_raw_value(adc_num,
-												 channel_num,
-												 raw_value);
+		const float32_t value = data_conversion_convert_raw_value(adc_num,
+																  channel_num,
+																  raw_value);
+		OT_TIMING_READ_END(t1, t2);
+		return value;
 	}
 	else
 	{
 		uint16_t raw_value = data_dispatch_peek_acquired_value(adc_num,
 															   channel_rank);
+		OT_TIMING_MARK(t2_peek);
 
 		float32_t peekValue;
 		if (raw_value != PEEK_NO_VALUE)
@@ -700,6 +711,7 @@ OWNTECH_FAST_CODE float32_t DataAPI::getChannelLatest(adc_t adc_num,
 				*dataValid = DATA_IS_MISSING;
 			}
 		}
+		OT_TIMING_READ_END(t1, t2_peek);
 		return peekValue;
 	}
 }

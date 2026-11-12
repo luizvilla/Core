@@ -424,6 +424,17 @@ TIMING_SHORT.update({'ap_boost_duty': 'b.duty', 'ap_boost_en': 'b.en', 'ap_burst
                      'ap_bridge_en': 'br.en', 'ap_pwm_ack': 'ack', 'ap_relay': 'relay'})
 TIMING_SHORT.update({'tick_sensors': 'sensors', 'tick_apply': 'writes', 'tick_scope': 'scope', '_rest': 'rest',
                      'tick_control': 'controlStep'})
+# L0-TIM-03 ADC data path (owntech_timing_probe.h): the dispatch per ADC and the latest-value reads per layer. Derived
+# segments (a measured total minus its probed parts) keep each bar equal to its measured total.
+TASKAPI_ADC_SECS = [('3:safety', 'safety check'), ('3:disp_adc1', 'dispatch ADC1'), ('3:disp_adc2', 'dispatch ADC2'),
+                    ('3:dispatch_rest', 'dispatch, other ADCs + loop')]
+SENSOR_LAYER_SECS = [('3:rd_sensor', 'lookup + checks'), ('3:rd_buffer', 'buffer layer'), ('3:rd_convert', 'conversion'),
+                     ('3:sensors_rest', 'around the reads')]
+DERIVED = {'3:dispatch_rest': ('3:dispatch', ('3:disp_adc1', '3:disp_adc2')),
+           '3:sensors_rest': ('3:tick_sensors', ('3:rd_sensor', '3:rd_buffer', '3:rd_convert'))}
+COUNT_ROWS = ('3:n_adc1', '3:n_adc2')  # sample counts, not cycles
+TIMING_SHORT.update({'disp_adc1': 'ADC1', 'disp_adc2': 'ADC2', 'dispatch_rest': 'rest', 'rd_sensor': 'lookup',
+                     'rd_buffer': 'buffer', 'rd_convert': 'conv', 'sensors_rest': 'rest'})
 
 
 def series_groups(rows, bucket, kind):
@@ -435,8 +446,9 @@ def series_groups(rows, bucket, kind):
         return base + [REST_GROUP]
     p = '3:' if kind == 'tim03' else ''   # tick-part keys: 'tick_*' (TIM-02) or '3:tick_*' (TIM-03)
     sp = '3:' if kind == 'tim03' else '2:'
-    out = [TASKAPI_GROUP] if kind == 'tim03' else []
-    out.append((SENSOR_GROUP[0], SENSOR_GROUP[1], [(p + 'tick_sensors', 'sensor reads')]))
+    adc = kind == 'tim03' and f'{bucket}/3:disp_adc1' in rows  # a run with the ADC path probes
+    out = ([(TASKAPI_GROUP[0], TASKAPI_GROUP[1], TASKAPI_ADC_SECS)] if adc else [TASKAPI_GROUP]) if kind == 'tim03' else []
+    out.append((SENSOR_GROUP[0], SENSOR_GROUP[1], SENSOR_LAYER_SECS if adc else [(p + 'tick_sensors', 'sensor reads')]))
     if f'{bucket}/{sp}boost_cold' in rows:
         for gname, hue, secs in base:
             if gname != 'scope':
@@ -480,6 +492,11 @@ def bar_rows(rep, kind, tag=''):
                     rest = total - sum(x[6] for x in segs)
                     if rest > 0.05:
                         segs.append((gname, hue, k, len(secs), key, text, rest, rest))
+                    continue
+                if key in DERIVED:
+                    whole, parts = DERIVED[key]
+                    v = mean_of(whole) - sum(mean_of(x) for x in parts)
+                    segs.append((gname, hue, k, len(secs), '_rest', text, max(v, 0.0), max(v, 0.0)))
                     continue
                 r = rows.get(f'{b}/{key}')
                 if r and r['calls']:
@@ -681,10 +698,15 @@ def timing_table(rep, cols, states_key='vsi_seen'):
         cells = []
         for key, _ in cols:
             r = rows.get(f'{b}/{key}')
+            if r and r['calls'] and key in COUNT_ROWS:  # a count: shown as is
+                cells.append(f"<td>{r['max_cycles']} <span class=\"sub\">({r['sum_cycles'] / r['calls']:.1f})</span></td>")
+                continue
             cells.append('<td>—</td>' if not r or not r['calls'] else
                          f"<td>{u(r['max_cycles']):.1f} <span class=\"sub\">({u(r['sum_cycles'] / r['calls']):.1f})</span></td>")
         p.append(f'<tr><td>{e(b)}</td>' + ''.join(cells) + '</tr>')
-    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs. Inverter states reached: '
+    p.append('</table></div><p class="sub">Worst case, mean in brackets, in µs'
+             + ('; the sample columns are counts of ADC samples dispatched per period' if any(k in COUNT_ROWS for k, _ in cols) else '')
+             + '. Inverter states reached: '
              + '; '.join(f"{e(b['name'])} {e(', '.join(VSI_NAMES[m] for m in b.get(states_key, [])))}" for b in rep['buckets']) + '.</p>')
     return '\n'.join(p)
 
@@ -693,8 +715,10 @@ TIM01_COLS = [('boost_cold', 'boost_cold'), ('boost_hot', 'boost_hot'), ('inv_st
               ('duty_pll', 'duty_pll'), ('duty_sogi', 'duty_sogi'), ('duty_park', 'duty_park'), ('duty_syncwin', 'duty_syncwin'),
               ('duty_mode_ff', 'duty_mode_ff'), ('duty_current_pi', 'duty_current_pi'), ('duty_output', 'duty_output'),
               ('observer', 'observer'), ('outputs', 'outputs'), ('controlStep', 'controlStep'), ('scope', 'scope')]
-TIM03_COLS = ([('3:gap', 'gap'), ('3:safety', 'safety'), ('3:dispatch', 'data dispatch'), ('3:tick', 'task tick'),
-               ('3:tick_sensors', 'sensors')] + [('3:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
+TIM03_COLS = ([('3:gap', 'gap'), ('3:safety', 'safety'), ('3:dispatch', 'data dispatch'), ('3:disp_adc1', 'd: ADC1'),
+               ('3:n_adc1', 'd: ADC1 samples'), ('3:disp_adc2', 'd: ADC2'), ('3:n_adc2', 'd: ADC2 samples'), ('3:tick', 'task tick'),
+               ('3:tick_sensors', 'sensors'), ('3:rd_sensor', 's: lookup'), ('3:rd_buffer', 's: buffer'),
+               ('3:rd_convert', 's: conversion')] + [('3:' + k, h) for k, h in TIM01_COLS if k not in ('controlStep', 'scope')]
               + [('3:tick_control', 'controlStep'), ('3:tick_apply', 'writes'), ('3:ap_boost_duty', 'w: boost duty'),
                  ('3:ap_boost_en', 'w: boost enable'), ('3:ap_burst', 'w: burst'), ('3:ap_bridge_duty', 'w: bridge duty'),
                  ('3:ap_bridge_en', 'w: bridge enables'), ('3:ap_pwm_ack', 'w: PWM ack'), ('3:ap_relay', 'w: relay'),

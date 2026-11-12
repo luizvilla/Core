@@ -41,6 +41,12 @@
 /* Current file header */
 #include "data_dispatch.h"
 #include "owntech_fast_code.h"
+#include "owntech_timing_probe.h"
+
+#ifdef TIMING_HARNESS
+volatile uint32_t timing_dispatch_cycles[OT_TIMING_ADC_COUNT];
+volatile uint32_t timing_dispatch_samples[OT_TIMING_ADC_COUNT];
+#endif
 
 /**
  *  Local variables
@@ -303,6 +309,7 @@ OWNTECH_FAST_CODE void data_dispatch_do_dispatch(uint8_t adc_num)
 	{
 		data_count_in_dma_buffer = dma_get_retrieved_data_count(adc_num);
 	}
+	OT_TIMING_DISPATCH_SAMPLES(adc_index, data_count_in_dma_buffer);
 
 	static size_t next_dma_buffer_index[ADC_COUNT] = {0};
 	size_t channel_count = enabled_channels_count[adc_index];
@@ -355,7 +362,9 @@ OWNTECH_FAST_CODE void data_dispatch_do_full_dispatch()
 {
 	for (uint8_t adc_num = 1 ; adc_num <= ADC_COUNT ; adc_num++)
 	{
+		OT_TIMING_MARK(t0);
 		data_dispatch_do_dispatch(adc_num);
+		OT_TIMING_DISPATCH_CYCLES(adc_num - 1, t0);
 	}
 }
 

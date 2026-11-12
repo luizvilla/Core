@@ -205,6 +205,9 @@ def tim02(rep, rows, buckets, hz, base):
     return fails
 
 
+# L0-TIM-03 rows not judged against the baseline: the gap and the harness's own cost, and the ADC sample counts
+# (counts, not cycles).
+NOT_CYCLES = ('/3:gap', '/3:harness', '/3:n_adc1', '/3:n_adc2')
 GAP_LIMIT_US = 150.0      # L0-TIM-03: largest gap between two task starts (catalogue)
 SILENCE_LIMIT_S = 0.5     # L0-TIM-03.f: full telemetry is due every ~100 ms; 0.5 s of silence means the task starved
 
@@ -309,14 +312,14 @@ def tim03(rep, rows, buckets, hz, base, console):
     if base:
         over, new = [], 0
         for n, r in rows.items():
-            if not is_tim03(n) or n.endswith(('/3:gap', '/3:harness')):
+            if not is_tim03(n) or n.endswith(NOT_CYCLES):
                 continue
             ref = base['rows'].get(n)
             if ref is None:
                 new += 1
             elif r['max_cycles'] > ref * (1.0 + base.get('tolerance', TOLERANCE)) + SLACK_CYCLES:
                 over.append(f"{n} {us(r['max_cycles'], hz):.1f} µs")
-        if new and not over and new == sum(1 for n in rows if is_tim03(n) and not n.endswith(('/3:gap', '/3:harness'))):
+        if new and not over and new == sum(1 for n in rows if is_tim03(n) and not n.endswith(NOT_CYCLES)):
             line('L0-TIM-03.e', 'INFO', 'No tick part or section slower than the baseline (no baseline yet)', '-', f'{new} rows to baseline')
         else:
             fails += bool(over)
@@ -481,6 +484,20 @@ def main():
             t, g = rows[f'{b}/3:tick'], rows[f'{b}/3:gap']
             md.append(f"| {b} | {us(t['max_cycles'], hz):.1f} ({us(t['sum_cycles'] / max(t['calls'], 1), hz):.1f}) | "
                       f"{us(g['max_cycles'], hz):.1f} ({us(g['sum_cycles'] / max(g['calls'], 1), hz):.1f}) | {bk.get('tim03_lost', 0)} |")
+        if all(f'{b}/3:disp_adc1' in rows for b in buckets):
+            mean = lambda b, k: rows[f'{b}/{k}']['sum_cycles'] / max(rows[f'{b}/{k}']['calls'], 1)
+            md += ['', '## ADC data path', '',
+                   'Mean per period in µs. Dispatch: the task API copies the DMA samples to the channel buffers, before the '
+                   'task. Reads: the tick\'s getLatestValue() calls, summed per layer.', '',
+                   '| Bucket | dispatch | ADC1 | samples | ADC2 | samples | other ADCs + loop | reads | lookup + checks | buffer | conversion | around the reads |',
+                   '|---|---|---|---|---|---|---|---|---|---|---|---|']
+            for b in buckets:
+                d, d1, d2 = mean(b, '3:dispatch'), mean(b, '3:disp_adc1'), mean(b, '3:disp_adc2')
+                r = [mean(b, k) for k in ('3:rd_sensor', '3:rd_buffer', '3:rd_convert')]
+                sens = mean(b, '3:tick_sensors')
+                md.append(f"| {b} | {us(d, hz):.2f} | {us(d1, hz):.2f} | {mean(b, '3:n_adc1'):.1f} | {us(d2, hz):.2f} | "
+                          f"{mean(b, '3:n_adc2'):.1f} | {us(d - d1 - d2, hz):.2f} | {us(sens, hz):.2f} | "
+                          + ' | '.join(f'{us(x, hz):.2f}' for x in r) + f' | {us(sens - sum(r), hz):.2f} |')
         with open(os.path.join(a.out3, 'timing_tim03.md'), 'w') as f:
             f.write('\n'.join(md) + '\n')
 

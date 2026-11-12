@@ -44,7 +44,7 @@ flowchart LR
 | File | Role |
 |---|---|
 | [`src/timing/timing_probe.h`](../../../src/timing/timing_probe.h) | `TIMING_PROBE(i)` in `controlStep`; empty unless `TIMING_HARNESS` |
-| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 5) |
+| [`src/timing/timing_report.h`](../../../src/timing/timing_report.h) | RAM layout read by the host (layout version 6) |
 | [`src/timing/timing_harness.cpp`](../../../src/timing/timing_harness.cpp) | Scenario and measurement on the target |
 | [`preflight.sh`](preflight.sh) | Checks tools, probe, board, bootloader; `--install` |
 | [`run.sh`](run.sh) | Build, flash, read, evaluate; `--update-baseline`, `--no-flash` |
@@ -106,9 +106,13 @@ After L0-TIM-02, the same firmware starts the application task (full telemetry e
 |---|---|
 | `3:tick`, `3:tick_*`, `3:<section>` | the task tick, its parts and every controlStep and calculateDuty section (same detail as TIM-01/02) |
 | `3:safety`, `3:dispatch` | what the task API does in the same interrupt before the task: the safety check (`CONFIG_OWNTECH_SAFETY_API`) and `spin.data.doFullDispatch()` (probes in `owntech_task_api`, TIMING builds only) |
+| `3:disp_adc1`, `3:disp_adc2`, `3:n_adc1`, `3:n_adc2` | inside `3:dispatch`: cycles of `data_dispatch_do_dispatch()` for ADC1 and ADC2, and the samples each copied (counts, not cycles; not judged against the baseline). The rest of `3:dispatch` is the empty ADCs and the loop |
+| `3:rd_sensor`, `3:rd_buffer`, `3:rd_convert` | inside `3:tick_sensors`: the tick's `getLatestValue()` calls summed per layer, sensor lookup and DataAPI checks, buffer layer (`get_acquired_values` or peek), conversion. The rest of `3:tick_sensors` is the code around the reads |
 | `3:gap` | time between two task starts |
 | `3:harness` | the test's own cost in the interrupt (inputs, recording); reported, left out of the figures |
 | bucket `tim03_lost` | lost periods: accumulated lateness of one period each, so steadily late starts count even when no single gap reaches 1.5 periods |
+
+The ADC path probes (`owntech_timing_probe.h` in the Spin API: `data_dispatch.cpp`, `DataAPI.cpp`, `Sensors.cpp`) exist only in the TIMING builds. They add about 2.5 µs to `3:tick_sensors` (four cycle-counter reads and three sums per read, five reads) and 0.16 µs to `3:dispatch`; the baseline from `b4602d9`'s successor on includes them.
 
 Criteria: `.a` coverage; `.b-<bucket>` task tick ≤ 80 µs; `.c` no lost period; `.d` gap ≤ 150 µs; `.e` baseline; `.f` background tasks served (telemetry never silent more than 0.5 s outside scope downloads, every `h` and `r` answered); `.g-<bucket>` INFO, the interrupt's time per period without the harness.
 
