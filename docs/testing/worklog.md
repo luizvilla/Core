@@ -797,3 +797,11 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Reading | The bridge command carries the 100 Hz of VAC: with the measured feedforward the command copies VAC sample by sample, and once connected VAC is the bridge's own output, so the loop VAC → feedforward → bridge → VAC has a gain of about 1 at every frequency. The mains has no 100 Hz (0.28 V), so the 100 Hz (and the DC) is self-sustained: any small half-cycle asymmetry is kept and only the bulb drains it. Consistent with the PI gains and the dead time having no effect on it. One period of one dump: to confirm |
 | Next | Candidate remedies: a 100 Hz notch and a DC block on VAC before the feedforward (odd harmonics still copied, so the low closing current is kept), or a resonant current term at 100 Hz. Confirm with a 2 kHz steady-state dump (128 ms) |
 | Firmware fix | `q` while connected re-armed the scope and the trigger (relay commanded, already true) fired on the next sample, so the 26 pre-trigger samples were never refilled. Every re-arm now goes through `scopeArm()`, and the trigger waits until 26 samples have been taken. USB and TIMING build; not run on the board |
+
+## 2026-11-13 — The measured DC bus in the duty is not the source of the 100 Hz
+
+| Field | Value |
+|---|---|
+| Question | Luiz Villa: the duty divides by the bus voltage; fixed or measured, and could it make the 100 Hz? |
+| Answer | Measured every tick (`state.inverter.setVBus(meas.v_dc_bus)`, control_step.cpp; duty = Vα / (2·Vbus) + 0.5). A measurement wobble at 50 Hz would turn into 0 and 100 Hz at the output. In the steady dump 210340 (one fresh period): measured bus std 0.78 V, 0.25 V at 50 Hz, 0.58 V at 100 Hz once a single 0 V sample is set aside; its effect on the bridge output is 0.20 V at 100 Hz against 9.2 V present. Not the source |
+| Side finding | The scope record of VDCBus holds an occasional single 0 V sample (sample 56 here, one at +34 ms in an earlier dump). The duty at that sample is normal (0.834 between 0.843 and 0.828), so the control did not use it; only the scope channel shows it. To trace |
