@@ -74,7 +74,7 @@ void pulsim_cblock_step(const double* in,int n_in,double* out,int n_out,
         !std::isfinite(in[MODE]) || in[MODE]<double(IDLE) || in[MODE]>double(MPPT) ||
         std::floor(in[MODE])!=in[MODE] ||
         (in[VAC_UPDATED]!=0 && in[VAC_UPDATED]!=1) ||
-        !std::isfinite(in[SYNC_REQUEST]) || in[SYNC_REQUEST]<INV_OFF || in[SYNC_REQUEST]>INV_INJECT ||
+        !std::isfinite(in[SYNC_REQUEST]) || in[SYNC_REQUEST]<int(INV_OFF) || in[SYNC_REQUEST]>int(INV_INJECT) ||
         std::floor(in[SYNC_REQUEST])!=in[SYNC_REQUEST] || !std::isfinite(in[INJECT_CURRENT])) {
         c->failed=true;error(out,n_out);return;
     }

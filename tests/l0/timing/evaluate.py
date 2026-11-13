@@ -8,7 +8,7 @@
 ## Criteria (procedure §6, tab Timing):
 ##   L0-TIM-01.a            the scenario reached every inverter state it times, without a fault
 ##   L0-TIM-01.b-<bucket>   no section slower than the committed baseline + tolerance (INFO without a baseline)
-##   L0-TIM-01.c-<bucket>   INFO: controlStep + scope worst case against the 80 µs budget of L0-TIM-02/03
+##   L0-TIM-01.c-<bucket>   INFO: controlStep + scope worst case against the budget of L0-TIM-02/03 (80 % of the period)
 ## Standard library only.
 ##
 ## @par Usage
@@ -18,11 +18,20 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 
-PERIOD_US = 100.0
-BUDGET_US = 80.0          # ADR 0005: 80 % of the control period
+
+def control_period_us():
+    """@brief app::control_task_period from src/app/control_step.h, in µs (50 since ADR 0006)."""
+    header = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'src', 'app', 'control_step.h')
+    m = re.search(r'control_task_period\s*=\s*(\d+)', open(header).read())
+    return float(m.group(1))
+
+
+PERIOD_US = control_period_us()
+BUDGET_US = 0.8 * PERIOD_US   # ADR 0005: 80 % of the control period (40 µs at 50 µs)
 TOLERANCE = 0.10          # +10 % on each section's worst case
 SLACK_CYCLES = 50         # absolute slack, so a 1 µs section does not fail on a few cycles
 VSI = ['OFF', 'VOLTAGE_SYNC', 'GRID_CONNECT', 'GRID_CONNECTED', 'RUN', 'STOPPING', 'DISCONNECT', 'FAULT',
@@ -104,12 +113,12 @@ def manifest(repo, rep, base):
     except OSError:
         pass
     tgt = rep.get('target', {})
-    phases = ', '.join(f"{b['name']} {b['ticks'] / 10000:g} s" for b in rep['buckets'])
+    phases = ', '.join(f"{b['name']} {b['ticks'] * PERIOD_US / 1e6:g} s" for b in rep['buckets'])
     acr = tgt.get('flash_acr')
     return {
         'test': 'L0-TIM-01',
         'title': 'L0-TIM-01 · Cycle cost of each controlStep section on the Spin',
-        'purpose': 'Locate where the 100 µs critical task spends its time, and catch a change that makes any section '
+        'purpose': f'Locate where the {PERIOD_US:.0f} µs critical task spends its time, and catch a change that makes any section '
                    'slower than the committed baseline before it reaches the bench (ADR 0005).',
         'criteria': ['L0-TIM-01'],
         'conditions': [
@@ -208,7 +217,7 @@ def tim02(rep, rows, buckets, hz, base):
 # L0-TIM-03 rows not judged against the baseline: the gap and the harness's own cost, and the ADC sample counts
 # (counts, not cycles).
 NOT_CYCLES = ('/3:gap', '/3:harness', '/3:n_adc1', '/3:n_adc2')
-GAP_LIMIT_US = 150.0      # L0-TIM-03: largest gap between two task starts (catalogue)
+GAP_LIMIT_US = 1.5 * PERIOD_US  # L0-TIM-03: largest gap between two task starts, 1.5 periods (catalogue)
 SILENCE_LIMIT_S = 0.5     # L0-TIM-03.f: full telemetry is due every ~100 ms; 0.5 s of silence means the task starved
 
 

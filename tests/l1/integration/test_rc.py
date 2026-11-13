@@ -32,7 +32,7 @@ def experiment():
     for i,value in enumerate(values):
         if value is not None:x[names.index(f'V(input{i})')]=value
     observer(0.,x)
-    try:r=p.simulate(b,t_end=.003,dt=20e-6,initial_state=x,store_every=1)
+    try:r=p.simulate(b,t_end=.003,dt=10e-6,initial_state=x,store_every=1)  # divides the control period (50 µs)
     finally:
         if cb.teardown:cb.teardown()
     return rows,np.asarray(r.states)[:,names.index('V(bus)')]
@@ -41,7 +41,8 @@ def main():
     """Verify the sampled native block and fresh repeated runs."""
     rows,bus=experiment();again,other=experiment();times=np.array([r[0] for r in rows]);out=np.array([r[2] for r in rows]);ok=True
     # @test L1-INT-02.a: Pulsim invokes the native ABI exactly once per control tick.
-    ok=emit('L1-INT-02.a',len(rows)==31 and np.allclose(np.diff(times),.0001,atol=1e-12,rtol=0) and np.array_equal(out[:,INDEX['invocations']],np.arange(1,32)),'Pulsim schedules real native controlStep once per 100 us',len(rows)) and ok
+    period=CONTRACT['control_period_s'];n=round(.003/period)+1
+    ok=emit('L1-INT-02.a',len(rows)==n and np.allclose(np.diff(times),period,atol=1e-12,rtol=0) and np.array_equal(out[:,INDEX['invocations']],np.arange(1,n+1)),f'Pulsim schedules real native controlStep once per {period*1e6:g} us',len(rows)) and ok
     # @test L1-INT-02.b: Firmware source output drives the RC and its measurement returns.
     sampled=np.array([r[1][3] for r in rows])
     ok=emit('L1-INT-02.b',np.max(bus)>0 and np.max(sampled)>0 and np.all(out[:,INDEX['block_error']]==0),'Native C-Block drives RC and reads its changing bus voltage',float(bus.max())) and ok

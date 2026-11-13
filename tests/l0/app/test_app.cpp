@@ -39,12 +39,12 @@
  *
  * Each case builds its own ControlState with controlInit(), i.e. with the
  * application's real tuning (app:: constants), and calls controlStep() once
- * per 100 µs period. Measurements are fixed values or a synthetic 230 V /
+ * per critical period (app::control_task_period, 50 µs). Measurements are fixed values or a synthetic 230 V /
  * 50 Hz grid; nothing the step outputs feeds back into them.
  *
  * Grid-related checks go through the real chain (PLL → grid observer →
  * inverter grid quality), so they run in real time: the observer needs 1 s
- * of healthy grid to qualify, i.e. 10 000 steps.
+ * of healthy grid to qualify, i.e. 20 000 steps at 50 µs.
  */
 
 #include "app/control_step.h"
@@ -56,7 +56,8 @@
 
 namespace {
 
-constexpr int ticks_per_s = 10000;                       ///< Control steps per second.
+constexpr int ticks_per_s = 1000000 / app::control_task_period;  ///< Control steps per second (20 000 at 50 µs).
+constexpr int grid_period_ticks = ticks_per_s / 50;             ///< Control steps per 50 Hz period.
 constexpr double two_pi = 6.283185307179586;             ///< 2π in double precision.
 constexpr float v_bus = 400.0F;                          ///< Bus voltage fed to the step (V).
 
@@ -323,20 +324,20 @@ int main() {
 
     // ---------------------------------------------------------------- L0-APP-03
     {
-        /** @test L0-APP-03.a: VAC stale for 200 periods (20 ms) trips the observer with InvalidMeasurement */
-        tc::Criterion c("L0-APP-03.a", "VAC stale for 200 periods (20 ms) trips the observer with InvalidMeasurement");
+        /** @test L0-APP-03.a: VAC stale for 20 ms (app::grid_voltage_stale_ticks periods) trips the observer with InvalidMeasurement */
+        tc::Criterion c("L0-APP-03.a", "VAC stale for 20 ms (app::grid_voltage_stale_ticks periods) trips the observer with InvalidMeasurement");
         ControlState state;
         Grid grid;
         float held = 0.0F;
         OperatorCommands cmd;
         if (qualifyGrid(c, state, grid, cmd, held)) {
             int trip_tick = -1;
-            for (int n = 1; n <= 400 && trip_tick < 0; ++n) {
+            for (int n = 1; n <= 2 * static_cast<int>(app::grid_voltage_stale_ticks) && trip_tick < 0; ++n) {
                 gridStep(state, grid, cmd, false, held);
                 if (state.grid_observer.isTripped()) trip_tick = n;
             }
             c.check("trips", trip_tick > 0);
-            c.check("exactly on the 200th stale period", trip_tick == static_cast<int>(app::grid_voltage_stale_ticks));
+            c.check("exactly on the last stale period (20 ms)", trip_tick == static_cast<int>(app::grid_voltage_stale_ticks));
             c.check("reason InvalidMeasurement",
                     state.grid_observer.getTripReason() == GridTripReason::InvalidMeasurement);
             c.check("observer no longer operable", !state.grid_observer.canOperate());
@@ -478,7 +479,7 @@ int main() {
             c.check("synchronized within 3 s", sync_tick > 0);
             c.check("never synchronized while the observer forbids operation", !sync_without_quality);
             c.check("sync after qualification", sync_tick > qualified_tick && qualified_tick > 0);
-            c.check("sync at least 1000 calls after qualification", sync_tick - qualified_tick >= 1000);
+            c.check("sync at least 100 ms after qualification", sync_tick - qualified_tick >= ticks_per_s / 10);
         }
         /** @test L0-APP-05.b: Time from start to observer qualification (INFO) */
         tc::info("L0-APP-05.b", "Time from start to observer qualification", qualified_tick / double(ticks_per_s), "s");
@@ -804,11 +805,11 @@ int main() {
         OperatorCommands cmd; cmd.inverter_stage = INV_VAC_FOLLOW;
         c.check("controlInit", controlInit(state) == 0);
         c.check("qualified", qualifyGrid(c, state, grid, cmd, held));
-        for (int k = 0; k < ticks_per_s + 200; ++k) gridStep(state, grid, cmd, true, held);
+        for (int k = 0; k < ticks_per_s + grid_period_ticks; ++k) gridStep(state, grid, cmd, true, held);
         double a0 = 0.0, a3 = 0.0;
-        for (int k = 0; k < 400; ++k) a0 = std::max(a0, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
+        for (int k = 0; k < 2 * grid_period_ticks; ++k) a0 = std::max(a0, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
         cmd.vac_offset = 0.03F;
-        for (int k = 0; k < 400; ++k) a3 = std::max(a3, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
+        for (int k = 0; k < 2 * grid_period_ticks; ++k) a3 = std::max(a3, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
         c.near("amplitude ratio with a 3 % offset", a3 / a0, 1.03, 2e-3);
         Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.i_ac = 4.0F;
         state.bridge_pwm_applied = true;
@@ -849,10 +850,10 @@ int main() {
         c.check("PI from the relay request", state.inverter.getCurrentLoopFromConnect());
         c.near("advance 0.3 in step 2b", state.inverter.getOutputPhaseAdvance(), app::follow_connect_advance, 1e-6);
         c.check("relay commanded", k_cmd >= 0);
-        c.near("PLL frozen from the command for 15 ms (periods)", k_freeze_end - k_cmd, 150.0, 2.0);
-        c.near("feedforward held from the predicted contact (periods after the command)", k_hold - k_cmd, 97.0, 2.0);
-        c.near("held to the end of the blanking (periods)", k_hold_end - k_hold, 53.0, 2.0);
-        c.near("GRID_CONNECTED 20 ms after the command, counted by the inverter (periods)", k_conn - k_cmd, 200.0, 3.0);
+        c.near("PLL frozen from the command for 15 ms (periods)", k_freeze_end - k_cmd, 0.015 * ticks_per_s, 2e-4 * ticks_per_s);
+        c.near("feedforward held from the predicted contact (periods after the command)", k_hold - k_cmd, 0.0097 * ticks_per_s, 2e-4 * ticks_per_s);
+        c.near("held to the end of the blanking (periods)", k_hold_end - k_hold, 0.0053 * ticks_per_s, 2e-4 * ticks_per_s);
+        c.near("GRID_CONNECTED 20 ms after the command, counted by the inverter (periods)", k_conn - k_cmd, 0.020 * ticks_per_s, 3e-4 * ticks_per_s);
         c.check("GRID_CONNECTED, no fault", state.inverter.getMode() == VSI_GRID_CONNECTED && !faulted);
         cmd.inverter_stage = INV_CONNECT;
         Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.relay_closed = relay.closed;

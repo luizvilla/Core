@@ -43,7 +43,8 @@
 /** @brief Application timing and controller tuning. */
 namespace app {
 
-/** @brief Critical task period, in µs. */
+/** @brief Critical task period, in µs: 20 kHz since be933ec (docs/adr/0006-control-rate-20-khz.md).
+ * Durations below are written in seconds and converted to ticks with app::ticks(). */
 inline constexpr uint32_t control_task_period = 50;
 /** @brief Run the boost voltage/startup or MPPT cold loop every ten critical ticks. */
 inline constexpr uint8_t cold_loop_divider = 10U;
@@ -60,6 +61,10 @@ inline constexpr float32_t duty_cycle_max_high_side = 0.95F;
 inline constexpr float32_t hot_loop_period = control_task_period * 1e-6F;
 /** @brief Cold (voltage/MPPT) loop period, in s. */
 inline constexpr float32_t cold_loop_period = hot_loop_period * cold_loop_divider;
+/** @brief A duration in critical ticks, rounded to the nearest tick. @param seconds Duration, in s. */
+inline constexpr uint32_t ticks(float32_t seconds) {
+    return static_cast<uint32_t>(seconds / hot_loop_period + 0.5F);
+}
 /** @brief Initial VDCBus reference, in V (shared boost output capacitor feeding the DC/AC stage). */
 inline constexpr float32_t initial_voltage_reference = 400.0F;
 /*
@@ -128,8 +133,10 @@ inline constexpr GridObserverConfig grid_observer_config = {
     grid_frequency_hz * 0.95F, grid_frequency_hz * 1.05F,
     0.1F, 0.1F, 1.0F
 };
-/** @brief Invalidate the observer if no new VAC sample arrives for 20 ms. */
-inline constexpr uint32_t grid_voltage_stale_ticks = 200U;
+/** @brief Invalidate the observer if no new VAC sample arrives for this long, in s. */
+inline constexpr float32_t grid_voltage_stale_time = 0.020F;
+/** @brief grid_voltage_stale_time in critical ticks (400 at 50 µs). */
+inline constexpr uint32_t grid_voltage_stale_ticks = ticks(grid_voltage_stale_time);
 
 /*
  * Inverter bench session (docs/testing/bench/inverter-session.md), 2026-11-09.
@@ -150,8 +157,13 @@ inline constexpr float32_t open_loop_m_rate = 1.0F;
 inline constexpr float32_t inject_current_max = 0.1F;
 /** @brief Bench protection: |IAC| above this trips the inverter (latched until OFF), in A. */
 inline constexpr float32_t bench_inverter_current_trip = 3.0F;
-/** @brief Relay contact time: command held this long before the feedback changes, in control ticks (20 ms). */
-inline constexpr uint16_t relay_contact_ticks = 200U;
+/** @brief Relay contact time: command held this long before the feedback changes, in s. */
+inline constexpr float32_t relay_contact_time = 0.020F;
+/** @brief relay_contact_time in critical ticks (400 at 50 µs). */
+inline constexpr uint16_t relay_contact_ticks = static_cast<uint16_t>(ticks(relay_contact_time));
+static_assert(grid_voltage_stale_ticks == 1000000U / 50U / control_task_period &&
+                  relay_contact_ticks == 1000000U / 50U / control_task_period,
+              "20 ms stays one 50 Hz period whatever the control period");
 /** @brief Relay closing time, command to contact (bench 2026-11-09: 9.7 ms). The command is issued this long
  * before a grid-voltage zero crossing, so the contact closes near zero voltage; 0 commands at once. */
 inline constexpr float32_t relay_close_delay = 0.0097F;

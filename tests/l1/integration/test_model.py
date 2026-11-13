@@ -25,7 +25,7 @@ def main():
     t,signals,rows,manifest=results['idle_healthy']
     calls=np.array([r['invocations'] for r in rows]);times=np.array([r['time_s'] for r in rows])
     # @test L1-INT-03.a: Only real native invocations, correct cadence and no hidden bridge request.
-    ok=emit('L1-INT-03.a',np.array_equal(calls,np.arange(1,len(rows)+1)) and np.max(abs(np.diff(times)-.0001))<1e-10 and manifest['finite_states'] and all(r['en_bridge']==r['relay_requested']==r['block_error']==0 for r in rows),'Refined switched model runs actual Core C-Block at the declared period',len(rows)) and ok
+    ok=emit('L1-INT-03.a',np.array_equal(calls,np.arange(1,len(rows)+1)) and np.max(abs(np.diff(times)-CONTRACT['control_period_s']))<1e-10 and manifest['finite_states'] and all(r['en_bridge']==r['relay_requested']==r['block_error']==0 for r in rows),'Refined switched model runs actual Core C-Block at the declared period',len(rows)) and ok
     # @test L1-INT-03.b: Nominal integration can qualify/synchronize without inverter or relay enable.
     ok=emit('L1-INT-03.b',any(r['grid_qualified'] for r in rows) and any(r['synchronized'] for r in rows) and all(r['en_bridge']==r['inverter_pwm_requested']==r['relay_requested']==0 for r in rows),'Nominal 50 Hz integration qualifies and synchronizes with bridge and relay off',next((r['time_s'] for r in rows if r['synchronized']),None)) and ok
     # @test L1-INT-03.c: Current input indexing remains correct after adding C-Block output nodes.

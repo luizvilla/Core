@@ -19,7 +19,7 @@ void pulsim_cblock_term(void*);
  * @return tc::finish exit status.
  */
 int main() {
-    constexpr double dt=0.0001;
+    constexpr double dt=app::control_task_period*1e-6;  // 50 µs (ADR 0006)
     ControlState direct{};const int init=controlInit(direct);
     void* state=pulsim_cblock_init(INPUT_COUNT,OUTPUT_COUNT);
     bool parity=init==0 && state;double max_error=0;float held=0;bool held_verified=false;

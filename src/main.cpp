@@ -112,8 +112,8 @@ static ControlState control;
 static bool voltage_notch_enabled = false;
 static bool current_resonant_enabled = false;
 
-/* One nominal 50 Hz period at the 10 kHz critical task rate. */
-static constexpr uint32_t v_ac_rms_window_sample_count = 200U;
+/* One nominal 50 Hz period at the critical task rate (400 samples at 20 kHz). */
+static constexpr uint32_t v_ac_rms_window_sample_count = app::ticks(1.0F / app::grid_frequency_hz);
 static float32_t grid_angle;
 static float32_t v_ac_rms_square_sum;
 static uint32_t v_ac_rms_sample_count;
@@ -121,11 +121,14 @@ static uint32_t v_ac_rms_sample_count;
 /* ScopeMimicry */
 /* 14 KiB capture: 256 samples of 14 channels, half before and half after the trigger: Sync rising
  * at 2 kHz; in the open-loop stage, the bridge start at 2 kHz; in CONNECT/INJECT, the relay command
- * rising at 10 kHz; after key p (boost alone, inverter OFF), the boost leaving IDLE at 2 kHz.
+ * rising at 10 kHz (key v); after key p (boost alone, inverter OFF), the boost leaving IDLE at 2 kHz.
  * Keep the byte count within ScopeMimicry's uint16_t buffer-size/dump limits. */
 static constexpr uint16_t scope_buffer_sample_count = 256U;
 static constexpr uint16_t scope_channel_count = 14U;
-static constexpr uint16_t scope_sample_divider = 5U;
+/* Scope rates are set in time, not ticks: 2 kHz by default, 10 kHz with key v (ADR 0006). */
+static constexpr uint16_t scope_sample_divider = static_cast<uint16_t>(app::ticks(1.0F / 2000.0F));
+static constexpr uint16_t scope_fast_divider = static_cast<uint16_t>(app::ticks(1.0F / 10000.0F));
+static_assert(scope_sample_divider == 10U && scope_fast_divider == 2U, "scope rates assume the 50 µs period");
 static_assert(scope_buffer_sample_count * scope_channel_count * sizeof(float32_t) <= UINT16_MAX,
               "Scope capture exceeds ScopeMimicry's buffer-size limit");
 static ScopeMimicry scope(scope_buffer_sample_count, scope_channel_count);
@@ -172,11 +175,11 @@ static uint16_t relay_hold_ticks = 0U;
 static constexpr uint32_t cycles_per_us = CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC / 1000000U;
 static constexpr uint32_t period_cycles = app::control_task_period * cycles_per_us;
 static inline uint32_t cpuCycles() { return *reinterpret_cast<volatile const uint32_t *>(0xE0001004UL); }
-/* Critical task load: longest run since the last telemetry line, in cycles (period 100 µs). */
+/* Critical task load: longest run since the last telemetry line, in cycles (period app::control_task_period). */
 static volatile uint32_t critical_max_cycles = 0U;
-/* Critical task calls, to check the real call rate against the 10 kHz the controllers assume. */
+/* Critical task calls, to check the real call rate against the 20 kHz the controllers assume. */
 static volatile uint32_t critical_calls = 0U;
-/* Longest interval between two critical task starts (µs, expected 100), and control periods without
+/* Longest interval between two critical task starts (µs, expected app::control_task_period), and control periods without
  * a new VAC sample (the last value is held), since the last telemetry line. */
 static volatile uint32_t critical_gap_max_cycles = 0U;
 /* Critical ticks lost since boot: a start gap of 1.5 periods or more counts the periods it skipped. */
@@ -193,7 +196,7 @@ static bool settle_count_test = false;
 /* Menu 'z': protection test, one control period sees an artificial AC current above the bench trip
  * (app::bench_inverter_current_trip); the scope's IAC channel shows it. */
 static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the artificial sample (0: none) */
-static constexpr uint16_t trip_test_delay_ticks = 1000U;  /* 100 ms: fills the scope's pre-trigger half at 2 or 10 kHz */
+static constexpr uint16_t trip_test_delay_ticks = static_cast<uint16_t>(app::ticks(0.1F));  /* 100 ms: fills the scope's pre-trigger half at 2 or 10 kHz */
 static bool scope_trigger_on_trip = false;  /* the capture waits for the bench trip (armed by 'z') */
 static bool scope_trigger_on_boost = false;  /* the capture waits for the boost start (armed by 'p') */
 static constexpr float32_t trip_test_current = 4.0F;  /* A, above the 3 A bench trip */
@@ -1079,7 +1082,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     /* Grid stages: 10 kHz around the relay closing (25.6 ms window) when asked with 'v'; otherwise 2 kHz. */
     const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT ||
                                                      inverter_stage == INV_FOLLOW_CONNECT || inverter_stage == INV_BUS_LOOP)) ?
-                             1U : scope_sample_divider;
+                             scope_fast_divider : scope_sample_divider;
     /* Snapshot only on the ticks the scope samples (it also evaluates the trigger then): the other ticks
      * keep the slack that lets a late start catch up (a lost tick shifts the PLL's time base). */
     if (++scope_sample_tick >= divider)

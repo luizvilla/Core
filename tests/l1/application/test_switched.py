@@ -9,7 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
 from runner import run,save
 from runtime import HERE
-from app_constants import STARTUP_CURRENT_MAX,BOOST_TRIP_CURRENT,BURST_PERIOD
+from app_constants import STARTUP_CURRENT_MAX,BOOST_TRIP_CURRENT,BURST_PERIOD,CONTROL_PERIOD,GRID_VOLTAGE_STALE_TICKS
 
 
 def emit(id,verdict,description,limit,value):
@@ -38,17 +38,17 @@ def main():
     if q is not None:
         start=q
         while start>0 and 207<=rows[start-1]['observer_rms']<=253 and 47.5<=rows[start-1]['observer_hz']<=52.5:start-=1
-        dwell=rows[q]['time_s']-rows[start]['time_s']+.0001
+        dwell=rows[q]['time_s']-rows[start]['time_s']+CONTROL_PERIOD
     # @test L1-APP-01.b: Qualification is timed from continuous eligible grid.
-    ok=emit('L1-APP-01.b','PASS' if dwell is not None and abs(dwell-1)<=.000100001 else 'FAIL',
-            'Observer qualifies after continuous healthy estimated grid','1 s +/- 100 us',dwell) and ok
+    ok=emit('L1-APP-01.b','PASS' if dwell is not None and abs(dwell-1)<=CONTROL_PERIOD*1.00001 else 'FAIL',
+            'Observer qualifies after continuous healthy estimated grid',f'1 s +/- {CONTROL_PERIOD*1e6:g} us',dwell) and ok
     emit('L1-APP-01.c','INFO','Time from electrical start to PLL synchronization','informational',
          next((r['time_s'] for r in rows if r['synchronized']),None))
     rows,data,meta=load(out/'vac_dropout');trip=next((r for r in rows if r['observer_trip']==1),None)
     fresh=[r for r in rows if r['vac_updated']]
     # @test L1-APP-08.a: Real delivery loss reaches stale threshold exactly.
-    valid=trip is not None and trip['vac_age_ticks']==200 and abs(trip['time_s']-fresh[-1]['time_s']-.02)<1e-10
-    ok=emit('L1-APP-08.a','PASS' if valid else 'FAIL','Lost VAC samples trigger InvalidMeasurement','200 control periods',trip['time_s'] if trip else None) and ok
+    valid=trip is not None and trip['vac_age_ticks']==GRID_VOLTAGE_STALE_TICKS and abs(trip['time_s']-fresh[-1]['time_s']-.02)<1e-10
+    ok=emit('L1-APP-08.a','PASS' if valid else 'FAIL','Lost VAC samples trigger InvalidMeasurement',f'{GRID_VOLTAGE_STALE_TICKS} control periods (20 ms)',trip['time_s'] if trip else None) and ok
     for case in ['dcdc_startup','dcdc_busreg','dcdc_burst']:
         scenario=json.loads((HERE/'scenarios'/f'{case}.json').read_text())
         print('Formal switched scenario:',case,flush=True)

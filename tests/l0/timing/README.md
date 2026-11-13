@@ -1,6 +1,6 @@
 # L0-TIM: on-target timing tests
 
-Cycle cost of the control code **on the Spin**, so that a change that saturates the 100 µs critical task is caught before the bench. Decision and limits: [ADR 0005](../../../docs/adr/0005-on-target-timing-tests.md). Criteria: procedure §6, tab Timing.
+Cycle cost of the control code **on the Spin**, so that a change that saturates the critical task (50 µs since [ADR 0006](../../../docs/adr/0006-control-rate-20-khz.md), 100 µs before) is caught before the bench. Decision and limits: [ADR 0005](../../../docs/adr/0005-on-target-timing-tests.md). The period and the budget (80 % of it, 40 µs) are read from `src/app/control_step.h`. Criteria: procedure §6, tab Timing.
 
 Unlike the other L0 folders, these tests **reflash the board**. They run only when asked:
 
@@ -69,7 +69,7 @@ The harness runs `controlStep()` on the production `ControlState` (after `contro
 | `observer` | grid observer and quality gate |
 | `outputs` | outputs, open loop, VAC follower, protection, relay timing |
 | `controlStep` | the whole call |
-| `scope` | the critical task's scope snapshot and `acquire`, run on every tick (the 10 kHz case) |
+| `scope` | the critical task's scope snapshot and `acquire`, run on every tick (the worst case) |
 | `duty_pll` | inside `calculateDuty` (library probes, `inverterTiming.h`): PLL PI or connection freeze, angle update and wrap |
 | `duty_sogi` | voltage and current SOGIs |
 | `duty_park` | Park transforms of V and I, finite checks |
@@ -80,13 +80,13 @@ The harness runs `controlStep()` on the production `ControlState` (after `contro
 
 The seven `duty_*` sections add up to `inv_duty`, apart from a few probe cycles. They come from probes in the `single_phase_inverter` fork (`luizvilla/single_phase_inverter` `f98cfac`, `src/inverterTiming.h`), which compile only under `TIMING_HARNESS`; the harness records them only when `calculateDuty` ran to its end (`inv_timing_seq` advanced).
 
-Criteria: `.a` the scenario reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault (otherwise the rows don't mean what their names say); `.b-<bucket>` no section exceeds the baseline by more than 10 % + 50 cycles; `.c-<bucket>` INFO, controlStep + scope against the 80 µs budget.
+Criteria: `.a` the scenario reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault (otherwise the rows don't mean what their names say); `.b-<bucket>` no section exceeds the baseline by more than 10 % + 50 cycles; `.c-<bucket>` INFO, controlStep + scope against the budget (80 % of the period).
 
 **Updating the baseline.** When a change legitimately costs more (or less), run `run.sh --run --update-baseline` and commit `baseline.json` with that change, saying why in the commit message.
 
 ## L0-TIM-02: whole critical tick per stage and per event
 
-After L0-TIM-01, the same firmware starts the **critical task** on `timingTim02Tick` and runs the same stage sequence again, in real time at 10 kHz: each tick calls the production tick body (`criticalTickBody` in `main.cpp`, also called by `loop_critical_task`). The ADC acquisition and the PWM run on the bare Spin; the sensors are read, then replaced by the synthetic signals, so the read cost stays in the tick. The relay feedback and the bridge acknowledgement come from the task's own models, and the scope samples as in production (2 kHz, 10 kHz around the relay), re-armed at each stage start as a bench key does. The application and communication tasks are not started (that is L0-TIM-03). At the end every output is stopped and the relay pin reset.
+After L0-TIM-01, the same firmware starts the **critical task** on `timingTim02Tick` and runs the same stage sequence again, in real time at the control rate (20 kHz): each tick calls the production tick body (`criticalTickBody` in `main.cpp`, also called by `loop_critical_task`). The ADC acquisition and the PWM run on the bare Spin; the sensors are read, then replaced by the synthetic signals, so the read cost stays in the tick. The relay feedback and the bridge acknowledgement come from the task's own models, and the scope samples as in production (2 kHz, 10 kHz around the relay), re-armed at each stage start as a bench key does. The application and communication tasks are not started (that is L0-TIM-03). At the end every output is stopped and the relay pin reset.
 
 **Only on a bare Spin** (no shield, or an unpowered one): this firmware switches the PWM outputs.
 
@@ -96,7 +96,7 @@ After L0-TIM-01, the same firmware starts the **critical task** on `timingTim02T
 | `tick_sensors`, `tick_control`, `tick_apply`, `tick_scope` | its parts: sensor reads, `controlStep`, PWM and relay writes, scope |
 | `ev:<event>` | the whole tick on which an event happened, one row per event and bucket: `entry`, `boost mode`, `vsi a>b`, `relay cmd on/off`, `relay fb on/off`, `bridge on/off` |
 
-Criteria: `.a` the scenario ran to its end and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault; `.b-<bucket>` whole tick ≤ 80 µs, with the events of the worst tick named; `.c-<bucket>` every event tick ≤ 80 µs; `.d` no tick part or event slower than the baseline + 10 % + 50 cycles. The review page shows its own test case (`l0_tim02/`): conditions, target snapshot, the tick and event tables, a tick-composition figure and an event figure.
+Criteria: `.a` the scenario ran to its end and reached PWM_SETTLE, GRID_CONNECTED and RUN without a fault; `.b-<bucket>` whole tick ≤ budget, with the events of the worst tick named; `.c-<bucket>` every event tick ≤ budget; `.d` no tick part or event slower than the baseline + 10 % + 50 cycles. The review page shows its own test case (`l0_tim02/`): conditions, target snapshot, the tick and event tables, a tick-composition figure and an event figure.
 
 ## L0-TIM-03: critical task in the running firmware
 
@@ -114,7 +114,7 @@ After L0-TIM-02, the same firmware starts the application task (full telemetry e
 
 The ADC path probes (`owntech_timing_probe.h` in the Spin API: `data_dispatch.cpp`, `DataAPI.cpp`, `Sensors.cpp`) exist only in the TIMING builds. They add about 2.5 µs to `3:tick_sensors` (four cycle-counter reads and three sums per read, five reads) and 0.16 µs to `3:dispatch`; the baseline includes them from `54227d3` on.
 
-Criteria: `.a` coverage; `.b-<bucket>` task tick ≤ 80 µs; `.c` no lost period; `.d` gap ≤ 150 µs; `.e` baseline; `.f` background tasks served (telemetry never silent more than 0.5 s outside scope downloads, every `h` and `r` answered); `.g-<bucket>` INFO, the interrupt's time per period without the harness.
+Criteria: `.a` coverage; `.b-<bucket>` task tick ≤ budget; `.c` no lost period; `.d` gap ≤ 1.5 periods; `.e` baseline; `.f` background tasks served (telemetry never silent more than 0.5 s outside scope downloads, every `h` and `r` answered); `.g-<bucket>` INFO, the interrupt's time per period without the harness.
 
 **Before/after reference.** `run.sh --run --flash-ws8` builds env `TIMING_WS8`, which puts the flash back to the clock driver's 8 wait states at boot. Its campaign carries `reference.json`: the control center lists it in the Runs tab and never takes it as a test's current result, and it is not judged against the baseline.
 

@@ -178,19 +178,15 @@
 			sensor-name = "IAC";
 			default-adc = "ADC_2";
 			default-order = <2>;
-			/* Previous calibration kept for reference:
-			 * I[A] = ADC counts * (0.0005 / 0.29766) - (1.02368866 / 0.29766).
-			 * default-gain = <0x3adc2bb1>;  // 0.00167976886 A/count
-			 * default-offset = <0xc05c1a8e>; // -3.43912069 A
+			/* I[A] = ADC counts * (0.0005 / 0.29766) + offset (gain from f54f0b4).
+			 * Offset corrected on the bench: the average measured bias was -0.27698113 A at
+			 * true IAC = 0 A, so offset = -3.43912069 + 0.27698113 = -3.16213956 A
+			 * (previous offset <0xc05c1a8e> = -3.43912069 A).
+			 * The values are IEEE 754 single-precision floats: check a hex value with
+			 * python3 -c "import struct; print(struct.unpack('>f', bytes.fromhex('3adc2bb1'))[0])".
+			 * <0x3f0f26cc>, briefly used here as the gain, is 0.559 A/count (333x too large).
 			 */
-			/* Previous desired calibration kept for reference:
-			 * default-gain = <0x3f0f26cc>; // 0.00167976885 A/count
-			 * default-offset = <0xc05c1a8e>; // -3.35953770 A
-			 */
-			/* Corrected zero-current offset: average measured bias was -0.27698113 A at true IAC = 0 A.
-			 * new offset = -3.43912069 + 0.27698113 = -3.16213956 A
-			 */
-			default-gain = <0x3f0f26cc>; /* 0.00167976885 A/count */
+			default-gain = <0x3adc2bb1>; /* 0.00167976886 A/count */
 			default-offset = <0xc04a607f>; /* -3.16213956 A */
 			sensor-conv-type = "LINEAR";
 			i-ac-adc1 {

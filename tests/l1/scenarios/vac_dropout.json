@@ -1,7 +1,7 @@
 {
   "name": "integration-vac-delivery-dropout",
   "title": "Grid voltage samples lost",
-  "purpose": "The grid stays electrically present, but the firmware stops receiving fresh VAC samples at 10 ms. Checks that the last sample is held and that the observer trips InvalidMeasurement after exactly 200 control periods (20 ms).",
+  "purpose": "The grid stays electrically present, but the firmware stops receiving fresh VAC samples at 10 ms. Checks that the last sample is held and that the observer trips InvalidMeasurement after 20 ms (400 control periods at 50 µs).",
   "criteria": [
     "L1-INT-04",
     "L1-APP-08"

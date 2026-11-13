@@ -10,7 +10,7 @@
  * The scenario walks the bench stages with synthetic measurements (230 V / 50 Hz grid, 400 V bus, 36 V / 2 A
  * input, 50 mA AC current) and the same relay and PWM acknowledgement models as the critical task. Each control
  * step runs with interrupts locked, so a row is the code's own cost (no ISR in it); the interference of the
- * running firmware is L0-TIM-03's job. Ticks run back to back (not paced at 100 µs): the counts do not depend
+ * running firmware is L0-TIM-03's job. Ticks run back to back (not paced at the control period): the counts do not depend
  * on wall time.
  *
  * @test L0-TIM-01
@@ -59,7 +59,7 @@ enum Section : uint8_t {
     SEC_OBSERVER,         ///< Grid observer and quality gate.
     SEC_OUTPUTS,          ///< Outputs, open loop, VAC follower, protection, relay timing.
     SEC_CONTROL_STEP,     ///< controlStep() as called by the critical task.
-    SEC_SCOPE,            ///< Scope snapshot and acquire (on every tick, the 10 kHz worst case).
+    SEC_SCOPE,            ///< Scope snapshot and acquire (on every tick, the worst case).
     /* Inside calculateDuty (library probes, inverterTiming.h); together they make up SEC_INV_DUTY. */
     SEC_DUTY_PLL,         ///< PLL PI (or connection freeze), angle update and wrap.
     SEC_DUTY_SOGI,        ///< Voltage and current SOGIs.
@@ -109,7 +109,7 @@ enum Section : uint8_t {
     SEC_T3_DUTY_MODE_FF,
     SEC_T3_DUTY_CURRENT_PI,
     SEC_T3_DUTY_OUTPUT,
-    SEC_T3_GAP,           ///< Time between this task start and the previous one (period 100 µs).
+    SEC_T3_GAP,           ///< Time between this task start and the previous one (period app::control_task_period).
     SEC_T3_HARNESS,       ///< What the harness itself adds in the interrupt (inputs, recording), outside the task tick.
     SEC_T3_SAFETY,        ///< Task API proxy: the safety check (CONFIG_OWNTECH_SAFETY_API), same interrupt, before the task.
     SEC_T3_DISPATCH,      ///< Task API proxy: spin.data.doFullDispatch() (ADC data), same interrupt, before the task.
@@ -224,10 +224,10 @@ int findBucket(const char *name, boost_mode mode)
 }
 
 /** @brief Synthetic measurements of scenario tick @p tick (both tests use the same signals). */
-/* One grid period is exactly 200 ticks (50 Hz at 10 kHz): the synthetic sine comes from a table, so the harness
- * adds no sinf/fmodf to the critical task (L0-TIM-03 measures that task's start timing). */
-constexpr uint32_t grid_period_ticks = 200U;
-static_assert(1000000U / app::control_task_period == 50U * grid_period_ticks, "200 ticks per 50 Hz period");
+/* One grid period is a whole number of ticks (400 at 50 µs, 200 at 100 µs): the synthetic sine comes from a table,
+ * so the harness adds no sinf/fmodf to the critical task (L0-TIM-03 measures that task's start timing). */
+constexpr uint32_t grid_period_ticks = tps / 50U;
+static_assert(tps == 50U * grid_period_ticks, "a whole number of ticks per 50 Hz period");
 float32_t sine_table[grid_period_ticks];
 
 void fillSineTable()
@@ -576,7 +576,7 @@ struct Tim03 {
     uint32_t in_phase = 0U;
     bool started = false;
     uint32_t prev_start = 0U;
-    int32_t lag = 0;         // accumulated (gap - period), cycles: how late the starts run against the 10 kHz grid
+    int32_t lag = 0;         // accumulated (gap - period), cycles: how late the starts run against the control-period grid
 };
 Tim03 t3;
 constexpr uint32_t period_cycles = 170U * app::control_task_period;  // at 170 MHz
