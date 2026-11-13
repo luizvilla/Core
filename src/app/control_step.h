@@ -44,7 +44,7 @@
 namespace app {
 
 /** @brief Critical task period, in µs. */
-inline constexpr uint32_t control_task_period = 100;
+inline constexpr uint32_t control_task_period = 50;
 /** @brief Run the boost voltage/startup or MPPT cold loop every ten critical ticks. */
 inline constexpr uint8_t cold_loop_divider = 10U;
 

@@ -8,5 +8,5 @@
     "docs": false,
     ".github": false
   },
-  "cmake.sourceDirectory": "/home/luiz-villa/code/Core2/zephyr"
+  "cmake.sourceDirectory": "D:/Git/Core-micro_verter_V2/zephyr"
 }
