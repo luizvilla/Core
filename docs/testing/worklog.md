@@ -778,3 +778,12 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Results | Node voltage at 100 Hz (CH1, the first channel read, while connected): 7.63, 7.18, 7.21, 7.22 V. Line current at 100 Hz (CH3, valid only at 100 ns): 0.247 A. Firmware IAC 45–105 ms after the relay command: 0.071 A at 100 Hz at 300 ns against 0.145 A at 100 ns (18:33 run). DC line current (telemetry IAC mean) +0.06, +0.07, 0.00, +0.17 A, no trend. **Tripling the dead time leaves the 100 Hz unchanged: dead time is not its source** |
 | Defect found | With waveforms ticked on a running scope, `scope.capture()` read the channels one after the other (seconds each) without stopping the acquisition, so each channel came from a later sweep; at 160–300 ns CH2 and CH3 were read after `x` (relay open: CH3 flat, CH2 = mains). Fixed: the capture stops the acquisition, reads measurements, screen and waveforms from the same sweep, then restarts it. Not yet tried on the scope |
 | Next | Rerun L2-INV-09 with the fixed capture to confirm with the line current itself; look for the 100 Hz source elsewhere (DC bus ripple, the APF/feedforward path, the bridge asymmetry) |
+
+## 2026-11-13 — L2-INV-09 rerun: dead time is not the source of the 100 Hz current
+
+| Field | Value |
+|---|---|
+| Session | `tests/out/2026-11-13_175f50e_204629_bench`, captures 20:52–20:55 kept connected until the waveforms were read (all channels valid: CH1 ≈ CH2, CH3 about 3 A peak to peak) plus the valid 100 ns capture of 20:47; Kp 3.5 V/A, Ti 20 ms, ff 0 |
+| Results | Line current (A peak) at 100 / 160 / 220 / 220 / 300 ns: 100 Hz 0.247, 0.258, 0.236, 0.240, 0.213 (slope −0.02 A per 100 ns); 250 Hz 0.152, 0.175, 0.187, 0.184, 0.221 (+45 %); 350 Hz 0.14 and 150 Hz 0.06–0.09 unchanged; 50 kHz 0.32 A; 50 Hz 0.01–0.02 A; DC about +0.1 A (scope mean minus the pre-contact probe offset), unchanged |
+| Conclusion | **Hypothesis rejected.** The dead time raises the 5th harmonic as expected (so the measurement sees dead time) but leaves the 100 Hz unchanged. The 100 Hz needs a half-cycle asymmetry from elsewhere: candidates the control path (DC in IAC or VAC through the APF, then the PI and the feedforward) or the bridge (DC offset, asymmetric switching) |
+| Next | One firmware dump at 10 kHz while connected (v, G, 2 s, r): bridge duty against IAC and VAC at 100 Hz tells control from hardware. CH1 with the probe shorted, relay open, for the +3 V DC |

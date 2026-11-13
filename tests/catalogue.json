@@ -1215,8 +1215,8 @@
    "criterion": ".a telemetry dt matches each capture point (100, 160, 220, 300 ns); INFO .b 100 Hz line current and DC line current per dead time (CH3 waveforms); .c whether the 100 Hz scales with the dead time",
    "conditions": "Step 2b connected with the measured feedforward (ff 0), same Kp and Ti for every point; dead time set with w / s with the inverter OFF; mains through the bulb, bus 400 V",
    "source": "docs/testing/bench/inverter-session.md; keys w / s",
-   "status": "planned",
-   "status_note": "Run 2026-11-13 20:47–20:50 (Kp 3.5, Ti 20 ms, ff 0): node voltage at 100 Hz (CH1, read while connected) 7.63 / 7.18 / 7.21 / 7.22 V at 100 / 160 / 220 / 300 ns; CH3 0.247 A at 100 Hz at 100 ns; firmware IAC at 100 Hz 0.071 A at 300 ns against 0.145 A at 100 ns (18:33). The 100 Hz does not grow with the dead time. CH2/CH3 waveforms at 160–300 ns invalid: read from a running scope after x (capture now holds the acquisition); rerun with the fixed capture to confirm",
+   "status": "implemented",
+   "status_note": "Run 2026-11-13 (Kp 3.5, Ti 20 ms, ff 0), five valid connected captures: line current at 100 Hz 0.247 / 0.258 / 0.236 and 0.240 / 0.213 A at 100 / 160 / 220 / 300 ns (−0.02 A per 100 ns): the 100 Hz does not follow the dead time, while the 250 Hz grows 0.152 → 0.221 A (+45 %), the expected odd-harmonic effect of dead time, so the measurement does see dead time. DC line current about +0.1 A, unchanged. Hypothesis rejected; source of the 100 Hz still open",
    "hardware": "bench"
   },
   {
