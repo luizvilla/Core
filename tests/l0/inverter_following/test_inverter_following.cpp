@@ -41,6 +41,7 @@
  * | L0-GFL-16 | PWM start-up before relay closure (PWM_WAIT, PWM_SETTLE) |
  * | L0-GFL-20 | APF quadrature (ADR 0007) |
  * | L0-GFL-21 | Feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha) (setFeedforwardSource) |
+ * | L0-GFL-22 | Feedforward filter: DC block and 2ω notch with the fundamental restored (setFeedforwardFilter) |
  *
  * The grid is a synthetic sine fed sample by sample; nothing the controller
  * outputs feeds back into it. Relay feedback is driven directly through
@@ -68,6 +69,7 @@
 #include "check.h"
 
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <limits>
 #include <string>
@@ -1339,6 +1341,54 @@ int main() {
             tc::info("L0-GFL-21.i", "SOGI, phase step 10°: largest output difference against a zero-Vq feedforward", zero_vq_err, "V");
             tc::info("L0-GFL-21.j", "SOGI, phase step 10°: samples in GRID_CONNECT before SYNC_LOST", n_connect, "samples");
         }
+    }
+
+    // ---------------------------------------------------------------- L0-GFL-22 (feedforward DC block and 2ω notch)
+    {
+        /** @test L0-GFL-22.a: The feedforward filter is off by default and kept across init() */
+        tc::Criterion c("L0-GFL-22.a", "Feedforward filter off by default; kept across init()");
+        singlePhaseInverterFollowing inv;
+        c.check("init", initDefault(inv));
+        c.check("off by default", !inv.getFeedforwardFilter());
+        inv.setFeedforwardFilter(true);
+        c.check("re-init", initDefault(inv));
+        c.check("kept across init()", inv.getFeedforwardFilter());
+    }
+    {
+        /** @test L0-GFL-22.b: Grid with 5 V DC, 10 V at 100 Hz and the bench odd harmonics: with the filter the measured feedforward keeps < 5 % of the DC and of the 100 Hz, the fundamental within ±0.5 % and ±0.3° of the unfiltered one, the 3rd/5th/7th within ±10 % */
+        tc::Criterion c("L0-GFL-22.b", "DC 5 V + 100 Hz 10 V + bench harmonics: filter removes DC and 100 Hz (< 5 %), fundamental ±0.5 % / ±0.3°, 3rd/5th/7th ±10 %");
+        const double harm[8] = {0, 1.0, 10.0 / V_pk, 0.034, 0, 0.046, 0, 0.02};   // [2] = 100 Hz
+        auto runFf = [&](bool filt, std::complex<double> h[8], double &dc) {
+            singlePhaseInverterFollowing inv; initDefault(inv);
+            inv.setFeedforwardFilter(filt); inv.requestSync();
+            double ph = 1.0; const int settle = 3 * ticks_per_s, navg = ticks_per_s / 5;   // 10 periods
+            for (int k = 0; k < 8; ++k) h[k] = 0.0;
+            dc = 0.0;
+            for (int n = 0; n < settle + navg; ++n) {
+                double v = 5.0;
+                for (int k = 1; k < 8; ++k) v += harm[k] * V_pk * std::cos(k * ph);
+                inv.calculateDuty(static_cast<float>(v), 0.0F);
+                if (n >= settle) {
+                    const double al = inv.getVabFeedforward().alpha;
+                    dc += al / navg;
+                    for (int k = 1; k < 8; ++k) h[k] += al * std::polar(2.0 / navg, -k * ph);
+                }
+                ph = std::fmod(ph + two_pi * 50.0 * Ts, two_pi);
+            }
+        };
+        std::complex<double> hf[8], hu[8]; double dcf, dcu;
+        runFf(true, hf, dcf); runFf(false, hu, dcu);
+        c.near("unfiltered keeps the DC (V)", dcu, 5.0, 0.2);
+        c.range("filtered DC (V)", std::fabs(dcf), 0.0, 0.25);
+        c.near("unfiltered keeps the 100 Hz (V)", std::abs(hu[2]), 10.0, 0.3);
+        c.range("filtered 100 Hz (V)", std::abs(hf[2]), 0.0, 0.5);
+        c.near("fundamental amplitude filtered / unfiltered", std::abs(hf[1]) / std::abs(hu[1]), 1.0, 0.005);
+        c.near("fundamental phase filtered − unfiltered (deg)", std::arg(hf[1] / hu[1]) * 180.0 / M_PI, 0.0, 0.3);
+        for (int k : {3, 5, 7})
+            c.near(("harmonic " + std::to_string(k) + " filtered / unfiltered").c_str(), std::abs(hf[k]) / std::abs(hu[k]), 1.0, 0.10);
+        /** @test L0-GFL-22.c: residual DC, 100 Hz and fundamental phase error with the filter (INFO) */
+        tc::info("L0-GFL-22.c", "Filtered feedforward: residual 100 Hz", std::abs(hf[2]), "V");
+        tc::info("L0-GFL-22.d", "Filtered feedforward: fundamental phase error", std::arg(hf[1] / hu[1]) * 180.0 / M_PI, "deg");
     }
 
     return tc::finish();

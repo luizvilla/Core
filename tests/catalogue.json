@@ -956,6 +956,16 @@
    "status_note": "Implemented 2026-11-13 at Luiz Villa's request: feedforward without the measurement noise"
   },
   {
+   "id": "L0-GFL-22",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "Feedforward filter: DC block and 2ω notch with the fundamental restored (setFeedforwardFilter)",
+   "criterion": ".a off by default, kept across init(); .b grid with 5 V DC, 10 V at 100 Hz and the bench odd harmonics: the filtered measured feedforward keeps < 5 % of the DC (0.25 V) and of the 100 Hz (0.5 V), the fundamental within ±0.5 % and ±0.3° of the unfiltered one, the 3rd/5th/7th within ±10 %; INFO .c residual 100 Hz, .d fundamental phase error",
+   "source": "`setFeedforwardFilter`, `calculateDuty` (library 0cce694)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13: residual 100 Hz 0.053 V of 10 V, fundamental within 0.019°; the notch subtracts the SOGI's previous sample (its one-sample lead would leave 3–6 %)"
+  },
+  {
    "id": "L1-GFL-01",
    "tab": "inverter",
    "level": "L1",
