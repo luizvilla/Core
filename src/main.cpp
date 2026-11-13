@@ -200,6 +200,8 @@ static int64_t rate_prev_ms = 0;
 static bool scope_fast_connect = false;
 /* Menu 'e': step 1 with the library's settle counter running (diagnostic for the fault after 'g'). */
 static bool settle_count_test = false;
+/* Inverter feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha), instead of the measured VAC (menu 'F'). */
+static bool sogi_feedforward = false;
 /* Menu 'z': protection test, one control period sees an artificial AC current above the bench trip
  * (app::bench_inverter_current_trip); the scope's IAC channel shows it. */
 static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the artificial sample (0: none) */
@@ -472,6 +474,7 @@ void loop_communication_task()
                "|     press c : step 1 PWM_SETTLE hold   |\n"
                "|     press g : step 2 connect (relay)   |\n"
                "|     press G : step 2b connect, PLL hold|\n"
+               "|     press F : feedforward SOGI/measured|\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
                "|     press y : step 4 bus loop (with m) |\n"
@@ -654,6 +657,16 @@ void loop_communication_task()
         settle_count_test = !settle_count_test;
         printk("step 1 settle counter: %s\n", settle_count_test ? "RUNNING (diagnostic)" : "off (normal)");
         break;
+    case 'F':
+        /* Switched only with the relay open: the control step applies it in OFF or before the relay command. */
+        if (inverter_stage != INV_OFF && inverter_stage != INV_SETTLE && inverter_stage != INV_OPEN_LOOP)
+        {
+            printk("feedforward source refused: inverter OFF (x) or step 1 (c) first\n");
+            break;
+        }
+        sogi_feedforward = !sogi_feedforward;
+        printk("feedforward: %s\n", sogi_feedforward ? "SOGI alpha and APF(SOGI alpha)" : "measured VAC and APF(VAC)");
+        break;
     case 'v':
         scope_fast_connect = !scope_fast_connect;
         printk("scope in CONNECT/INJECT: %s\n", scope_fast_connect ? "10 kHz" : "2 kHz");
@@ -709,14 +722,15 @@ void loop_application_task()
         const dqo_t idq_s = control.inverter.getIdq();
         const uint32_t load_s = critical_max_cycles / cycles_per_us;
         critical_max_cycles = 0U;
-        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u\n",
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
                (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
                static_cast<unsigned int>(control.grid_observer.canOperate()),
                static_cast<unsigned int>(control.inverter.getFaultReason()),
                (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)), static_cast<unsigned int>(load_s),
-               static_cast<unsigned int>(critical_lost_ticks));
+               static_cast<unsigned int>(critical_lost_ticks),
+               static_cast<unsigned int>(control.sogi_feedforward_applied));
         task.suspendBackgroundMs(100);
         return;
     }
@@ -940,6 +954,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     cmd.v_bus_ref = voltage_reference;
     cmd.voltage_notch_enabled = voltage_notch_enabled;
     cmd.current_resonant_enabled = current_resonant_enabled;
+    cmd.sogi_feedforward = sogi_feedforward;
 
     const ControlOutputs out = controlStep(control, meas, cmd);
     TIMING_TICK_PROBE(2);

@@ -258,6 +258,8 @@ struct OperatorCommands {
     bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
     bool voltage_notch_enabled = false; ///< Reject 100 Hz in boost voltage feedback (menu 'N').
     bool current_resonant_enabled = false; ///< Add 100 Hz boost current correction (menu 'K').
+    bool sogi_feedforward = false;   ///< Inverter feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha), instead of
+                                     ///< the measured VAC and its APF (menu 'F'); applied only while the relay is open.
 };
 
 /** @brief PWM commands for one control period. */
@@ -291,6 +293,7 @@ struct ControlState {
     bool bench_tripped = false;                 ///< Bench current protection latched (cleared in the OFF stage).
     bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
     bool follow_connect_applied = false;        ///< Step 2b settings currently applied to the inverter.
+    bool sogi_feedforward_applied = false;      ///< Feedforward source currently applied: SOGI (true) or measured.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
     Pid bus_pid;                                ///< DC bus voltage loop (stage INV_BUS_LOOP), d-axis current out.
     float32_t bus_current_ref = 0.0F;           ///< Bus loop output, A peak (held between its runs; 0 outside RUN).

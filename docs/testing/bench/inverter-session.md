@@ -11,6 +11,7 @@ The first hardware tests of the inverter: generate 230 V RMS, synchronize with t
 | ~~1d~~ | — | removed by ADR 0007 (key `a` and stage 5 gone) | — | (L2-INV-06 retired) |
 | 2 | `g` | `INV_CONNECT`, grid on the other side | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
 | 2b | `G` | `INV_FOLLOW_CONNECT`, grid on the other side | PWM_SETTLE (10 periods) → GRID_CONNECT (PI on, blanking) → GRID_CONNECTED 20 ms after the relay command | The connection with the current PI from the relay request and the PLL frozen around the contact (L2-INV-07) |
+| 2b-SOGI | `F`, then `G` | `INV_FOLLOW_CONNECT`, feedforward from SOGI alpha and APF(SOGI alpha) | as 2b | Step 2b with a feedforward free of the measurement noise and the grid harmonics (L2-INV-08) |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
 | relay test | `R` | `INV_OFF` (dead bench only) | OFF | The relay closes and opens on its own (pre-check L2-INV-10.a) |
@@ -39,7 +40,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 ## Telemetry
 
-**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs>` (`off` is always 0 since ADR 0007; it stays in the line for the L2 console parser). Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending keys so the menu stays responsive.
+**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs> lost <ticks> ff <source>` (`off` is always 0 since ADR 0007; it stays in the line for the L2 console parser; `ff` is the feedforward source applied: 0 the measured VAC and its APF, 1 SOGI alpha and APF(SOGI alpha), key `F`). Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending keys so the menu stays responsive.
 
 **Full (`l`):** every 100 ms one line, fields separated by `:`:
 
@@ -207,6 +208,30 @@ Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the c
 | .g State 3 (GRID_CONNECTED) 20 ms after the relay command | ±2 ms | counted by the inverter | |
 | .h INFO: closing peak and settling against step 2 | record | the effect of the PI from the request and the blanking | |
 
+## L2-INV-08 · Step 2b with the SOGI feedforward
+
+**Why.** In L2-INV-07 (2026-11-13, 16:39) the connection left 0.57 A RMS on the line, its fundamental leading the grid by 56°, with a 5th and 7th of 0.18 and 0.13 A. Since ADR 0007 the feedforward is the measured VAC and its APF: it copies the measurement noise and the grid harmonics into the bridge voltage. This step builds it from the PLL pair instead, SOGI alpha and APF(SOGI alpha): the SOGI passes the fundamental with gain 1 and keeps 0.51 / 0.31 / 0.23 of the 3rd / 5th / 7th and about 0.11 of white noise at 50 µs (L0-GFL-21). The inverter then makes a clean sine where the grid has harmonics, so the harmonic voltage difference drives some harmonic current through the bulb: the comparison with L2-INV-07 tells which effect dominates.
+
+**Firmware.** Key `F` toggles the source, only in OFF, step 0 or step 1, and the control step applies it only with the relay open. Telemetry `ff` shows the source applied (1: SOGI). It stays selected until `F` again or a restart. Everything else is step 2b.
+
+**Conditions.** As L2-INV-07. Configure the scope measurements in Setup first. CH4 on GPIO 22 (3.3 V when the relay is commanded; check the probe attenuation) so the single shot triggers on the command.
+
+**Sequence.**
+1. `c`, wait for `inv 8`. Acquire point *step1-measured* (`ff 0`).
+2. Press `F`: the console prints `feedforward: SOGI…`, the telemetry shows `ff 1`. Wait 1 s, Acquire point *step1-sogi*. Compare RMS and PHASE of the two points (.i).
+3. Optional: `v` for the 10 kHz firmware capture. Arm single shot on CH4 rising (point *close*), press `G`. Expected as L2-INV-07: 8 → 2 → 3, state 3 20 ms after the command.
+4. In GRID_CONNECTED: Acquire point *connected* (residual current, .c); watch `Id`, `Iq` for 30 s. Press `r` for the firmware capture.
+5. Arm single shot on CH4 falling (point *open*), press `x`.
+6. Press `F` again to return to the measured feedforward, or leave it for the next run (the telemetry says which).
+
+**Acceptance.** As L2-INV-07 (.a closing peak < 3 A without trip; .b settled within 100 ms; .c residual < 0.05 A RMS; .d orderly opening; .g state 3 20 ms ±2 ms after the command), plus:
+
+| Criterion | Limit | Why | Result |
+|---|---|---|---|
+| .ff Telemetry `ff 1` from `G` to the end | yes | the run used the SOGI feedforward | |
+| .h INFO: closing peak, residual current and its harmonics against L2-INV-07 | record | the effect of the feedforward source | |
+| .i INFO: step 1 with each source, inverter side against grid side (RMS %, PHASE) | record | the SOGI feedforward drops the harmonics from the inverter voltage | |
+
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 
 **Conditions.** As step 2, in GRID_CONNECTED (state 3). The bulb makes a weak grid: the injected current raises the grid-side voltage by I·R_bulb (cold about 40 Ω, hot about 500 Ω). The firmware caps the reference at 0.1 A peak (`app::inject_current_max`), which keeps the rise below the observer's 253 V limit. Higher currents need the bulb bypassed and a new cap: a separate decision.
@@ -238,6 +263,7 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 | 2026-11-09/10 | L2-INV-01 | `c935efb` and later | 399–402 V (meter 399.4 V) | .a pass (RMS very close), .b pass after the leg-order fix, .c pass, .d pass | `2026-11-09_inverter/L2-INV-01_in-phase.png` | bridge leg order and VDCBus calibration fixed during the step |
 | 2026-11-09/10 | L2-INV-04 | `b487ba5` (fix), `f352225`/`acf1ad6` (z) | 400–404 V | .a pass, .b 9.7 ms (1 of 3), .c .d to do, .e partial, .f pass | `2026-11-09_inverter/L2-INV-04_*.png`, `src/Data_records/2026-11-09_21-4*` | findings #9 (relay pin), #10 (fault 12), #11 (scope dump) |
 | | L2-INV-02 | | | | | |
+| | L2-INV-08 | | | | | |
 | | L2-INV-03 | | | | | |
 
 ## Simulation counterpart

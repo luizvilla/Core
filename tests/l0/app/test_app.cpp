@@ -779,6 +779,49 @@ int main() {
         c.check("inverter OFF", state.inverter.getMode() == VSI_OFF);
     }
 
+    // ---------------------------------------------------------------- L0-APP-15 (feedforward source, menu F)
+    {
+        /** @test L0-APP-15.a: The feedforward source defaults to measured; the request applies on the next period with the relay open, and back */
+        tc::Criterion c("L0-APP-15.a", "Feedforward measured by default; SOGI on request with the relay open (next period), and back");
+        ControlState state; Grid grid; float held = 0.0F;
+        OperatorCommands cmd;
+        c.check("controlInit", controlInit(state) == 0);
+        gridStep(state, grid, cmd, true, held);
+        c.check("default measured", state.inverter.getFeedforwardSource() == FeedforwardSource::MEASURED);
+        cmd.sogi_feedforward = true;
+        gridStep(state, grid, cmd, true, held);
+        c.check("SOGI after one period (OFF)", state.inverter.getFeedforwardSource() == FeedforwardSource::SOGI);
+        cmd.inverter_stage = INV_SETTLE;
+        for (int k = 0; k < 2 * ticks_per_s; ++k) gridStep(state, grid, cmd, true, held);
+        c.check("kept in step 1", state.inverter.getFeedforwardSource() == FeedforwardSource::SOGI);
+        cmd.sogi_feedforward = false;
+        gridStep(state, grid, cmd, true, held);
+        c.check("measured again after one period (step 1, relay open)", state.inverter.getFeedforwardSource() == FeedforwardSource::MEASURED);
+    }
+    {
+        /** @test L0-APP-15.b: A request while the relay is closed waits: the source changes only once the relay is open again */
+        tc::Criterion c("L0-APP-15.b", "Request with the relay closed waits until the relay is open again");
+        ControlState state; Grid grid; Relay relay;
+        OperatorCommands cmd; cmd.inverter_stage = INV_CONNECT;
+        c.check("controlInit", controlInit(state) == 0);
+        auto run = [&](int ticks) {
+            for (int k = 0; k < ticks; ++k) {
+                Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.i_ac = 0.0F; m.relay_closed = relay.closed;
+                const ControlOutputs out = controlStep(state, m, cmd);
+                state.bridge_pwm_applied = out.bridge_enable; relay.apply(out); grid.advance();
+            }
+        };
+        run(4 * ticks_per_s);
+        c.check("relay closed in step 2", relay.closed);
+        cmd.sogi_feedforward = true;
+        run(ticks_per_s / 2);
+        c.check("still measured while closed", state.inverter.getFeedforwardSource() == FeedforwardSource::MEASURED);
+        cmd.inverter_stage = INV_OFF;
+        run(2 * ticks_per_s);
+        c.check("relay open after OFF", !relay.closed);
+        c.check("SOGI once open", state.inverter.getFeedforwardSource() == FeedforwardSource::SOGI);
+    }
+
     // ---------------------------------------------------------------- L0-APP-12
     {
         /** @test L0-APP-12.a: Step 2b: measured feedforward in PWM_SETTLE (ADR 0007, no VAC copy), PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */

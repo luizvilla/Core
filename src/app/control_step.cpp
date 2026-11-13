@@ -175,6 +175,13 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
         state.inverter.setConnectWindow(follow_connect ? app::follow_connect_window : 0.0F);
         state.follow_connect_applied = follow_connect;
     }
+    /* Feedforward source (menu 'F'): changed only with the relay open and not commanded, so it never switches under a
+     * closed contact; a request made while connected waits for the relay to open. */
+    if (cmd.sogi_feedforward != state.sogi_feedforward_applied && !meas.relay_closed && !state.relay_command_latched)
+    {
+        state.inverter.setFeedforwardSource(cmd.sogi_feedforward ? FeedforwardSource::SOGI : FeedforwardSource::MEASURED);
+        state.sogi_feedforward_applied = cmd.sogi_feedforward;
+    }
     TIMING_PROBE(3);
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
     TIMING_PROBE(4);

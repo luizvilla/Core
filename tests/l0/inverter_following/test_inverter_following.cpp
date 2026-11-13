@@ -39,6 +39,8 @@
  * | L0-GFL-10 | Synchronization with grid harmonics (bench levels, EN 50160 limits) |
  * | L0-GFL-13 | Synchronization with a DC offset on VAC |
  * | L0-GFL-16 | PWM start-up before relay closure (PWM_WAIT, PWM_SETTLE) |
+ * | L0-GFL-20 | APF quadrature (ADR 0007) |
+ * | L0-GFL-21 | Feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha) (setFeedforwardSource) |
  *
  * The grid is a synthetic sine fed sample by sample; nothing the controller
  * outputs feeds back into it. Relay feedback is driven directly through
@@ -66,8 +68,10 @@
 #include "check.h"
 
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -1182,6 +1186,135 @@ int main() {
         step(inv, grid);
         const dqo_t idq = inv.getIdq();
         c.range("|Idq| on the first sample (A)", std::hypot(idq.d, idq.q), 1.0, 3.0);
+    }
+
+    // ---------------------------------------------------------------- L0-GFL-21 (feedforward source)
+    // The voltage SOGI is H(s) = Kr s / (s^2 + Kr s + w0^2), Kr = 500 rad/s (library VOLTAGE_SOGI_KR): at h·w0 its
+    // gain is Kr h / sqrt((Kr h)^2 + (w0 (h^2 - 1))^2), and it passes white noise over Kr/4 = 125 Hz (one-sided
+    // noise bandwidth) against 1/(2 Ts) = 5 kHz for the raw samples: noise RMS ratio sqrt(125 / 5000) = 0.16.
+    const double sogi_kr = 500.0;
+    auto sogiGain = [&](double h) { return sogi_kr * h / std::hypot(sogi_kr * h, w0 * (h * h - 1.0)); };
+    {
+        /** @test L0-GFL-21.a: The default feedforward is MEASURED; with SOGI it equals the PLL pair on every sample; switching back restores the measurement; the source survives init() */
+        tc::Criterion c("L0-GFL-21.a", "Default MEASURED; SOGI: feedforward = PLL Vab and Vdq on every sample; back to MEASURED; kept across init()");
+        singlePhaseInverterFollowing inv; Grid grid;
+        c.check("init", initDefault(inv));
+        c.check("default source MEASURED", inv.getFeedforwardSource() == FeedforwardSource::MEASURED);
+        inv.requestSync();
+        for (int n = 0; n < 2 * ticks_per_s; ++n) step(inv, grid);
+        inv.setFeedforwardSource(FeedforwardSource::SOGI);
+        bool equal = true;
+        for (int n = 0; n < ticks_per_s / 10; ++n) {
+            step(inv, grid);
+            const clarke_t ff = inv.getVabFeedforward(), pll = inv.getVab();
+            const dqo_t ffdq = inv.getVdqFeedforward(), plldq = inv.getVdq();
+            equal = equal && ff.alpha == pll.alpha && ff.beta == pll.beta && ffdq.d == plldq.d && ffdq.q == plldq.q;
+        }
+        c.check("SOGI: feedforward Vab and Vdq equal the PLL's on 1000 samples", equal);
+        inv.setFeedforwardSource(FeedforwardSource::MEASURED);
+        const float v = grid.v();
+        step(inv, grid);
+        c.near("MEASURED again: feedforward alpha = the measurement (V)", inv.getVabFeedforward().alpha, v, 1e-6);
+        inv.setFeedforwardSource(FeedforwardSource::SOGI);
+        c.check("re-init", initDefault(inv));
+        c.check("source kept across init()", inv.getFeedforwardSource() == FeedforwardSource::SOGI);
+    }
+    // Feedforward alpha of each source on a distorted, noisy 50 Hz grid, once synchronized.
+    struct FfRun { double h[8]; double ripple_d; std::vector<double> alpha; };
+    auto ffOn = [&](FeedforwardSource src, const double harm[8], double noise_pk) {
+        singlePhaseInverterFollowing inv;
+        FfRun r{};
+        initDefault(inv);
+        inv.setFeedforwardSource(src);
+        inv.requestSync();
+        double ph = 1.0;
+        uint32_t lcg = 12345U;
+        const int settle = 3 * ticks_per_s, n_avg = ticks_per_s / 5;  // 10 periods
+        double re[8] = {}, im[8] = {}, d_min = 1e9, d_max = -1e9;
+        for (int n = 0; n < settle + n_avg; ++n) {
+            double v = 0.0;
+            for (int k = 1; k < 8; ++k) v += harm[k] * V_pk * std::cos(k * ph);
+            lcg = lcg * 1664525U + 1013904223U;
+            const double noise = noise_pk * (2.0 * (lcg >> 8) / double(1U << 24) - 1.0);  // uniform, RMS noise_pk/sqrt(3)
+            inv.calculateDuty(static_cast<float>(v + noise), 0.0F);
+            if (n >= settle) {
+                const double a = inv.getVabFeedforward().alpha;
+                for (int k = 1; k < 8; ++k) { re[k] += a * std::cos(k * ph); im[k] += a * std::sin(k * ph); }
+                const dqo_t ff = inv.getVdqFeedforward();
+                d_min = std::fmin(d_min, ff.d); d_max = std::fmax(d_max, ff.d);
+                r.alpha.push_back(a);
+            }
+            ph = std::fmod(ph + two_pi * 50.0 * Ts, two_pi);
+        }
+        for (int k = 1; k < 8; ++k) r.h[k] = 2.0 * std::hypot(re[k], im[k]) / n_avg / V_pk;
+        r.ripple_d = d_max - d_min;
+        return r;
+    };
+    const double bench_h[8] = {0, 1.0, 0, 0.034, 0, 0.046, 0, 0.02};  // bench grid, 2026-11-09
+    {
+        /** @test L0-GFL-21.b: Bench harmonics (3rd 3.4 %, 5th 4.6 %, 7th 2 %): MEASURED copies them; SOGI keeps the SOGI's gain at each (0.51, 0.31, 0.23), within ±15 %; the fundamental within ±1 % for both */
+        tc::Criterion c("L0-GFL-21.b", "Bench harmonics: MEASURED copies them; SOGI attenuates 3rd/5th/7th to the SOGI gain (0.51/0.31/0.23) ±15 %; fundamental ±1 %");
+        const FfRun m = ffOn(FeedforwardSource::MEASURED, bench_h, 0.0), s = ffOn(FeedforwardSource::SOGI, bench_h, 0.0);
+        c.near("MEASURED fundamental (p.u.)", m.h[1], 1.0, 0.01);
+        c.near("SOGI fundamental (p.u.)", s.h[1], 1.0, 0.01);
+        for (int k : {3, 5, 7}) {
+            const std::string h = std::to_string(k);
+            c.near(("MEASURED harmonic " + h + " / grid").c_str(), m.h[k] / bench_h[k], 1.0, 0.02);
+            c.near(("SOGI harmonic " + h + " / grid").c_str(), s.h[k] / bench_h[k], sogiGain(k), 0.15 * sogiGain(k));
+        }
+        /** @test L0-GFL-21.d: Bench harmonics: ripple of the feedforward Vd for each source (INFO) */
+        tc::info("L0-GFL-21.d", "Bench harmonics: feedforward Vd ripple (max - min), MEASURED", m.ripple_d, "V");
+        tc::info("L0-GFL-21.e", "Bench harmonics: feedforward Vd ripple (max - min), SOGI", s.ripple_d, "V");
+    }
+    {
+        /** @test L0-GFL-21.c: Clean 50 Hz grid with uniform noise of ±20 V on VAC: the SOGI feedforward keeps at most 0.25 of the measured feedforward's noise RMS (theory 0.16); noise = the same run with minus without the noise, sample by sample */
+        tc::Criterion c("L0-GFL-21.c", "±20 V uniform noise on VAC: SOGI feedforward noise RMS ≤ 0.25 × MEASURED (theory 0.16)");
+        const double clean_h[8] = {0, 1.0, 0, 0, 0, 0, 0, 0};
+        auto noiseRms = [&](FeedforwardSource src) {
+            const FfRun a = ffOn(src, clean_h, 20.0), b = ffOn(src, clean_h, 0.0);
+            double e2 = 0.0;
+            for (size_t k = 0; k < a.alpha.size(); ++k) e2 += (a.alpha[k] - b.alpha[k]) * (a.alpha[k] - b.alpha[k]);
+            return std::sqrt(e2 / a.alpha.size());
+        };
+        const double nm = noiseRms(FeedforwardSource::MEASURED), ns = noiseRms(FeedforwardSource::SOGI);
+        c.near("MEASURED noise RMS = the input's, 20/sqrt(3) V (V)", nm, 20.0 / std::sqrt(3.0), 1.0);
+        c.range("SOGI / MEASURED noise RMS", ns / nm, 0.0, 0.25);
+        /** @test L0-GFL-21.f: Noise: SOGI / MEASURED noise RMS ratio (INFO) */
+        tc::info("L0-GFL-21.f", "Noise: SOGI / MEASURED feedforward noise RMS", ns / nm, "");
+    }
+
+    {
+        /** @test L0-GFL-21.g: SOGI source in GRID_CONNECT (feedforward only, advance 0.3 as step 2b), grid phase stepped 10°: until the library's SYNC_LOST stops it, the instantaneous feedforward Vq is used, not zero, so the bridge voltage stays SOGI alpha rotated by the advance on every sample while the PLL angle lags; INFO the largest Vq and the error a zero Vq would have given */
+        tc::Criterion c("L0-GFL-21.g", "SOGI in GRID_CONNECT, grid phase step 10°: output = SOGI alpha rotated by the advance on every sample (Vq not zeroed)");
+        singlePhaseInverterFollowing inv; Grid grid;
+        inv.setFeedforwardSource(FeedforwardSource::SOGI);
+        c.check("advance 0.3 accepted", inv.setOutputPhaseAdvance(0.3F));
+        if (reachConnect(c, inv, grid)) {
+            grid.phase = std::fmod(grid.phase + 10.0 * M_PI / 180.0, two_pi);
+            double out_err = 0.0, vq_max = 0.0, zero_vq_err = 0.0;
+            int n_connect = 0, n_vq = 0;
+            for (int n = 0; n < ticks_per_s / 25; ++n) {  // up to 40 ms
+                const float duty = step(inv, grid);
+                if (inv.getMode() != VSI_GRID_CONNECT) break;  // SYNC_LOST: the library stops the connection (by design)
+                ++n_connect;
+                const clarke_t ab = inv.getVab();
+                const dqo_t dq = inv.getVdqFeedforward();
+                const double delta = inv.getOutputPhaseAdvance() * inv.getw() * Ts;
+                const double out = (duty - 0.5) * 2.0 * V_bus;
+                out_err = std::fmax(out_err, std::fabs(out - (ab.alpha * std::cos(delta) - ab.beta * std::sin(delta))));
+                vq_max = std::fmax(vq_max, std::fabs(dq.q));
+                if (std::fabs(dq.q) > 10.0) ++n_vq;
+                // what the output would be with Vq forced to 0: Vd at the PLL angle (+ advance)
+                zero_vq_err = std::fmax(zero_vq_err, std::fabs(out - dq.d * std::cos(inv.getTheta() + delta)));
+            }
+            c.range("samples in GRID_CONNECT with |Vq| > 10 V (the PLL angle wrong)", n_vq, 20.0, 1e9);
+            c.near("output - SOGI alpha rotated by the advance (V)", out_err, 0.0, 0.05);
+            /** @test L0-GFL-21.h: largest instantaneous feedforward Vq after the phase step (INFO) */
+            tc::info("L0-GFL-21.h", "SOGI, phase step 10°: largest instantaneous feedforward Vq carried to the output", vq_max, "V");
+            /** @test L0-GFL-21.i: largest difference between the output and a zero-Vq feedforward (INFO) */
+            tc::info("L0-GFL-21.i", "SOGI, phase step 10°: largest output difference against a zero-Vq feedforward", zero_vq_err, "V");
+            tc::info("L0-GFL-21.j", "SOGI, phase step 10°: samples in GRID_CONNECT before SYNC_LOST", n_connect, "samples");
+        }
     }
 
     return tc::finish();

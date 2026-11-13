@@ -712,3 +712,15 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | `scope.set_delay(0.1)` (was 0.5): 26 samples before the first sample where the trigger holds (sample 26 of 256, was 129), 230 from it: 13 ms / 115 ms at 2 kHz, 2.6 ms / 23 ms at 10 kHz (`v`), so at 10 kHz state 3 of step 2b (+20 ms) is now inside the capture. Before each dump the firmware prints `scope: 256 samples, trigger at sample N, R Hz`, R being the rate the capture ran at (divider kept while it acquires). The bench app and the review page read that line; older dumps keep the rate guessed from the console and the trigger at sample 129 (it was taken as 128). |
 | Evidence | `pio run -e USB` and `-e TIMING` build (RAM 32.9 %, flash 75.0 % for USB). Not flashed, not run on the board |
 | Hardware check | Pending: flash env USB, take one dump with `r` and check the console prints the header and the trigger edge sits at sample 26 |
+
+## 2026-11-13 — Feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha) (key F, L2-INV-08)
+
+| Field | Value |
+|---|---|
+| Commit | Uncommitted on `apf_quadrature` after `ef4be85`; single_phase_inverter `b9e8829` (branch `feat/sogi-feedforward` of luizvilla/single_phase_inverter, from `1db5b89`), pinned in `src/app.ini` and `tests/l1/dependencies.lock.json` |
+| Files | Library `singlePhaseInverterFollowing.{h,cpp}`, `README.md`. App `src/app/control_step.{h,cpp}`, `src/main.cpp`. Tests `tests/l0/inverter_following/test_inverter_following.cpp` (L0-GFL-21), `tests/l0/app/test_app.cpp` (L0-APP-15), `tests/l2/{criteria.json,console.py,README.md}`, catalogue, procedure §6, `bench/inverter-session.md` (L2-INV-08) |
+| Reason | Luiz Villa, after L2-INV-07 (16:39) left 0.57 A RMS on the line with the measured feedforward: build the feedforward from SOGI alpha(VAC) and APF(SOGI alpha) so it carries no measurement noise |
+| Behaviour change | `setFeedforwardSource(MEASURED | SOGI)` in the library, default MEASURED (ADR 0007 unchanged). Key `F` toggles it in OFF, step 0 or step 1; the control step applies it only with the relay open and not commanded. Telemetry ends with `ff 0/1` (the source applied). No extra computation in the critical task with SOGI (the PLL pair is reused; the feedforward APF keeps running so a switch starts settled) |
+| Evidence | Campaign `tests/out/2026-11-13_ef4be85-dirty_171310_z8S8pr` (L0 + L0-TIM on a bare Spin): L0-GFL-21.a–c PASS (with the bench harmonics the SOGI feedforward keeps 0.51/0.31/0.23 of the 3rd/5th/7th as the theory says, feedforward Vd ripple 56.9 → 19.7 V; noise RMS ratio 0.17, theory 0.16 at 100 µs, 0.11 at 50 µs); L0-APP-15.a–b PASS; L0 host 151 pass, 5 known fail, 0 new. L0-TIM-01/02/03 budgets pass (worst critical tick 38.6 µs in OPEN_LOOP_o, 38.5 before). L0-TIM-03.c: 1 lost period in OPEN_LOOP_o, also seen once at `22cc663` (15:33): intermittent, not from this change |
+| Not done | Bench (L2-INV-08). L1 with the SOGI source (L1-GFL-16 not implemented yet) |
+| Hardware check | Pending: flash env USB on the inverter's Spin, then L2-INV-08 |
