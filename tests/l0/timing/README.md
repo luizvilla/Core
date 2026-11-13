@@ -118,6 +118,30 @@ Criteria: `.a` coverage; `.b-<bucket>` task tick ≤ budget; `.c` no lost period
 
 **Before/after reference.** `run.sh --run --flash-ws8` builds env `TIMING_WS8`, which puts the flash back to the clock driver's 8 wait states at boot. Its campaign carries `reference.json`: the control center lists it in the Runs tab and never takes it as a test's current result, and it is not judged against the baseline.
 
+## When the harness does not finish (frozen target)
+
+**Symptom.** `read_report` repeats the same state and tick count (for example `RUNNING_TIM03, 807122 ticks`) until it times out, then `L0-TIM-01.a FAIL … state RUNNING_TIM03`. The tick counter only stops if the critical task stops: on Zephyr that is usually a fatal error, and the core halts with interrupts locked (control, protections and console all stop; the HRTIM keeps switching). The verdict does not say so: diagnose it by hand while the board is still frozen.
+
+**Diagnosis** (board untouched after the run; the TIMING `firmware.elf` must match what is on the board):
+
+```bash
+O=~/.platformio/packages/tool-openocd
+# 1. Mode and active exception (ICSR VECTACTIVE: 3 HardFault, 4 MemManage, 5 BusFault, 6 UsageFault)
+$O/bin/openocd -s $O/openocd/scripts -f interface/stlink.cfg -f target/stm32g4x.cfg \
+  -c init -c halt -c "reg pc" -c "mdw 0xE000ED04 1" -c resume -c shutdown
+# 2. Fatal reason, faulting thread and context (OpenOCD as GDB server, then GDB)
+$O/bin/openocd -s $O/openocd/scripts -f interface/stlink.cfg -f target/stm32g4x.cfg -c init -c halt &
+~/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gdb -batch -nx .pio/build/TIMING/firmware.elf \
+  -ex "target extended-remote :3333" -ex bt -ex "frame 1" -ex "p *esf" \
+  -ex "p _kernel.cpus[0].current" -ex "p/x _kernel.cpus[0].current->stack_info" -ex "monitor shutdown"
+```
+
+`k_sys_fatal_error_handler(reason)`: 0 CPU exception, 2 `K_ERR_STACK_CHK_FAIL` (a thread overflowed its stack; the thread's `stack_info.size` tells which: 0x400 is an OwnTech asynchronous task, the background task), 3 kernel oops, 4 kernel panic. Symbolize `esf.pc` with `arm-none-eabi-addr2line -f -e .pio/build/TIMING/firmware.elf <pc>`. Write the result into the campaign (`l0_tim03/fatal_diagnosis.md`), then flash env USB.
+
+**Found this way (2026-11-13).** The run on `cd277eb` froze at the first scope dump (`r`) during TIM-03; the same with the firmware files of `c862597`. The core sat in `arch_system_halt(reason 2)`: the background task overflowed its 1 KB stack in the `sprintf` of `ScopeMimicry::dump_datas()` when the control interrupt stacked its FPU frame on top. At `ef4be85` the dumps had completed. The same fault on the bench, at the dump of 22:36:32, coincided with a bridge leg blowing (worklog 2026-11-13, incident and stack overflow; campaigns `2026-11-13_cd277eb_225411_Go83KY` and `2026-11-13_cd277eb-dirty_230231_ZpGJDI`, each with `l0_tim03/fatal_diagnosis.md`). TIM-03 caught it because it dumps every 10 s while the critical task runs; the steps without a run of L0-TIM in between were not checked.
+
+**Limits.** Whether the overflow happens depends on where the interrupt lands, so a pass does not prove a margin. Planned (see *Not yet implemented*): a stack-margin criterion, the fatal reason decoded automatically when the ticks stop, back-to-back dumps with the full telemetry.
+
 ## Reporting
 
 How the review page (`tests/common/review_report.py`) shows the timing tests. Keep these rules when adding L0-TIM-03/04 or changing a figure.
@@ -138,5 +162,6 @@ How the review page (`tests/common/review_report.py`) shows the timing tests. Ke
 | ID | What |
 |---|---|
 | L0-TIM-04 | Start delay of the critical task (other threads' interrupt locks) |
+| L0-TIM-03 additions | Stack margin per thread after dumps during the critical task (`CONFIG_INIT_STACKS`, `k_thread_stack_space_get`; e.g. ≥ 256 bytes free in the background task); when the ticks stop, halt the core over SWD and report the Zephyr fatal reason and thread in the verdict; back-to-back dumps with the full telemetry (worst case) |
 
 Sensor reads (`getLatestValue`) need the ADC acquisition running, so they are measured in L0-TIM-03, not in L0-TIM-01.

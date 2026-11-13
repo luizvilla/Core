@@ -1729,7 +1729,7 @@
    "conditions": "TIMING firmware after L0-TIM-02: the critical task runs criticalTaskTick with synthetic inputs at 20 kHz on the bare Spin (ADC and PWM running), the application task with full telemetry every 100 ms and the communication task; the host reads the USB console and sends h every 5 s and r every 10 s (console_reader.py). Reference build TIMING_WS8 (8 flash wait states) for before/after",
    "source": "ADR 0005; catalogue limits 80 µs, 150 µs, no lost period",
    "status": "implemented",
-   "status_note": "Implemented 2026-11-12",
+   "status_note": "Implemented 2026-11-12. 2026-11-13: the runs on cd277eb and on the c862597 firmware froze at the first scope dump during TIM-03 (reported as L0-TIM-01.a FAIL, state RUNNING_TIM03); diagnosed over SWD as K_ERR_STACK_CHK_FAIL, the background task overflowing its 1 KB stack in the dump's sprintf. The same fault coincided with the bench incident (worklog 2026-11-13); tests/l0/timing/README.md, frozen target. Stack-margin and fatal-reason criteria planned",
    "harness": "tests/l0/timing/run.sh --run [--flash-ws8]"
   },
   {
