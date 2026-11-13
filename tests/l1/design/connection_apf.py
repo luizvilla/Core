@@ -182,7 +182,7 @@ def discrete(closed, r, lg=None):
 
 
 def run(source='apf', bulb=None, t_settle=0.30, t_after=2.0, bridge_gain=0.976, bridge_phase_deg=-0.3, stop_on_trip=True, edge='rise',
-        lg=None, contact=RELAY_ACTUAL, vdt=VDT_FIT):
+        lg=None, contact=RELAY_ACTUAL, vdt=VDT_FIT, kp=KP_I, ti=TI_I, id_step=None, gains=None):
     """vdt (V): dead-time voltage of the bridge, opposing the inductor current (smoothed over ±50 mA): the bridge applies
     vb − vdt·tanh(iL / 0.05) — a fixed voltage loss, so an effective resistance that falls as the current grows."""
     """@return dict of traces at the control rate and events (contact, observer trip, current trip)."""
@@ -190,7 +190,9 @@ def run(source='apf', bulb=None, t_settle=0.30, t_after=2.0, bridge_gain=0.976, 
     sv = Sogi(500.0); apf_v, apf_ff, apf_i = Apf(), Apf(), Apf()
     wn = 3.0 / (2 * math.pi / W0); kpp = 2 * wn * 0.7 / VPK; kip = wn * wn / VPK
     pll_pi = Pi(kpp, kpp / kip, -10 * W0, 10 * W0)
-    pid, piq = Pi(KP_I, TI_I, -LIM_I, LIM_I), Pi(KP_I, TI_I, -LIM_I, LIM_I)
+    pid, piq = Pi(kp, ti, -LIM_I, LIM_I), Pi(kp, ti, -LIM_I, LIM_I)
+    # gains: [(s from the relay command, Kp, Ti)], applied live as the bench keys + - > < do (library setCurrentPiGains)
+    schedule = sorted(gains or [])
     w_tune_k = TS / (TS + 0.010)
     # Relay command at the first instant after t_settle that puts the predicted contact on a rising zero crossing.
     # edge: the predicted contact on a rising or a falling zero crossing of the grid fundamental (bench: either).
@@ -245,8 +247,16 @@ def run(source='apf', bulb=None, t_settle=0.30, t_after=2.0, bridge_gain=0.976, 
             ffd, ffq = vd_avg, 0.0
         elif after and source == 'apf_g07':
             gain = 0.7
+        while schedule and t - t_cmd >= schedule[0][0]:
+            _, kp_new, ti_new = schedule.pop(0)
+            for pi_ in (pid, piq):   # bumpless, as the library since 0caa792: the integral term Kp·∫e/Ti carries over
+                ui = pi_.kp * pi_.i / pi_.ti
+                pi_.kp, pi_.ti = kp_new, ti_new
+                pi_.i = ui * ti_new / kp_new
         if t >= t_cmd:
-            pd_, pq_ = pid(0.0, idm), piq(0.0, iqm)
+            # id_step = (s after the contact, A): the application's RUN reference (step 3) from that instant on.
+            id_ref = id_step[1] if id_step and t >= t_contact + id_step[0] else 0.0
+            pd_, pq_ = pid(id_ref, idm), piq(0.0, iqm)
         else:
             pid.reset(); piq.reset(); pd_, pq_ = 0.0, 0.0
         od, oq = gain * ffd + pd_, gain * ffq + pq_
@@ -588,14 +598,172 @@ def report(out: Path):
     return out / 'report.md'
 
 
+# ---- bench gain changes (keys + - > <) replayed in the model ------------------------------------------------------
+KP_STEP, KP_MIN, KP_MAX, TI_STEP, TI_MIN, TI_MAX = 0.1, 0.5, 10.0, 0.001, 0.001, 0.100   # app::current_kp_step… (control_step.h)
+
+
+def step_gain(v, up, step, lo, hi):
+    """app::stepGain: one step, snapped to the step grid, clamped."""
+    return min(max(math.floor(v / step + (1.5 if up else -0.5)) * step, lo), hi)
+
+
+def bench_gain_schedule(console, t_ref_iso):
+    """@brief Current PI gains from a bench console: the + - > < presses replayed from the last boot (defaults then),
+    as the firmware applies them. @return [(s from t_ref, Kp, Ti)] with the gains in force at t_ref first."""
+    import datetime as dt
+    t_ref = dt.datetime.fromisoformat(t_ref_iso).timestamp()
+    kp, ti, out = KP_I, TI_I, []
+    for line in (REPO / console).read_text(errors='replace').splitlines():
+        parts = line.split(' ', 2)
+        if len(parts) < 3: continue
+        try: t = dt.datetime.fromisoformat(parts[0]).timestamp()
+        except ValueError: continue
+        if parts[1] == '<' and 'Booting Zephyr' in parts[2]:
+            kp, ti = KP_I, TI_I; out = [(t - t_ref, kp, ti)]
+        elif parts[1] == '>' and parts[2] in ('+', '-', '>', '<'):
+            if parts[2] in '+-': kp = step_gain(kp, parts[2] == '+', KP_STEP, KP_MIN, KP_MAX)
+            else: ti = step_gain(ti, parts[2] == '>', TI_STEP, TI_MIN, TI_MAX)
+            out.append((t - t_ref, kp, ti))
+    before = [g for g in out if g[0] <= 0]
+    return ([(-1e9, *before[-1][1:])] if before else [(-1e9, KP_I, TI_I)]) + [g for g in out if g[0] > 0]
+
+
+# ---- D-GFL-10: current PI gain sweep -------------------------------------------------------------------------------
+STEP_AT, STEP_A = 0.6, 0.1   # Id reference step 0.6 s after the contact, 0.1 A (the bench's step 3 size)
+
+
+def step_metrics(r):
+    """Connection and step response of one run (time from the contact)."""
+    t = r['t'] - r['t_contact']; idm, iqm = r['id'], r['iq']
+    out = metrics(r)
+    pre = (t >= STEP_AT - 0.2) & (t < STEP_AT)
+    if not pre.any() or t[-1] < STEP_AT + 0.6:
+        return out
+    base = float(np.mean(idm[pre])); after = t >= STEP_AT
+    # one-period moving average removes the 2ω ripple of the instantaneous dq current
+    n = int(round(0.02 / TS)); k = np.ones(n) / n
+    ida = np.convolve(idm, k, 'same'); iqa = np.convolve(iqm, k, 'same')
+    y = (ida[after] - base) / STEP_A; ta = t[after] - STEP_AT
+    def first(cond):
+        i = np.where(cond)[0]; return float(ta[i[0]]) if len(i) else math.nan
+    out['rise'] = first(y >= 0.9) - first(y >= 0.1)
+    out['overshoot'] = float(max(0.0, (y[ta < 0.6].max() - 1.0) * 100))
+    band = np.abs(y - 1.0) > 0.05; i = np.where(band & (ta < 0.6))[0]
+    out['settle'] = float(ta[i[-1]]) if len(i) else 0.0
+    end = ta > 0.5; out['final_err'] = float((y[end].mean() - 1.0) * 100) if end.any() else math.nan
+    out['iq_dist'] = float(np.abs(iqa[after][ta < 0.6] - np.mean(iqa[pre])).max())
+    ripple = (t >= 0.3) & (t < STEP_AT)
+    out['idq_wander'] = float(np.hypot(ida[ripple], iqa[ripple]).max()) if ripple.any() else math.nan
+    return out
+
+
+def sweep(out: Path, kps=(1.0, 2.0, 3.5, 5.0, 7.0, 10.0), tis=(0.005, 0.010, 0.020, 0.040, 0.080)):
+    """@brief D-GFL-10: connection (step 2b, APF feedforward, fitted grid) and an Id step for each (Kp, Ti)."""
+    import sys
+    sys.path.insert(0, str(REPO / 'tests' / 'common'))
+    from interactive_plot import Figure
+    out.mkdir(parents=True, exist_ok=True)
+    use_measured_grid()
+    res = {}
+    for kp in kps:
+        for ti in tis:
+            r = run('apf', Bulb(thermal=False), t_after=STEP_AT + 0.65, kp=kp, ti=ti, id_step=(STEP_AT, STEP_A))
+            res[(kp, ti)] = (r, step_metrics(r))
+    def grid_table(title, key, fmt, note=''):
+        L = [f'**{title}**{note}', '', '| Kp (V/A) \\ Ti (ms) | ' + ' | '.join(f'{ti * 1e3:g}' for ti in tis) + ' |',
+             '|---|' + '---|' * len(tis)]
+        for kp in kps:
+            cells = []
+            for ti in tis:
+                m = res[(kp, ti)][1]
+                tr = m['obs_trip'] if m['obs_trip'] is not None else m['cur_trip']
+                cells.append(f'trip {tr:.2f} s' if tr is not None else fmt(m.get(key, math.nan)))
+            mark = ' (today)' if (kp, abs(ti - TI_I) < 1e-9) == (KP_I, True) else ''
+            L.append(f'| {kp:g}{mark} | ' + ' | '.join(cells) + ' |')
+        return L + ['']
+    f2 = lambda v: '—' if v != v else f'{v:.2f}'   # noqa: E731
+    fms = lambda v: '—' if v != v else f'{v * 1e3:.0f}'   # noqa: E731
+    fpc = lambda v: '—' if v != v else f'{v:.0f}'   # noqa: E731
+    # interactive figure: Id step responses and the connection current for a few settings
+    picks = [(KP_I, TI_I)] + [k for k in ((1.0, 0.005), (7.0, 0.010), (10.0, 0.040), (3.5, 0.005), (7.0, 0.040)) if k in res]
+    cols = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#8e44ad', '#c2185b']
+    fig = Figure('s', 'time from the contact (s)')
+    c1 = fig.chart('A, Id (one-period mean)', 230); c2 = fig.chart('A, Iq (one-period mean)', 170); c3 = fig.chart('A, line current', 200)
+    n = int(round(0.02 / TS)); k = np.ones(n) / n
+    for (kp, ti), col in zip(picks, cols):
+        r = res[(kp, ti)][0]; t = r['t'] - r['t_contact']; s_ = t >= -0.05; lab = f'Kp {kp:g}, Ti {ti * 1e3:g} ms'
+        dec = 4
+        fig.line(c1, lab, t[s_][::dec], np.convolve(r['id'], k, 'same')[s_][::dec], col, 1.4)
+        fig.line(c2, lab, t[s_][::dec], np.convolve(r['iq'], k, 'same')[s_][::dec], col, 1.2)
+        fig.line(c3, lab, t[s_][::dec], r['ig'][s_][::dec], col, 1.0)
+    c1['events'] = [{'t': STEP_AT, 'label': f'Id reference +{STEP_A:g} A'}]
+    L = ['# D-GFL-10: current PI gains (Kp, Ti) on the fitted step 2b model', '',
+         'Design test ([ADR 0004](../../../adr/0004-averaged-model-for-fast-evaluation.md)), run at Luiz Villa\'s request on 2026-11-13: '
+         'averaged model, **INFO only, no verdict**. It gives a ballpark of the current PI gains worth trying on the bench with the keys '
+         '+ / − (Kp ±0.1 V/A, 0.5–10) and > / < (Ti ±1 ms, 1–100 ms), applied live. Generated by `tests/l1/design/connection_apf.py --sweep docs/testing/design/D-GFL-10_bench`.', '',
+         f'**Model**: D-GFL-09 as fitted to the bench ([report](../D-GFL-09_bench/report.md)): APF feedforward (unchanged), measured grid, '
+         f'{R_FIT:g} Ω behind the relay, {VDT_FIT:g} V of dead time, step 2b from the relay command. The gains apply from the start. '
+         f'{STEP_A:g} A Id reference step {STEP_AT:g} s after the contact (the bench\'s step 3 size). Current PI output limit ±30 V. '
+         'Trips: the grid observer (100 ms delay) and the 3 A current trip.', '',
+         '**Reading the tables**: each cell is one (Kp, Ti); "trip" means the setting tripped before the end of the run.', '']
+    L += grid_table('Connection: RMS line current 12–52 ms after the contact (A)', 'rms_12_52', f2)
+    L += grid_table('Wander before the step: largest |Idq| (one-period mean) 0.3–0.6 s after the contact (A)', 'idq_wander', f2,
+                    ' — bench with Kp 3.5, Ti 20 ms: telemetry |Idq| up to 0.3–0.5 A')
+    L += grid_table('Id step 0.1 A: rise time 10–90 % (ms, one-period mean, so 10 ms is about the floor)', 'rise', fms)
+    L += grid_table('Id step: settling to ±5 % within 0.6 s (ms; 600 = not settled)', 'settle', fms)
+    L += grid_table('Id step: error 0.5–0.6 s after the step (%)', 'final_err', fpc)
+    L += grid_table('Id step: overshoot (%)', 'overshoot', fpc)
+    L += grid_table('Id step: largest Iq disturbance within 0.6 s (A)', 'iq_dist', f2)
+    # gains changed online: today's gains for the connection, the keys pressed 0.3 s after the contact
+    live = [(7.0, 0.005), (10.0, 0.010), (5.0, 0.005), (10.0, 0.005)]
+    L += ['## Changing the gains online', '',
+          '**Computed before the library made the change bumpless** (0caa792): here ∫e was kept, so the integral term jumped by the '
+          'ratio of the new to the old Kp/Ti at the change; the Kp 5 / Ti 5 ms trip comes from that jump. The model now carries the '
+          'integral term over, as the firmware does; rerun the sweep to refresh this table. '
+          'On the bench the gains change while connected (keys + − > <; the telemetry reports kp and ti; every capture and firmware '
+          'dump records the gains in force). The model applies the same change: today\'s gains (Kp 3.5 V/A, Ti 20 ms) through the '
+          'connection, the new gains 0.3 s after the contact, the 0.1 A step at 0.6 s. `run(gains=...)` takes such a schedule, and '
+          '`bench_gain_schedule()` rebuilds it from a bench console (the key presses since the last boot).', '',
+          '| New gains at +0.3 s | Rise 10–90 % (ms) | Settling ±5 % (ms) | Overshoot (%) | Error 0.5–0.6 s (%) | Iq disturbance (A) | Trip |',
+          '|---|---|---|---|---|---|---|']
+    live_runs = []
+    for kp_, ti_ in live:
+        r = run('apf', Bulb(thermal=False), t_after=STEP_AT + 0.65, id_step=(STEP_AT, STEP_A), gains=[(0.3 + RELAY_ACTUAL, kp_, ti_)])
+        mt = step_metrics(r); live_runs.append(((kp_, ti_), r))
+        L.append(f'| Kp {kp_:g} V/A, Ti {ti_ * 1e3:g} ms | {fms(mt.get("rise", math.nan))} | {fms(mt.get("settle", math.nan))} | '
+                 f'{fpc(mt.get("overshoot", math.nan))} | {fpc(mt.get("final_err", math.nan))} | {f2(mt.get("iq_dist", math.nan))} | {fmt_trip(mt)} |')
+    m0 = res[(KP_I, TI_I)][1]
+    L += [f'| unchanged (Kp {KP_I:g}, Ti {TI_I * 1e3:g} ms) | {fms(m0.get("rise", math.nan))} | {fms(m0.get("settle", math.nan))} | '
+          f'{fpc(m0.get("overshoot", math.nan))} | {fpc(m0.get("final_err", math.nan))} | {f2(m0.get("iq_dist", math.nan))} | {fmt_trip(m0)} |', '']
+    (kp_l, ti_l), r_l = live_runs[0]; t = r_l['t'] - r_l['t_contact']; s_ = t >= -0.05; lab = f'online: 3.5/20 ms → {kp_l:g}/{ti_l * 1e3:g} ms at +0.3 s'
+    fig.line(c1, lab, t[s_][::4], np.convolve(r_l['id'], k, 'same')[s_][::4], '#5d6d7e', 1.4, dash=[5, 3])
+    fig.line(c2, lab, t[s_][::4], np.convolve(r_l['iq'], k, 'same')[s_][::4], '#5d6d7e', 1.2, dash=[5, 3])
+    fig.line(c3, lab, t[s_][::4], r_l['ig'][s_][::4], '#5d6d7e', 1.0, dash=[5, 3])
+    c1['events'].append({'t': 0.3, 'label': 'online change'})
+    (out / 'iplot_sweep.html').write_text(fig.html('dgfl10-sweep', 'D-GFL-10 step responses for selected current PI gains'), encoding='utf-8')
+    L += ['## Responses', '', '<!-- iplot sweep -->', '',
+          'Interactive: drag to zoom, double-click to reset, click a legend entry to hide a setting. Id and Iq as one-period means '
+          '(the 2ω ripple of the instantaneous dq current removed).', '',
+          '## Limits', '', '- Same as D-GFL-09: averaged bridge, fitted grid and dead time, no SYNC_LOST; the ff 1 trip was not reproduced '
+          'there, so a setting that survives here is a candidate, not a guarantee.',
+          '- The one-period mean that removes the 2ω ripple also slows the measured rise time (floor about 10 ms).',
+          '- A result here never passes or fails the firmware (ADR 0004).']
+    (out / 'report.md').write_text('\n'.join(L) + '\n', encoding='utf-8')
+    return out / 'report.md', res
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--report', help='write report.md and figures into this folder')
+    ap.add_argument('--sweep', help='D-GFL-10: current PI gain sweep, report into this folder')
     ap.add_argument('--source', default='apf', choices=['apf', 'sogi', 'pll', 'apf_g07'])
     ap.add_argument('--fixed', type=float, help='fixed bulb resistance (Ω) instead of the thermal model')
     o = ap.parse_args()
     if o.report:
         print(report(Path(o.report)))
+        return
+    if o.sweep:
+        print(sweep(Path(o.sweep))[0])
         return
     use_measured_grid()
     r = run(o.source, Bulb(thermal=False, r_cold=o.fixed) if o.fixed else Bulb())

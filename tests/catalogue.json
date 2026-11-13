@@ -342,6 +342,18 @@
    "status_note": "Run 2026-11-13 at Luiz Villa's request. Fit: a grid impedance alone cannot match both the current and the PLL swing; 25 Ω behind the relay with 6 V of bridge dead time does (ff 0: 50 Hz 0.64 A at −131° against the bench 0.71 A at −124°, ω_avg 309.9–318.7 against 309.3–318.7 rad/s, correlation 0.9 with the scope). Check on ff 1 (not fitted): same waveform shape (correlation 0.95), 3× the late current of ff 0, but no trip within 2 s where the bench tripped after about 1 s. Options: APF late |Idq| 0.26 A, SOGI 0.73 A, option 1 0.75 A (like SOGI), gain 0.7 trips at once"
   },
   {
+   "id": "D-GFL-10",
+   "tab": "model",
+   "level": "D",
+   "title": "Current PI gains (Kp, Ti) on the fitted step 2b model: connection, wander and Id step",
+   "criterion": "Grid Kp 1–10 V/A × Ti 5–80 ms: connection RMS current, wander before the step, 0.1 A Id step (rise, settling, overshoot, error, Iq disturbance), trips; gains changed online 0.3 s after the contact; interactive responses. INFO only",
+   "conditions": "D-GFL-09 model as fitted (APF feedforward, measured grid, 25 Ω, 6 V dead time), step 2b, 0.1 A Id step 0.6 s after the contact",
+   "source": "ADR 0004; tests/l1/design/connection_apf.py --sweep docs/testing/design/D-GFL-10_bench",
+   "status": "implemented",
+   "report": "docs/testing/design/D-GFL-10_bench/report.md",
+   "status_note": "Run 2026-11-13 at Luiz Villa's request: with 25 Ω behind the relay the tracking speed is set by Kp/(Ti·R): today's 3.5 V/A, 20 ms rise in 0.42 s and does not settle within 0.6 s; Kp 7–10 with Ti 5 ms rise in 57–79 ms, settle in 75–104 ms, no overshoot, less wander; Kp 1 trips unless Ti is 5 ms. Online-change rows computed before the bumpless library fix"
+  },
+  {
    "id": "L0-BST-01",
    "tab": "boost",
    "level": "L0",
