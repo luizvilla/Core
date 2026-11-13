@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from session import REPO, OUT, Session, now_iso, record_capture
+from session import REPO, OUT, Session, firmware_settings, now_iso, record_capture
 from console import Console, INV_STATES, STAGES, decode_dump, fw_timebase, parse_telemetry
 
 WEB = Path(__file__).resolve().parent / 'web'
@@ -106,7 +106,8 @@ class Bench:
             rate, trig, why = fw_timebase(self.console.rx, t)
             man['firmware_captures'].append({'time': now_iso(), 'txt': str(txt.relative_to(self.sess.dir)),
                                              'csv': str(csv.relative_to(self.sess.dir)) if csv else None,
-                                             'rate_hz': rate, 'rate_why': why, 'trigger_index': trig})
+                                             'rate_hz': rate, 'rate_why': why, 'trigger_index': trig,
+                                             'settings': firmware_settings(self.console.latest())})
             self.sess.save_manifest(test, man)
         self.changed(test)
 
@@ -336,6 +337,7 @@ class Bench:
                         time.sleep(0.3)
                     self.job['text'] = f'triggered: capturing {tid} {point}'
                 entry = record_capture(s, sc, tid, point, float(b.get('seconds', 2)), bool(b.get('waveforms')) or single,
+                                       settings=firmware_settings(self.console.latest()),
                                        single=single, note=b.get('note', ''))
                 self.changed(tid)
                 return f'captured {point} at {entry["timestamp"][11:]}'

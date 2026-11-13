@@ -32,7 +32,11 @@
   "q": {"label": "restart firmware scope"},
   "f": {"label": "force firmware scope trigger"},
   "v": {"label": "firmware scope 10 kHz / 2 kHz in CONNECT"},
-  "F": {"label": "feedforward SOGI / measured (OFF or step 1)"}
+  "F": {"label": "feedforward SOGI / measured (OFF or step 1)"},
+  "+": {"label": "current PI Kp +0.1 V/A"},
+  "-": {"label": "current PI Kp −0.1 V/A"},
+  ">": {"label": "current PI Ti +1 ms"},
+  "<": {"label": "current PI Ti −1 ms"}
  },
  "tests": {
   "L2-INV-10": {
@@ -98,7 +102,7 @@
   "L2-INV-02": {
    "points": ["close", "connected", "open"],
    "point_help": "close: Arm single shot on CH4 rising, then g; connected: Acquire in GRID_CONNECTED; open: Arm single shot on CH4 falling, then x",
-   "keys": ["c", "g", "x", "r", "v"],
+   "keys": ["c", "g", "x", "r", "v", "+", "-", ">", "<"],
    "criteria": [
     {"id": ".a", "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip", "point": "close", "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))", "unit": "A", "lo": 0, "hi": 3,
      "telemetry": [{"console_lacks": "bench current trip"}]},
@@ -113,7 +117,7 @@
   "L2-INV-07": {
    "points": ["close", "connected", "open"],
    "point_help": "As step 2, with G: close = Arm single shot on CH4 rising, then G; connected = Acquire in GRID_CONNECTED; open = Arm single shot on CH4 falling, then x. Optional: v before G for the 10 kHz firmware capture (23 ms from the relay command at 0.1 ms per sample: the contact and state 3 in detail); the default 2 kHz keeps 115 ms at 0.5 ms, state 3 included",
-   "keys": ["c", "v", "G", "x", "r"],
+   "keys": ["c", "v", "G", "x", "r", "+", "-", ">", "<"],
    "criteria": [
     {"id": ".a", "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip", "point": "close", "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))", "unit": "A", "lo": 0, "hi": 3,
      "telemetry": [{"console_lacks": "bench current trip"}]},
@@ -143,8 +147,8 @@
     "v",
     "G",
     "x",
-    "r"
-   ],
+    "r",
+    "+", "-", ">", "<"],
    "criteria": [
     {
      "id": ".ff",
@@ -271,7 +275,7 @@
   "L2-INV-03": {
    "points": ["0.02A", "0.05A", "0.1A"],
    "point_help": "Id_ref of the capture (j/k; the console prints it): 0.02 A first, then 0.05 A and 0.1 A. Acquire in RUN with CH3 and CH2 on screen",
-   "keys": ["j", "k", "n", "g", "x", "r"],
+   "keys": ["j", "k", "n", "g", "x", "r", "+", "-", ">", "<"],
    "criteria": [
     {"id": ".a-0.02A", "desc": "Line current amplitude at Id_ref 0.02 A (CH3 RMS·√2; ±5 mA at this step)", "point": "0.02A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.015, "hi": 0.025},
     {"id": ".a-0.05A", "desc": "Line current amplitude at Id_ref 0.05 A (CH3 RMS·√2; ±10 %)", "point": "0.05A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.045, "hi": 0.055},

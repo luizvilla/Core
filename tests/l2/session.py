@@ -527,8 +527,28 @@ class Session:
 
 
 # ---- capture (shared by the app and bench.py) ---------------------------------------------------
+def firmware_settings(tel: dict | None) -> dict:
+    """@brief The settings the board reports in its telemetry (feedforward source, current PI gains), or {}."""
+    if not tel:
+        return {}
+    out = {}
+    if tel.get('ff') is not None: out['ff'] = int(tel['ff'])
+    if tel.get('kp') is not None: out['kp'] = float(tel['kp'])
+    if tel.get('ti') is not None: out['ti_ms'] = float(tel['ti'])
+    return out
+
+
+def settings_text(s: dict) -> str:
+    """@brief 'Kp 3.5 V/A, Ti 20 ms, feedforward measured' for a firmware_settings() dict ('' when empty)."""
+    parts = []
+    if 'kp' in s: parts.append(f'Kp {s["kp"]:g} V/A')
+    if 'ti_ms' in s: parts.append(f'Ti {s["ti_ms"]:g} ms')
+    if 'ff' in s: parts.append('feedforward ' + ('SOGI' if s['ff'] else 'measured'))
+    return ', '.join(parts)
+
+
 def record_capture(sess: Session, sc, test: str, point: str, seconds: float = 2.0, waveforms: bool = False,
-                   single: bool = False, note: str = '') -> dict:
+                   single: bool = False, note: str = '', settings: dict | None = None) -> dict:
     """@brief Capture the scope for one point of a test and add it to the test's history.
     A running scope has its statistics restarted and collected for `seconds`; after a single shot (or a
     stopped scope) the acquisition on screen is read as it is. @return the capture entry of the manifest."""
@@ -539,7 +559,7 @@ def record_capture(sess: Session, sc, test: str, point: str, seconds: float = 2.
     cap = capture(sc, sess.folder(test) / rel, label=f'{test} {point}', waveforms=waveforms, stats_note=stats_note)
     entry = {'dir': rel, 'timestamp': cap['timestamp'],
              'stats': 'all' if stats_note.startswith('statistics restarted') else 'current',
-             'stats_note': stats_note, 'waveforms': waveforms, 'note': note}
+             'stats_note': stats_note, 'waveforms': waveforms, 'note': note, 'settings': settings or {}}
     with sess.lock:
         man = sess.manifest(test)
         pt = man['points'].setdefault(point, {'captures': [], 'pinned': None})
