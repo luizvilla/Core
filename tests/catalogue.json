@@ -1230,6 +1230,18 @@
    "hardware": "bench"
   },
   {
+   "id": "L2-INV-11",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "The 100 Hz line current with the feedforward filter (key D)",
+   "criterion": ".a telemetry ffn 0 then 1, same Kp, Ti, dt; .c connection with the filter on without trip or fault; INFO .b 100 Hz line current and node voltage and DC with the filter off and on (prediction about 10× less 100 Hz)",
+   "conditions": "Step 2b connected, measured feedforward (ff 0), filter switched with D in OFF; firmware scope at 2 kHz, steady-state dumps with q then r",
+   "source": "docs/testing/bench/inverter-session.md; key D; library 0cce694",
+   "status": "planned",
+   "status_note": "Defined 2026-11-13 after the steady-state dump showed the bridge copying the node's 100 Hz (gain 0.965)",
+   "hardware": "bench"
+  },
+  {
    "id": "L2-INV-02",
    "tab": "inverter",
    "level": "L2",

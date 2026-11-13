@@ -249,6 +249,17 @@ Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the c
 
 **Acceptance.** INFO: the 100 Hz amplitude of the line current per dead time (from the CH3 waveforms), and the DC line current. A 100 Hz that grows with the dead time confirms the hypothesis; a constant one rejects it.
 
+## L2-INV-11 · The 100 Hz current with the feedforward filter
+
+**Why.** The steady-state dump of 2026-11-13 21:12 shows the bridge copying the node's 100 Hz with a gain of 0.965 at +0.3° (and its DC): with VAC on the inverter side of the bulb once connected, the measured feedforward amplifies an internal 100 Hz or DC source about 9×. Key `D` filters the measured feedforward: a DC block (0.2 s) and a notch at twice the PLL frequency, the fundamental restored exactly (L0-GFL-22: 100 Hz and DC removed to 0.5 %, fundamental within 0.02°, odd harmonics kept). Prediction: about 10× less 100 Hz on the line, and less DC.
+
+**Sequence.** Same Kp, Ti, dead time, `ff 0`; default 2 kHz firmware scope (no `v`).
+1. Filter off (`ffn 0`): `c`, `G`, wait 2 s; tick *waveforms*, Acquire point *ffn0*; `q`, wait 0.2 s, `r`; `x`.
+2. In OFF press `D` (`ffn 1`); `c`, wait 2 s so the filter settles; `G`, wait 2 s; Acquire point *ffn1*; `q`, `r`; `x`.
+3. Restart the board if the grid observer tripped.
+
+**Acceptance.** .a the telemetry shows `ffn 0` then `ffn 1`; .c the connection with the filter on has no trip and no fault; INFO .b the 100 Hz line current and node voltage and the DC with the filter off and on.
+
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 
 **Conditions.** As step 2, in GRID_CONNECTED (state 3). The bulb makes a weak grid: the injected current raises the grid-side voltage by I·R_bulb (cold about 40 Ω, hot about 500 Ω). The firmware caps the reference at 0.1 A peak (`app::inject_current_max`), which keeps the rise below the observer's 253 V limit. Higher currents need the bulb bypassed and a new cap: a separate decision.
@@ -282,6 +293,7 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 | | L2-INV-02 | | | | | |
 | | L2-INV-08 | | | | | |
 | | L2-INV-09 | | | | | |
+| | L2-INV-11 | | | | | |
 | | L2-INV-03 | | | | | |
 
 ## Simulation counterpart
