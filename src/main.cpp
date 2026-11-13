@@ -119,7 +119,7 @@ static float32_t v_ac_rms_square_sum;
 static uint32_t v_ac_rms_sample_count;
 
 /* ScopeMimicry */
-/* 14 KiB capture: 256 samples of 14 channels, half before and half after the trigger: Sync rising
+/* 14 KiB capture: 256 samples of 14 channels, 10 % before the trigger and 90 % from it on: Sync rising
  * at 2 kHz; in the open-loop stage, the bridge start at 2 kHz; in CONNECT/INJECT, the relay command
  * rising at 10 kHz (key v); after key p (boost alone, inverter OFF), the boost leaving IDLE at 2 kHz.
  * Keep the byte count within ScopeMimicry's uint16_t buffer-size/dump limits. */
@@ -131,6 +131,15 @@ static constexpr uint16_t scope_fast_divider = static_cast<uint16_t>(app::ticks(
 static_assert(scope_sample_divider == 10U && scope_fast_divider == 2U, "scope rates assume the 50 µs period");
 static_assert(scope_buffer_sample_count * scope_channel_count * sizeof(float32_t) <= UINT16_MAX,
               "Scope capture exceeds ScopeMimicry's buffer-size limit");
+/* Share of the capture recorded before the trigger. ScopeMimicry keeps (uint16_t)(delay * length) samples before the
+ * first sample where the trigger holds, which is then sample scope_trigger_sample of the dump (oldest first): 26 of
+ * 256, i.e. 13 ms before and 115 ms from the trigger at 2 kHz, 2.6 ms and 23 ms at 10 kHz. */
+static constexpr float32_t scope_trigger_delay = 0.1F;
+static constexpr uint16_t scope_trigger_sample =
+    static_cast<uint16_t>(scope_trigger_delay * scope_buffer_sample_count) + 1U;
+/* Divider of the ticks that fed the last capture (set while it acquires), printed with the dump. */
+static uint16_t scope_divider_now = scope_sample_divider;
+static uint16_t scope_capture_divider = scope_sample_divider;
 static ScopeMimicry scope(scope_buffer_sample_count, scope_channel_count);
 static bool is_scope_downloading;
 static uint16_t scope_sample_tick;
@@ -264,6 +273,10 @@ FAST_CODE bool scope_trigger()
 
 void dump_scope_datas(ScopeMimicry &scope)
 {
+    /* Read by tests/l2 (bench app, review page): where the trigger is and the rate the capture ran at. */
+    printk("scope: %u samples, trigger at sample %u, %u Hz\n", static_cast<unsigned int>(scope_buffer_sample_count),
+           static_cast<unsigned int>(scope_trigger_sample),
+           static_cast<unsigned int>(1000000U / (app::control_task_period * scope_capture_divider)));
     printk("begin record\n");
     scope.reset_dump();
     while (scope.get_dump_state() != finished)
@@ -363,7 +376,7 @@ void setup_routine()
     scope.connectChannel(i_low_1_value, "ILow1_A");     /* boost startup (Jean, 34fd7d9) */
     scope.connectChannel(v_dc_bus_value, "VDCBus_V");
     scope.set_trigger(&scope_trigger);
-    scope.set_delay(0.5F);
+    scope.set_delay(scope_trigger_delay);
     scope.start();
 
 #ifdef TIMING_HARNESS
@@ -779,7 +792,7 @@ static FAST_CODE void scopeSample(ControlState &state, const ControlOutputs &out
     scope_inverter_mode = static_cast<float32_t>(state.inverter.getMode());
     scope_bridge_on = state.bridge_pwm_applied ? 1.0F : 0.0F;
     scope_bridge_duty = state.bridge_pwm_applied ? out.bridge_duty : 0.0F;
-    if (!is_scope_downloading) scope.acquire();
+    if (!is_scope_downloading && scope.acquire() != 2U) scope_capture_divider = scope_divider_now;  /* 2: capture full */
 }
 
 #ifdef TIMING_HARNESS
@@ -1060,7 +1073,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     TIMING_TICK_PROBE(3);
     const uint32_t t_applied = cpuCycles();
     notePart(2, t_controlled, t_applied);
-    /* Grid stages: 10 kHz around the relay closing (25.6 ms window) when asked with 'v'; otherwise 2 kHz. */
+    /* Grid stages: 10 kHz around the relay closing (2.6 ms before, 23 ms from it) when asked with 'v'; otherwise 2 kHz. */
     const uint16_t divider = (scope_fast_connect && (inverter_stage == INV_CONNECT || inverter_stage == INV_INJECT ||
                                                      inverter_stage == INV_FOLLOW_CONNECT || inverter_stage == INV_BUS_LOOP)) ?
                              scope_fast_divider : scope_sample_divider;
@@ -1069,6 +1082,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     if (++scope_sample_tick >= divider)
     {
         scope_sample_tick = 0U;
+        scope_divider_now = divider;
         scopeSample(control, out);
     }
     const uint32_t t_end = cpuCycles();

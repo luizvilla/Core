@@ -701,3 +701,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | L0 + L0-TIM campaign `tests/out/2026-11-13_9f9db15-dirty_150308_arDd4C`: 176 pass, 15 fail (5 known #2, #5; 10 baseline comparisons, below), 34 info. L0-GFL all pass, including L0-GFL-20 (new); L0-APP all pass except L0-APP-03.c (#2), L0-APP-14 new, L0-APP-12 on the new feedforward; L0-FAV-01/02 pass (new). L0-GFL before → after: instantaneous \|Vq\| with bench harmonics 59.3 → 13.5 V, with EN 50160 harmonics 130.6 → 23.9 V, lock 0.18 → 0.20 s. **L0-TIM (Spin, 20 kHz):** every budget passes: worst tick 38.5 µs / 40 µs (OPEN_LOOP_o), 0 lost, largest gap 73.1 µs / 75 µs (OFF_BUSREG, was 66.4). Against the previous 20 kHz run (`2026-11-13_74a6925_114726_lwv6ac`): interrupt time per period −0.7 to −1.1 µs in every stage, worst tick −0.6 to −1.8 µs. `duty_sogi` (SOGI + 3 APFs) 2.96 µs against 2.22 µs in the baseline; the one sin/cos for the three park transforms and the removed current SOGI pay for it. The L0-TIM baseline checks (.b, 02.d, 03.e) compare with the pre-merge 100 µs baseline `a616f39` and failed before this change too (boost sections): baseline not rewritten |
 | Not done | L1 (L1-GFL-15/16 defined for the L1 machine; L1-GFL-17 catalogued only). The L1 runtime does not model the averaging yet (one sample per tick): a prerequisite written in L1-GFL-15/16. Bench |
 | Hardware check | L0-TIM only. **The board holds the TIMING firmware: flash env USB before a bench session** |
+
+## 2026-11-13 — Firmware scope: trigger at 10 % of the capture, timebase printed with the dump
+
+| Field | Value |
+|---|---|
+| Commit | Uncommitted on `apf_quadrature` after `ef4be85` |
+| Files | `src/main.cpp`; `tests/l2/{console.py,app.py,criteria.json,web/index.html,README.md}`, `tests/common/review_report.py`; `bench/inverter-session.md` |
+| Reason | Luiz Villa, looking at the step 2b dump of 16:03: the trigger sat at half the buffer; move it to 10 % to keep more of the transition |
+| Behaviour change | `scope.set_delay(0.1)` (was 0.5): 26 samples before the first sample where the trigger holds (sample 26 of 256, was 129), 230 from it: 13 ms / 115 ms at 2 kHz, 2.6 ms / 23 ms at 10 kHz (`v`), so at 10 kHz state 3 of step 2b (+20 ms) is now inside the capture. Before each dump the firmware prints `scope: 256 samples, trigger at sample N, R Hz`, R being the rate the capture ran at (divider kept while it acquires). The bench app and the review page read that line; older dumps keep the rate guessed from the console and the trigger at sample 129 (it was taken as 128). |
+| Evidence | `pio run -e USB` and `-e TIMING` build (RAM 32.9 %, flash 75.0 % for USB). Not flashed, not run on the board |
+| Hardware check | Pending: flash env USB, take one dump with `r` and check the console prints the header and the trigger edge sits at sample 26 |

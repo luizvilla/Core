@@ -55,7 +55,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 The DC bus voltage is the 8th telemetry field (`VDCBus`) and the DC source display; it needs no oscilloscope channel.
 
-The firmware scope (`r` downloads, `q` re-arms) records 14 channels: VAC, Vq_avg, omega_avg, V_d, V_q, IAC, omega, Sync, relay command, inverter state, Vd_avg, applied bridge duty, ILow1, VDCBus. After `p` (boost alone, inverter OFF) it triggers on the boost leaving IDLE at 2 kHz; otherwise it triggers on Sync rising at 2 kHz (about 64 ms before and after); in the open-loop stage, on the bridge start at 2 kHz (re-arm with `q` before pressing `o`); in the CONNECT and INJECT stages, on the relay command rising at 10 kHz (12.8 ms before and after).
+The firmware scope (`r` downloads, `q` re-arms) records 14 channels: VAC, Vq_avg, omega_avg, V_d, V_q, IAC, omega, Sync, relay command, inverter state, Vd_avg, applied bridge duty, ILow1, VDCBus. After `p` (boost alone, inverter OFF) it triggers on the boost leaving IDLE at 2 kHz; otherwise it triggers on Sync rising at 2 kHz; in the open-loop stage, on the bridge start at 2 kHz (re-arm with `q` before pressing `o`); in the CONNECT, INJECT and FOLLOW_CONNECT stages, on the relay command rising, at 2 kHz or at 10 kHz after `v`. Since 2026-11-13 a capture keeps 10 % before the trigger and 90 % from it (256 samples: 13 ms before and 115 ms from it at 2 kHz, 2.6 ms and 23 ms at 10 kHz; it was half and half). Before each dump the firmware prints `scope: 256 samples, trigger at sample 26, <rate> Hz`, which the bench app and the review page use for the time axis.
 
 ## L2-INV-10 · Pre-checks (before any power)
 
@@ -196,7 +196,7 @@ Removed by ADR 0007 on 2026-11-13: the key `a` and the VAC follower stage (value
 
 Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the contact gave 0.37 A; 20–80 ms after it, 0.76 A, with the settling only postponed (the slow tail comes from the PLL when it is released). The 20 ms connect window counts the state change, not the blanking. Tested at L0 (`L0-GFL-19`, `L0-APP-12`); switched-model check defined (L1-GFL-16, replacing L1-GFL-14).
 
-**Conditions.** As step 2: grid on the other side through the cold bulb. Scope as step 2 (trigger on the relay command, 2 ms/div); the 10 kHz firmware capture (`v`) covers the sequence.
+**Conditions.** As step 2: grid on the other side through the cold bulb. Scope as step 2 (trigger on the relay command, 2 ms/div). The firmware capture triggers on the relay command. At the default 2 kHz it keeps 115 ms from it at 0.5 ms per sample, state 3 at +20 ms included. `v` is optional: at 10 kHz it keeps 23 ms at 0.1 ms per sample, for the contact (+9.7 ms) and state 3 in detail. `v` toggles and stays until pressed again.
 
 **Sequence.** From step 1 (`c`, state 8), press `G`. Record as step 2 (.a–.f of L2-INV-02), plus the state sequence 8 → 2 → 3 with 20 ms between the relay command and state 3. `x` disconnects.
 
