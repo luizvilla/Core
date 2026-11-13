@@ -805,3 +805,12 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Question | Luiz Villa: the duty divides by the bus voltage; fixed or measured, and could it make the 100 Hz? |
 | Answer | Measured every tick (`state.inverter.setVBus(meas.v_dc_bus)`, control_step.cpp; duty = Vα / (2·Vbus) + 0.5). A measurement wobble at 50 Hz would turn into 0 and 100 Hz at the output. In the steady dump 210340 (one fresh period): measured bus std 0.78 V, 0.25 V at 50 Hz, 0.58 V at 100 Hz once a single 0 V sample is set aside; its effect on the bridge output is 0.20 V at 100 Hz against 9.2 V present. Not the source |
 | Side finding | The scope record of VDCBus holds an occasional single 0 V sample (sample 56 here, one at +34 ms in an earlier dump). The duty at that sample is normal (0.834 between 0.843 and 0.828), so the control did not use it; only the scope channel shows it. To trace |
+
+## 2026-11-13 — Steady-state dump at 2 kHz: the bridge copies the node's 100 Hz (gain 0.965, +0.3°)
+
+| Field | Value |
+|---|---|
+| Data | `tests/out/2026-11-13_24e7c97_205616_bench/firmware_scope/211235` (firmware with the scope re-arm fix, flashed 21:09), L2-INV-08 connected, ff 0, Kp 3.5 V/A, Ti 20 ms, 2 kHz, taken with `q` then `r`: six periods analysed. No discontinuity at sample 26 (re-arm fix works); one 0 V sample in the VDCBus record (174), as before |
+| Results (six periods) | VAC 9.52 V at 100 Hz (+53°), DC −3.87 V; bridge output (flat bus) 9.18 V at 100 Hz (+53°), DC −4.00 V; IAC 0.144 A at 100 Hz (+29°), DC +0.038 A; DC bus 0.50 V at 100 Hz. Per period the IAC 100 Hz stays 0.140–0.151 A at 26–33°: a stationary state. Bridge/VAC at 100 Hz: 0.965 at +0.3° (the step 1 bridge gain is 0.976). VAC/IAC at 100 Hz: 66 Ω at +24° |
+| Reading | The measured feedforward copies the node's 100 Hz and DC into the bridge with a gain close to 1; behind about 5 Ω of inverter impedance and 66 Ω of bulb path, an internal 100 Hz (or DC) source is amplified by about 66 / (66·0.035 + 5) ≈ 9×, so about 1 V inside the inverter gives the 9.5 V and 0.14 A observed; the PI gains and the dead time change that source little and the amplification not at all |
+| Proposal | A 100 Hz notch and a DC block on VAC before the feedforward (copy gain about 0 there, amplification about 0.9): predicted about 10× less 100 Hz (≈ 1 V, ≈ 15 mA) and less DC, odd harmonics still copied. Behind a toggle key for a bench A/B |
