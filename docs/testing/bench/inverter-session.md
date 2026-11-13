@@ -261,6 +261,16 @@ Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the c
 
 **Acceptance.** .a the telemetry shows `ffn 0` then `ffn 1`; .c the connection with the filter on has no trip and no fault; INFO .b the 100 Hz line current and node voltage and the DC with the filter off and on.
 
+## L2-INV-12 · DC current loop
+
+**Why.** With the feedforward filter the DC line current drops from 126 to 10 mA (L2-INV-11), but nothing removes the rest: the dq current PIs see a DC current as a 50 Hz ripple. Behind the bulb 10 mA is harmless; on a stiff grid the same few hundred millivolts of bridge DC would drive amps. Key `B` adds an integrator on the line current (minus the current-sensor offset, learnt while the relay is open) that corrects the bridge DC while connected (Ki 100 V/(A·s): about 0.3 s behind the bulb).
+
+**Sequence.** Feedforward filter on (`D`, `ffn 1`) throughout; DC ammeter in series with the line.
+1. Loop off (`dcl 0`): `c`, `G`, wait 5 s; Acquire point *dcl0*; note the ammeter; `x`.
+2. In OFF, wait 3 s (the sensor offset is learnt), press `B` (`dcl 1`); `c`, `G`, wait 5 s; Acquire point *dcl1*; note the ammeter and the telemetry `vdc`; `x`.
+
+**Acceptance.** .a the DC ammeter reads less with the loop on than off; .c no trip, no fault; INFO .b the readings and the correction `vdc`.
+
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 
 **Conditions.** As step 2, in GRID_CONNECTED (state 3). The bulb makes a weak grid: the injected current raises the grid-side voltage by I·R_bulb (cold about 40 Ω, hot about 500 Ω). The firmware caps the reference at 0.1 A peak (`app::inject_current_max`), which keeps the rise below the observer's 253 V limit. Higher currents need the bulb bypassed and a new cap: a separate decision.
@@ -295,6 +305,7 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 | | L2-INV-08 | | | | | |
 | | L2-INV-09 | | | | | |
 | | L2-INV-11 | | | | | |
+| | L2-INV-12 | | | | | |
 | | L2-INV-03 | | | | | |
 
 ## Simulation counterpart

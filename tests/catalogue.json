@@ -1252,6 +1252,18 @@
    "hardware": "bench"
   },
   {
+   "id": "L2-INV-12",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "DC current loop (key B)",
+   "criterion": ".a DC ammeter lower with the loop on than off; .c connection without trip or fault; INFO .b ammeter readings and the correction vdc",
+   "conditions": "Step 2b connected with the feedforward filter on (D), DC ammeter in series with the line; the sensor offset learnt in OFF for 3 s before B",
+   "source": "docs/testing/bench/inverter-session.md; key B; library 67097f2",
+   "status": "planned",
+   "status_note": "Defined 2026-11-13: the step before reducing the series impedance",
+   "hardware": "bench"
+  },
+  {
    "id": "L2-INV-02",
    "tab": "inverter",
    "level": "L2",
