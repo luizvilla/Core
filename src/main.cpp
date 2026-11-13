@@ -139,7 +139,16 @@ static constexpr uint16_t scope_trigger_sample =
 /* Divider of the ticks that fed the last capture (set while it acquires), printed with the dump. */
 static uint16_t scope_divider_now = scope_sample_divider;
 static uint16_t scope_capture_divider = scope_sample_divider;
+/* Samples taken since the last re-arm: the trigger waits until the pre-trigger part of the buffer is refilled, so a
+ * dump never mixes in samples of the previous capture (q while connected triggers at once otherwise). */
+static volatile uint16_t scope_armed_samples = 0U;
 static ScopeMimicry scope(scope_buffer_sample_count, scope_channel_count);
+/* Re-arm the firmware scope (every key that re-arms it goes through here). */
+static void scopeArm()
+{
+    scope_armed_samples = 0U;
+    scope.start();
+}
 static bool is_scope_downloading;
 static uint16_t scope_sample_tick;
 /* ScopeMimicry requires persistent float channels, including flags and enums. */
@@ -259,6 +268,12 @@ static volatile bool scope_force_trigger = false;
 
 FAST_CODE bool scope_trigger()
 {
+    /* Called once per scope sample: hold any trigger until the pre-trigger samples are fresh. */
+    if (scope_armed_samples < scope_trigger_sample)
+    {
+        ++scope_armed_samples;
+        return false;
+    }
     if (scope_force_trigger)
     {
         scope_force_trigger = false;
@@ -384,7 +399,7 @@ void setup_routine()
     scope.connectChannel(v_dc_bus_value, "VDCBus_V");
     scope.set_trigger(&scope_trigger);
     scope.set_delay(scope_trigger_delay);
-    scope.start();
+    scopeArm();
 
 #ifdef TIMING_HARNESS
     /* TIMING env (ADR 0005), bare Spin only: L0-TIM-01 in this thread (no tasks); L0-TIM-02 in the critical task
@@ -511,7 +526,7 @@ void loop_communication_task()
         printk("startup: converter 1, current clamped, inverter OFF; scope armed on the boost start\n");
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = true;
-        scope.start();
+        scopeArm();
         mode = STARTUP;
         inverter_stage = INV_OFF;
         break;
@@ -542,7 +557,7 @@ void loop_communication_task()
     case 'c':
         printk("inverter step 1: PWM_SETTLE hold (relay open)\n");
         startStage(INV_SETTLE);
-        scope.start();  /* re-arm: capture the bridge start of step 1 (compare with step 2b) */
+        scopeArm();  /* re-arm: capture the bridge start of step 1 (compare with step 2b) */
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = false;
         relay_test = false;
@@ -553,7 +568,7 @@ void loop_communication_task()
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = false;
         relay_test = false;
-        scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
+        scopeArm();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'g':
         printk("inverter step 2: settle %u periods, close the relay, zero current\n",
@@ -562,7 +577,7 @@ void loop_communication_task()
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = false;
         relay_test = false;
-        scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
+        scopeArm();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'n':
         printk("inverter step 3: inject %.3f A (d axis, peak)\n", (double)inject_current);
@@ -570,7 +585,7 @@ void loop_communication_task()
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = false;
         relay_test = false;
-        scope.start();  /* re-arm: capture this stage's start (or a fault) */
+        scopeArm();  /* re-arm: capture this stage's start (or a fault) */
         break;
     case 'y':
         /* Nominal operation: the boost in MPPT ('m' first) feeds the bus, the inverter holds it (app::bus_loop_*). */
@@ -581,7 +596,7 @@ void loop_communication_task()
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = false;
         relay_test = false;
-        scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
+        scopeArm();  /* re-arm: capture the relay closing (or a fault) of this stage */
         break;
     case 'j':
         inject_current += inject_current_step;
@@ -644,13 +659,13 @@ void loop_communication_task()
         is_scope_downloading = true;
         break;
     case 'q':
-        scope.start();
+        scopeArm();
         printk("scope acquisition restarted\n");
         break;
     case 'z':
         scope_trigger_on_trip = true;
         scope_trigger_on_boost = false;
-        scope.start();  /* re-arm: the capture triggers on the trip */
+        scopeArm();  /* re-arm: the capture triggers on the trip */
         trip_test_countdown = trip_test_delay_ticks;
         printk("protection test: in 100 ms, one period at %.1f A (trip above %.1f A); scope armed on the trip\n",
                (double)trip_test_current, (double)app::bench_inverter_current_trip);
@@ -842,7 +857,7 @@ static ControlOutputs timingTaskTick(const Measurements &meas, const OperatorCom
     return criticalTaskTick(&meas, &cmd);
 }
 static bool timingRelayClosed() { return relay_closed; }
-static void timingStageStart() { scope.start(); }
+static void timingStageStart() { scopeArm(); }
 #endif
 
 /**
