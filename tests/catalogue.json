@@ -1267,12 +1267,12 @@
    "id": "L2-INV-13",
    "tab": "inverter",
    "level": "L2",
-   "title": "IAC sampling instant (keys [ / ])",
-   "criterion": ".a an ADC_2 trigger instant where the firmware DC reading iacm matches the DC ammeter within ±20 mA; .c connected throughout without trip or fault; INFO .b iacm, ammeter and scope mean per instant",
-   "conditions": "Step 2b connected with the feedforward filter on (D) and the DC loop off, DC ammeter in series with the line; the instant stepped with [ / ] (0 to 0.95 of the LEG2_HIGH up-count, 0.05 steps), 3 s per point",
-   "source": "docs/testing/bench/inverter-session.md; keys [ / ]; telemetry adt, iacm",
+   "title": "IAC sampled twice per switching period (ADR 0008)",
+   "criterion": ".a at the start-up instant (0.5, two samples half a period apart, ADR 0008) the firmware DC reading iacm matches the DC ammeter within ±20 mA; .c connected throughout without trip or fault; INFO .b iacm, ammeter and scope mean at 0.50, 0.25 and 0.75",
+   "conditions": "Step 2b connected with the feedforward filter on (D) and the DC loop off, DC ammeter in series with the line; ADC_2 on CMP3 up and down (overlay EdgeTrigger_Both); the instant moved with [ / ] for the contrast points, 3 s per point",
+   "source": "docs/testing/bench/inverter-session.md; docs/adr/0008-iac-two-samples-per-switching-period.md; keys [ / ]; telemetry adt, iacm",
    "status": "planned",
-   "status_note": "Defined 2026-11-13 with Luiz Villa, after L2-INV-12 found the firmware IAC about +145 mA too high while connected",
+   "status_note": "Defined 2026-11-13 with Luiz Villa. First session (one sample per period, adt 0.00): iacm +137 mA against a true DC of about −11 mA; the CH3 FFT (344 mA at 50 kHz, 52 mA at 100 kHz, 75 mA at 150 kHz) replayed at the switching frequency gives −544 to +534 mA of error with one sample and −8 to +11 mA with two samples T/2 apart, at any phase: ADR 0008. To rerun with the two-sample firmware",
    "hardware": "bench"
   },
   {
@@ -1486,10 +1486,10 @@
    "tab": "app",
    "level": "L0",
    "title": "IAC sampling instant from the bench keys ([ / ]) and the slow IAC average (iacm)",
-   "criterion": ".a [ / ] step the ADC_2 trigger instant by 0.05 within [0, 0.95] of the up-count (0 the HRTIM default, clamped at both ends); .b iacm settles on the DC of IAC: 0.1 A under 1 A at 50 Hz reads 0.1 A ± 7 mA after 3 s, time constant 0.5 s (63 % ± 3 % at 0.5 s)",
+   "criterion": ".a the ADC_2 trigger starts at 0.5 of the up-count (ADR 0008); [ / ] step it by 0.05 within [0, 0.95] (clamped at both ends); .b iacm settles on the DC of IAC: 0.1 A under 1 A at 50 Hz reads 0.1 A ± 7 mA after 3 s, time constant 0.5 s (63 % ± 3 % at 0.5 s)",
    "source": "`app::nextAdcTriggerIndex`, `ControlState::i_ac_mean`; main.cpp keys [ / ], `spin.pwm.setAdcTriggerInstant(PWME)`",
    "status": "implemented",
-   "status_note": "Implemented 2026-11-13 to find the IAC sampling instant that removes the +145 mA bias (L2-INV-12)"
+   "status_note": "Implemented 2026-11-13 to find the IAC sampling instant that removes the +145 mA bias (L2-INV-12); start-up instant 0.5 with two samples per period (ADR 0008)"
   },
   {
    "id": "L0-FAV-01",

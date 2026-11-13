@@ -41,8 +41,8 @@
   "s": {"label": "bridge dead time −20 ns, not below 100 ns (inverter OFF)"},
   "D": {"label": "feedforward filter DC + 100 Hz on/off (OFF or step 1)"},
   "B": {"label": "DC current loop on/off (OFF or step 1)"},
-  "[": {"label": "IAC ADC instant −0.05 of the up-count (any stage)"},
-  "]": {"label": "IAC ADC instant +0.05 of the up-count (any stage)"}
+  "[": {"label": "IAC ADC instant −0.05 of the up-count (any stage; 0.50 at start-up)"},
+  "]": {"label": "IAC ADC instant +0.05 of the up-count (any stage; 0.50 at start-up)"}
  },
  "tests": {
   "L2-INV-10": {
@@ -315,14 +315,14 @@
    ]
   },
   "L2-INV-13": {
-   "_doc": "IAC sampling instant (keys [ / ]): the firmware IAC read about +145 mA too high while connected (L2-INV-12). Each point is one ADC_2 trigger instant (telemetry adt), with the relay closed and the DC loop off; the true DC is the ammeter in series. The app records adt and iacm (0.5 s average of the firmware IAC) with every capture.",
-   "points": ["adt0.00", "adt0.25", "adt0.50", "adt0.75", "adt0.95"],
-   "point_help": "Filter on (D, ffn 1), DC loop off (dcl 0). c, G, wait 3 s. For each point: step with ] (5 presses per 0.25) until the telemetry adt matches, wait 3 s for iacm, Acquire, note the ammeter. x at the end",
+   "_doc": "IAC sampling (ADR 0008): ADC_2 samples IAC twice per switching period on CMP3 up and down; at the start-up instant 0.5 (telemetry adt) the samples are half a period apart and the 50 kHz ripple cancels. The firmware DC reading iacm (0.5 s average) must match the DC ammeter. Points 0.25 and 0.75 move the pair off T/2 for contrast. Relay closed, DC loop off; the app records adt and iacm with every capture.",
+   "points": ["adt0.50", "adt0.25", "adt0.75"],
+   "point_help": "Filter on (D, ffn 1), DC loop off (dcl 0). c, G, wait 3 s. adt0.50: the start-up instant (telemetry adt 0.50), Acquire, note the ammeter. adt0.25: [ five times, wait 3 s, Acquire. adt0.75: ] ten times, wait 3 s, Acquire. ] [ back to 0.50, then x",
    "keys": ["x", "D", "c", "G", "[", "]", "q", "r"],
    "criteria": [
-    {"id": ".a", "desc": "An instant where the firmware DC reading (iacm) matches the DC ammeter within ±20 mA; note which (the new start-up default)", "operator": true, "limit": "|iacm − ammeter| ≤ 20 mA"},
-    {"id": ".b", "desc": "iacm, the ammeter and the scope mean at each instant", "operator": "info"},
-    {"id": ".c", "desc": "Connected throughout the sweep without trip or fault", "limit": "yes", "operator": true,
+    {"id": ".a", "desc": "At the start-up instant 0.50 the firmware DC reading iacm matches the DC ammeter within ±20 mA", "operator": true, "limit": "|iacm − ammeter| ≤ 20 mA"},
+    {"id": ".b", "desc": "iacm, the ammeter and the scope mean at 0.50, 0.25 and 0.75", "operator": "info"},
+    {"id": ".c", "desc": "Connected throughout without trip or fault", "limit": "yes", "operator": true,
      "telemetry": [{"field": "flt", "all": "0"}, {"console_lacks": "bench current trip"}]}
    ]
   },
