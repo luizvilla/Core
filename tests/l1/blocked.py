@@ -5,7 +5,6 @@
 """Keep catalogue IDs stable and preserve the procedure's library/model gates."""
 reasons={
  'L1-APP-05':'native PV variant implemented; sustained MPPT fixture and declared settling/acceptance window pending; short-run extraction remains far below available MPP',
- 'L1-APP-06':'procedure verdict gate: open finding #1; nominal integration runs regardless',
  'L1-APP-07':'procedure verdict gate: open finding #1; switched phase-continuous fault scenarios pending',
  'L1-APP-09':'formal switched mode-transition fixture pending',
  'L1-GFL-01':'library-only connection harness and validated relay fixture pending; application remains synchronization-only',

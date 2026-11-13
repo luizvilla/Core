@@ -1,0 +1,38 @@
+{
+  "name": "application-settle-step1",
+  "title": "Step 1 (SETTLE) through the cold bulb, 20 kHz control",
+  "purpose": "Bench plant of the inverter cases (ideal 400 V bus, 500 µH filter without chokes, grid behind 40 Ω, duty limits 0.05–0.95). OFF at t = 0, step 1 (SETTLE) at 10 ms, held to 1.3 s. The observer qualifies after its 1 s dwell; the inverter then synchronizes for 100 ms, starts the bridge at 50 % (PWM_WAIT) and holds PWM_SETTLE with the relay open. Checks the real step-1 sequence with the bridge switching at 50 ns resolution. About one hour of computing: run only on request (L1_LONG=1).",
+  "criteria": [
+    "L1-APP-06"
+  ],
+  "duration_s": 1.3,
+  "dt_s": 5e-08,
+  "store_period_s": 2e-05,
+  "bridge": {
+    "duty_min": 0.05,
+    "duty_max": 0.95
+  },
+  "commands": [
+    {
+      "time_s": 0,
+      "mode": 0,
+      "sync_request": 0,
+      "v_bus_ref": 400,
+      "vac_updated": 1,
+      "inject_current": 0.0
+    },
+    {
+      "time_s": 0.01,
+      "mode": 0,
+      "sync_request": 1,
+      "v_bus_ref": 400,
+      "vac_updated": 1,
+      "inject_current": 0.0
+    }
+  ],
+  "plant_options": {
+    "output_chokes": false,
+    "grid_series_ohm": 40.0,
+    "ideal_bus_V": 400.0
+  }
+}

@@ -7,9 +7,9 @@ from pathlib import Path
 import json,os,sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
-from runner import run,save
+from runner import run,save,pll_aligned
 from runtime import HERE,CONTRACT
-from app_constants import STARTUP_CURRENT_MAX
+from app_constants import STARTUP_CURRENT_MAX,GRID_VOLTAGE_STALE_TICKS
 
 def emit(id,ok,description,value):
     """Report one criterion using the campaign's existing protocol."""
@@ -27,7 +27,8 @@ def main():
     # @test L1-INT-03.a: Only real native invocations, correct cadence and no hidden bridge request.
     ok=emit('L1-INT-03.a',np.array_equal(calls,np.arange(1,len(rows)+1)) and np.max(abs(np.diff(times)-CONTRACT['control_period_s']))<1e-10 and manifest['finite_states'] and all(r['en_bridge']==r['relay_requested']==r['block_error']==0 for r in rows),'Refined switched model runs actual Core C-Block at the declared period',len(rows)) and ok
     # @test L1-INT-03.b: Nominal integration can qualify/synchronize without inverter or relay enable.
-    ok=emit('L1-INT-03.b',any(r['grid_qualified'] for r in rows) and any(r['synchronized'] for r in rows) and all(r['en_bridge']==r['inverter_pwm_requested']==r['relay_requested']==0 for r in rows),'Nominal 50 Hz integration qualifies and synchronizes with bridge and relay off',next((r['time_s'] for r in rows if r['synchronized']),None)) and ok
+    aligned_t,_=pll_aligned(rows)  # inverter in stage OFF: getSync() stays false, the alignment is judged on the logged averages
+    ok=emit('L1-INT-03.b',any(r['grid_qualified'] for r in rows) and aligned_t is not None and all(r['en_bridge']==r['inverter_pwm_requested']==r['relay_requested']==0 for r in rows),'Nominal 50 Hz integration qualifies and the PLL aligns (one-period averages) with bridge and relay off',aligned_t) and ok
     # @test L1-INT-03.c: Current input indexing remains correct after adding C-Block output nodes.
     finite_current=np.max(abs(signals['ILow1']-signals['IP(DC1_Iin)']))
     # Samples share storage/control ticks here; interpolation only affects floating boundaries.
@@ -36,8 +37,8 @@ def main():
     # @test L1-INT-03.d: The scenario command reaches exactly its requested tick; Core owns scheduling.
     ok=emit('L1-INT-03.d',len(changed)==1 and abs(changed[0]['time_s']-.001)<1e-12 and changed[0]['cold_tick']==0 and changed[0]['boost_mode']==1 and abs(changed[0]['i_ref1']-STARTUP_CURRENT_MAX)<1e-6 and all(r['i_ref1']<=STARTUP_CURRENT_MAX+1e-6 and r['i_ref2']==0 for r in rows) and manifest['finite_states'],f'Tick-aligned STARTUP: cold update on the command tick, current reference clamped to {STARTUP_CURRENT_MAX:g} A on leg 1',[(r['time_s'],r['i_ref1']) for r in changed]) and ok
     _,signals,rows,manifest=results['vac_dropout'];trip=[r for r in rows if r['observer_trip']==1];fresh=[r for r in rows if r['vac_updated']==1]
-    # @test L1-INT-04.a: Real VAC delivery loss holds the sample, ages to 200 and trips invalid measurement.
-    ok=emit('L1-INT-04.a',bool(trip) and trip[0]['vac_age_ticks']==200 and abs(trip[0]['time_s']-fresh[-1]['time_s']-.02)<1e-10 and manifest['finite_states'],'VAC delivery dropout triggers Core stale detection after exactly 200 periods',trip[0]['time_s'] if trip else None) and ok
+    # @test L1-INT-04.a: Real VAC delivery loss holds the sample, ages to app::grid_voltage_stale_ticks (20 ms) and trips invalid measurement.
+    ok=emit('L1-INT-04.a',bool(trip) and trip[0]['vac_age_ticks']==GRID_VOLTAGE_STALE_TICKS and abs(trip[0]['time_s']-fresh[-1]['time_s']-.02)<1e-10 and manifest['finite_states'],f'VAC delivery dropout triggers Core stale detection after exactly {GRID_VOLTAGE_STALE_TICKS} periods (20 ms)',trip[0]['time_s'] if trip else None) and ok
     # @test L1-INT-04.b: The electrical grid remains healthy during sample loss.
     mask=signals['vac_updated']==0
     ok=emit('L1-INT-04.b',np.ptp(signals['VP(Grid_voltage)'][mask])>600 and all(r['block_error']==0 for r in rows),'Sample-loss fixture does not switch off the physical grid',float(np.ptp(signals['VP(Grid_voltage)'][mask]))) and ok

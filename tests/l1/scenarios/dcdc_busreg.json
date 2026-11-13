@@ -26,7 +26,7 @@
     {
       "time_s": 0,
       "mode": 2,
-      "sync_request": 1,
+      "sync_request": 0,
       "v_bus_ref": 400,
       "vac_updated": 1
     }

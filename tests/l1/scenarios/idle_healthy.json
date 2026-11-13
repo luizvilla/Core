@@ -1,7 +1,7 @@
 {
   "name": "integration-idle-healthy",
   "title": "Healthy grid, boost idle",
-  "purpose": "A 230 V / 50 Hz grid is present from t = 0 and the boost stays in IDLE. Checks that the C-Block runs at the control period, that the grid observer qualifies after its 1 s dwell and the PLL synchronizes, and that no leg, bridge or relay is driven. The bus is not energised; no DC/DC power flows.",
+  "purpose": "A 230 V / 50 Hz grid is present from t = 0 and the boost stays in IDLE. Checks that the C-Block runs at the control period, that the grid observer qualifies after its 1 s dwell and the PLL aligns (one-period averages; inverter stage OFF), and that no leg, bridge or relay is driven. The bus is not energised; no DC/DC power flows.",
   "criteria": [
     "L1-INT-03.a",
     "L1-INT-03.b",
@@ -15,7 +15,7 @@
     {
       "time_s": 0,
       "mode": 0,
-      "sync_request": 1,
+      "sync_request": 0,
       "v_bus_ref": 400,
       "vac_updated": 1
     }

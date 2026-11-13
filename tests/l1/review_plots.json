@@ -19,9 +19,41 @@
         ]
       },
       {
+        "unit": "V",
+        "signals": [
+          "v_q"
+        ]
+      }
+    ]
+  },
+  "L1-APP-06.a": {
+    "scenario": "settle_step1",
+    "signal": "inverter_mode",
+    "unit": "VSI mode (1 SYNC, 9 PWM_WAIT, 8 PWM_SETTLE, 7 FAULT)",
+    "limits": null,
+    "events": [
+      {
+        "t": 0.01,
+        "label": "step 1"
+      },
+      {
+        "t": 1.0,
+        "label": "observer dwell ends"
+      }
+    ],
+    "panels": [
+      {
         "unit": "flag (0/1)",
         "signals": [
-          "synchronized"
+          "grid_qualified",
+          "en_bridge",
+          "relay_requested"
+        ]
+      },
+      {
+        "unit": "duty",
+        "signals": [
+          "duty_bridge"
         ]
       }
     ]

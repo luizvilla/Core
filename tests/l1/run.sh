@@ -27,5 +27,6 @@ rc=0
 "$py" "$repo/tests/l1/integration/test_pv.py" || rc=1
 "$py" "$repo/tests/l1/integration/test_pv_lambertw.py" || rc=1
 "$py" "$repo/tests/l1/application/test_switched.py" || rc=1
+"$py" "$repo/tests/l1/application/test_settle.py" || rc=1  # L1-APP-06: BLOCKED unless L1_LONG=1 (about one hour)
 "$py" "$repo/tests/l1/blocked.py"
 exit "$rc"

@@ -7,7 +7,7 @@ from pathlib import Path
 import csv,json,os,sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import numpy as np
-from runner import run,save
+from runner import run,save,pll_aligned
 from runtime import HERE
 from app_constants import STARTUP_CURRENT_MAX,BOOST_TRIP_CURRENT,BURST_PERIOD,CONTROL_PERIOD,GRID_VOLTAGE_STALE_TICKS
 
@@ -42,8 +42,8 @@ def main():
     # @test L1-APP-01.b: Qualification is timed from continuous eligible grid.
     ok=emit('L1-APP-01.b','PASS' if dwell is not None and abs(dwell-1)<=CONTROL_PERIOD*1.00001 else 'FAIL',
             'Observer qualifies after continuous healthy estimated grid',f'1 s +/- {CONTROL_PERIOD*1e6:g} us',dwell) and ok
-    emit('L1-APP-01.c','INFO','Time from electrical start to PLL synchronization','informational',
-         next((r['time_s'] for r in rows if r['synchronized']),None))
+    emit('L1-APP-01.c','INFO','Time from electrical start to PLL alignment (one-period averages, inverter OFF)','informational',
+         pll_aligned(rows)[0])
     rows,data,meta=load(out/'vac_dropout');trip=next((r for r in rows if r['observer_trip']==1),None)
     fresh=[r for r in rows if r['vac_updated']]
     # @test L1-APP-08.a: Real delivery loss reaches stale threshold exactly.

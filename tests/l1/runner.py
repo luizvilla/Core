@@ -199,6 +199,22 @@ def run(scenario,project=None,progress=None,cancelled=None):
             for n,a in model.parts.items() if a.type.name=='CAPACITOR' and n.startswith(('DC1_C','DC2_C','Cbus')))
     return t,signals,rows,metadata
 
+def pll_aligned(rows,v_peak=230*2**.5,w_ref=2*np.pi*50):
+    """First control tick at which the inverter library's alignment conditions hold on one-period averages.
+    Same limits as singlePhaseInverterFollowing::synchronizationAligned(): Vd within 10 % of the peak,
+    |Vq| below 1 % of it, frequency within 5 %. Used with the inverter in stage OFF, where getSync()
+    stays false (it needs VOLTAGE_SYNC or a later mode, and every stage above OFF runs the bridge).
+    @return (time_s, index) of the first aligned tick, or (None, None)."""
+    n=round(1/(50*CONTRACT['control_period_s']))
+    if len(rows)<n:return None,None
+    vd=np.convolve([r['v_d'] for r in rows],np.ones(n)/n,'valid');vq=np.convolve([r['v_q'] for r in rows],np.ones(n)/n,'valid')
+    w=np.convolve([r['w'] for r in rows],np.ones(n)/n,'valid')
+    ok=(vd>.9*v_peak)&(vd<1.1*v_peak)&(np.abs(vq)<.01*v_peak)&(np.abs(w-w_ref)<.05*w_ref)
+    if not ok.any():return None,None
+    i=int(np.argmax(ok))+n-1
+    return rows[i]['time_s'],i
+
+
 def save(data,out):
     """Write raw CSV, GUI-readable traces and exact source/model provenance."""
     t,signals,rows,meta=data;out=Path(out);out.mkdir(parents=True,exist_ok=True)

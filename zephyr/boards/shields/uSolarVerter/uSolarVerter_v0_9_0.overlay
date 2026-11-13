@@ -185,6 +185,8 @@
 			 * The values are IEEE 754 single-precision floats: check a hex value with
 			 * python3 -c "import struct; print(struct.unpack('>f', bytes.fromhex('3adc2bb1'))[0])".
 			 * <0x3f0f26cc>, briefly used here as the gain, is 0.559 A/count (333x too large).
+			 * main.cpp adds i_ac_cal_offset (-0.30 A) on top: both are needed. Without this
+			 * offset IAC read +3.17 A at 0 A on the bench (2026-11-13), above the 3 A trip.
 			 */
 			default-gain = <0x3adc2bb1>; /* 0.00167976886 A/count */
 			default-offset = <0xc04a607f>; /* -3.16213956 A */
