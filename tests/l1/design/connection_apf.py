@@ -182,7 +182,7 @@ def discrete(closed, r, lg=None):
 
 
 def run(source='apf', bulb=None, t_settle=0.30, t_after=2.0, bridge_gain=0.976, bridge_phase_deg=-0.3, stop_on_trip=True, edge='rise',
-        lg=None, contact=RELAY_ACTUAL, vdt=VDT_FIT, kp=KP_I, ti=TI_I, id_step=None, gains=None):
+        lg=None, contact=RELAY_ACTUAL, vdt=VDT_FIT, kp=KP_I, ti=TI_I, id_step=None, gains=None, vb_dc=0.0, iac_offset=0.0):
     """vdt (V): dead-time voltage of the bridge, opposing the inductor current (smoothed over ±50 mA): the bridge applies
     vb − vdt·tanh(iL / 0.05) — a fixed voltage loss, so an effective resistance that falls as the current grows."""
     """@return dict of traces at the control rate and events (contact, observer trip, current trip)."""
@@ -276,11 +276,11 @@ def run(source='apf', bulb=None, t_settle=0.30, t_after=2.0, bridge_gain=0.976, 
         for j in range(SUB):
             tj = t + (j + 0.5) * H
             vg = mains(tj)
-            x = Ad @ x + Bd @ np.array([vb - vdt * math.tanh(x[0] / 0.05) if vdt else vb, vg])
+            x = Ad @ x + Bd @ np.array([vb + vb_dc - vdt * math.tanh(x[0] / 0.05) if vdt else vb + vb_dc, vg])
             if not closed: x[3] = 0.0
             sv_acc += x[1] if closed else vg
             si_acc += x[3]
-        vac_meas, iac_meas = sv_acc / SUB, si_acc / SUB
+        vac_meas, iac_meas = sv_acc / SUB, si_acc / SUB + (iac_offset if closed else 0.0)
         bulb.heat(iac_meas ** 2 * bulb.r, TS)
         s_v2 += vac_meas * vac_meas - vac_hist.popleft() ** 2; vac_hist.append(vac_meas)
         vac_rms = math.sqrt(max(s_v2, 0.0) / N)
