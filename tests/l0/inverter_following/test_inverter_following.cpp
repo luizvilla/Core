@@ -1188,6 +1188,30 @@ int main() {
         c.range("|Idq| on the first sample (A)", std::hypot(idq.d, idq.q), 1.0, 3.0);
     }
 
+    // ---------------------------------------------------------------- L0-GFL-17.f (bumpless gain change)
+    {
+        /** @test L0-GFL-17.f: Gains changed while the current loop runs (3.5 V/A, 20 ms → 7 V/A, 5 ms) are bumpless: on the change sample the bridge voltage differs from an unchanged twin by at most (new Kp − old Kp)·|error| + 0.01 V (only the proportional part changes); INFO the integral term */
+        tc::Criterion c("L0-GFL-17.f", "Live gain change 3.5 V/A, 20 ms → 7 V/A, 5 ms in RUN: bridge voltage jump ≤ ΔKp·|error| + 0.01 V against an unchanged twin");
+        singlePhaseInverterFollowing a, b; Grid ga, gb;
+        ga.current = gb.current = 0.99;   // 1 A reference, 0.99 A measured: a small steady error builds the integral term
+        for (auto *inv : {&a, &b}) inv->setCurrentPiGains(3.5F, 0.020F);
+        const bool ok = reachRun(c, a, ga) && reachRun(c, b, gb);
+        if (ok) {
+            for (int n = 0; n < ticks_per_s; ++n) { step(a, ga); step(b, gb); }
+            c.check("twins identical before the change", step(a, ga) == step(b, gb));
+            c.check("new gains accepted", a.setCurrentPiGains(7.0F, 0.005F));
+            const double jump = std::fabs(step(a, ga) - step(b, gb)) * 2.0 * V_bus;
+            const dqo_t idq = a.getIdq();
+            const double bound = (7.0 - 3.5) * std::hypot(1.0 - idq.d, idq.q) + 0.01;
+            c.range("bridge voltage jump minus ΔKp·|error| on the change sample (V)", jump - bound + 0.01, -1e9, 0.01);
+            tc::info("L0-GFL-17.h", "Bridge voltage jump on the change sample (proportional part only)", jump, "V");
+            c.near("gains read back", a.getCurrentPiKp() * 1000.0 + a.getCurrentPiTi() * 1000.0, 7000.0 + 5.0, 1e-3);
+            /** @test L0-GFL-17.g: integral term at the change, and the jump a kept ∫e would have given (INFO) */
+            const double ui = 3.5 * 0.01 / 0.020 * 1.0;   // Kp·∫e/Ti grows by Kp·e/Ti per second: about this after 1 s
+            tc::info("L0-GFL-17.g", "Integral term after 1 s at 0.01 A error (Kp·e·t/Ti), and ×(7/5 ms)/(3.5/20 ms) − 1 = 7 the jump if ∫e were kept", ui, "V");
+        }
+    }
+
     // ---------------------------------------------------------------- L0-GFL-21 (feedforward source)
     // The voltage SOGI is H(s) = Kr s / (s^2 + Kr s + w0^2), Kr = 500 rad/s (library VOLTAGE_SOGI_KR): at h·w0 its
     // gain is Kr h / sqrt((Kr h)^2 + (w0 (h^2 - 1))^2), and it passes white noise over Kr/4 = 125 Hz (one-sided

@@ -898,8 +898,8 @@
    "tab": "inverter",
    "level": "L0",
    "title": "Current-loop settings from the application (PI gains, limit, output advance)",
-   "criterion": ".a defaults equal the historical values (Kp 0.001 V/A, Ti 0.3 ms, ±30 V, no advance); .b invalid values (zero, negative, NaN, infinity, advance outside 0–2) rejected, configuration unchanged; .c settings kept across init(), also when made before it; .d in RUN, gains change live (correction Kp·error on the next step) and the advance is accepted, while the limit is refused; .e the advance rotates the output by advance·ω·Ts with the magnitude unchanged",
-   "source": "`setCurrentPiGains`, `setCurrentPiLimit`, `setOutputPhaseAdvance` (library ab35e2f; current SOGI gain removed in 1db5b89, ADR 0007)",
+   "criterion": ".a defaults equal the historical values (Kp 0.001 V/A, Ti 0.3 ms, ±30 V, no advance); .b invalid values (zero, negative, NaN, infinity, advance outside 0–2) rejected, configuration unchanged; .c settings kept across init(), also when made before it; .d in RUN, gains change live (correction Kp·error on the next step) and the advance is accepted, while the limit is refused; .e the advance rotates the output by advance·ω·Ts with the magnitude unchanged; .f live gain change in RUN (3.5 V/A, 20 ms → 7 V/A, 5 ms) is bumpless: the bridge voltage on the change sample differs from an unchanged twin by at most ΔKp·|error| + 0.01 V; INFO .g the integral term, .h the jump",
+   "source": "`setCurrentPiGains`, `setCurrentPiLimit`, `setOutputPhaseAdvance` (library ab35e2f; current SOGI gain removed in 1db5b89, ADR 0007; bumpless since library 0caa792)",
    "status": "implemented",
    "status_note": "Implemented 2026-11-10; current SOGI gain checks removed 2026-11-13 (ADR 0007)"
   },
