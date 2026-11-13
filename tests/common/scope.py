@@ -352,10 +352,28 @@ def summary_md(cap: dict) -> str:
 def capture(scope: Scope, out: Path, label: str = "", waveforms: bool = False,
             screen: bool = True, stats_note: str = "") -> dict:
     """@brief Write screen.png, capture.json, summary.md (and waveforms.npz) into `out`.
+    A running scope is stopped first and restarted at the end, so the measurements, the screen and every channel's
+    waveform come from the same acquisition (each channel takes seconds to read; read from a running scope they came
+    from successive sweeps, after the bench had moved on: L2-INV-09, 2026-11-13).
     @return the capture dict (as in capture.json)."""
     out.mkdir(parents=True, exist_ok=True)
+    was_running = scope.running()
+    if was_running:
+        scope.inst.write("ACQuire:STATE STOP")
+        scope.q("*OPC?", timeout_s=10)
+    try:
+        return _capture_held(scope, out, label, waveforms, screen, stats_note, was_running)
+    finally:
+        if was_running:
+            scope.inst.write("ACQuire:STATE RUN")
+
+
+def _capture_held(scope: Scope, out: Path, label: str, waveforms: bool, screen: bool, stats_note: str,
+                  was_running: bool) -> dict:
+    """@brief capture() on a held acquisition."""
     cap = {"timestamp": dt.datetime.now().isoformat(timespec="seconds"), "label": label,
-           "stats": stats_note, "setup": scope.setup(), "measurements": scope.measurements()}
+           "stats": stats_note, "held": "stopped for the capture, restarted after" if was_running else "already stopped",
+           "setup": scope.setup(), "measurements": scope.measurements()}
     if waveforms:
         import numpy as np
         arrays, stats = {}, {}

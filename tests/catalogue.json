@@ -1216,7 +1216,7 @@
    "conditions": "Step 2b connected with the measured feedforward (ff 0), same Kp and Ti for every point; dead time set with w / s with the inverter OFF; mains through the bulb, bus 400 V",
    "source": "docs/testing/bench/inverter-session.md; keys w / s",
    "status": "planned",
-   "status_note": "Defined 2026-11-13 with Luiz Villa: the 100 Hz current (0.26 A) appears only with current flowing; hypothesis dead time with a small DC line current",
+   "status_note": "Run 2026-11-13 20:47–20:50 (Kp 3.5, Ti 20 ms, ff 0): node voltage at 100 Hz (CH1, read while connected) 7.63 / 7.18 / 7.21 / 7.22 V at 100 / 160 / 220 / 300 ns; CH3 0.247 A at 100 Hz at 100 ns; firmware IAC at 100 Hz 0.071 A at 300 ns against 0.145 A at 100 ns (18:33). The 100 Hz does not grow with the dead time. CH2/CH3 waveforms at 160–300 ns invalid: read from a running scope after x (capture now holds the acquisition); rerun with the fixed capture to confirm",
    "hardware": "bench"
   },
   {

@@ -769,3 +769,12 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Keys `w` / `s` set the dead time of both bridge legs (LEG1_HIGH, LEG2_HIGH) ±20 ns within 100–400 ns, never below the board's 100 ns, only with the inverter OFF; set explicitly at start-up (100 ns, as the overlay). Telemetry ends with `dt <ns>`; the bench app records it with every capture |
 | Evidence | L0-APP-17 PASS; USB builds (flash 75.6 %) |
 | Not done | L0-TIM on target (pending, as for the gain keys). Bench: L2-INV-09 at 100, 160, 220, 300 ns |
+
+## 2026-11-13 — L2-INV-09: the 100 Hz current does not follow the dead time; scope capture fixed
+
+| Field | Value |
+|---|---|
+| Session | `tests/out/2026-11-13_175f50e_204629_bench`, Kp 3.5 V/A, Ti 20 ms, ff 0, one connected capture per dead time (100, 160, 220, 300 ns; telemetry dt confirms each) and a firmware dump of the 300 ns connection |
+| Results | Node voltage at 100 Hz (CH1, the first channel read, while connected): 7.63, 7.18, 7.21, 7.22 V. Line current at 100 Hz (CH3, valid only at 100 ns): 0.247 A. Firmware IAC 45–105 ms after the relay command: 0.071 A at 100 Hz at 300 ns against 0.145 A at 100 ns (18:33 run). DC line current (telemetry IAC mean) +0.06, +0.07, 0.00, +0.17 A, no trend. **Tripling the dead time leaves the 100 Hz unchanged: dead time is not its source** |
+| Defect found | With waveforms ticked on a running scope, `scope.capture()` read the channels one after the other (seconds each) without stopping the acquisition, so each channel came from a later sweep; at 160–300 ns CH2 and CH3 were read after `x` (relay open: CH3 flat, CH2 = mains). Fixed: the capture stops the acquisition, reads measurements, screen and waveforms from the same sweep, then restarts it. Not yet tried on the scope |
+| Next | Rerun L2-INV-09 with the fixed capture to confirm with the line current itself; look for the 100 Hz source elsewhere (DC bus ripple, the APF/feedforward path, the bridge asymmetry) |
