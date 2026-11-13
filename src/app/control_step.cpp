@@ -189,6 +189,12 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
         state.inverter.setFeedforwardSource(cmd.sogi_feedforward ? FeedforwardSource::SOGI : FeedforwardSource::MEASURED);
         state.sogi_feedforward_applied = cmd.sogi_feedforward;
     }
+    /* DC current loop (menu 'B'): only with the relay open and not commanded, like the feedforward settings. */
+    if (cmd.dc_loop != state.dc_loop_applied && !meas.relay_closed && !state.relay_command_latched &&
+        state.inverter.setDcCurrentLoop(cmd.dc_loop))
+    {
+        state.dc_loop_applied = cmd.dc_loop;
+    }
     /* Feedforward filter (menu 'D'): same rule, only with the relay open and not commanded (it settles in about 1 s). */
     if (cmd.ff_filter != state.ff_filter_applied && !meas.relay_closed && !state.relay_command_latched)
     {

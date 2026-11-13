@@ -915,6 +915,34 @@ int main() {
         c.check("on once the relay is open", !relay.closed && state.inverter.getFeedforwardFilter());
     }
 
+    // ---------------------------------------------------------------- L0-APP-19 (DC current loop, key B)
+    {
+        /** @test L0-APP-19.a: The DC current loop is off by default; a request applies on the next period with the relay open; with the relay closed it waits until the relay is open */
+        tc::Criterion c("L0-APP-19.a", "DC current loop off by default; on/off with the relay open, a request while closed waits for the relay to open");
+        ControlState state; Grid grid; Relay relay;
+        OperatorCommands cmd;
+        c.check("controlInit", controlInit(state) == 0);
+        auto run = [&](int ticks) {
+            for (int k = 0; k < ticks; ++k) {
+                Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.i_ac = 0.0F; m.relay_closed = relay.closed;
+                const ControlOutputs out = controlStep(state, m, cmd);
+                state.bridge_pwm_applied = out.bridge_enable; relay.apply(out); grid.advance();
+            }
+        };
+        run(1);
+        c.check("off by default", !state.inverter.getDcCurrentLoop());
+        cmd.dc_loop = true; run(1);
+        c.check("on after one period (OFF)", state.inverter.getDcCurrentLoop());
+        cmd.dc_loop = false; run(1);
+        c.check("off again", !state.inverter.getDcCurrentLoop());
+        cmd.inverter_stage = INV_CONNECT; run(4 * ticks_per_s);
+        c.check("relay closed in step 2", relay.closed);
+        cmd.dc_loop = true; run(ticks_per_s / 2);
+        c.check("unchanged while closed", !state.inverter.getDcCurrentLoop());
+        cmd.inverter_stage = INV_OFF; run(2 * ticks_per_s);
+        c.check("on once the relay is open", !relay.closed && state.inverter.getDcCurrentLoop());
+    }
+
     // ---------------------------------------------------------------- L0-APP-12
     {
         /** @test L0-APP-12.a: Step 2b: measured feedforward in PWM_SETTLE (ADR 0007, no VAC copy), PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */

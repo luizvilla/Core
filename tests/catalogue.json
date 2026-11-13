@@ -1448,6 +1448,16 @@
    "status_note": "Implemented 2026-11-13"
   },
   {
+   "id": "L0-APP-19",
+   "tab": "app",
+   "level": "L0",
+   "title": "DC current loop from the menu (B): applied only with the relay open",
+   "criterion": ".a off by default; on and off on the next period with the relay open; a request with the relay closed waits until OFF has opened it",
+   "source": "`controlStep`, `OperatorCommands::dc_loop`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13"
+  },
+  {
    "id": "L0-FAV-01",
    "tab": "app",
    "level": "L0",

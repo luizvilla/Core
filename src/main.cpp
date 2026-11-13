@@ -212,6 +212,8 @@ static bool settle_count_test = false;
 static bool sogi_feedforward = false;
 /* Feedforward DC block and 2ω notch (menu 'D', library setFeedforwardFilter). */
 static bool ff_filter = false;
+/* DC current loop (menu 'B', library setDcCurrentLoop). */
+static bool dc_loop = false;
 /* Current PI gains, stepped by the bench keys + - (Kp) and > < (Ti) (app::nextCurrentKp, app::nextCurrentTi). */
 static float32_t current_kp = app::inverter_current_kp;
 static float32_t current_ti = app::inverter_current_ti;
@@ -498,6 +500,7 @@ void loop_communication_task()
                "|     press G : step 2b connect, PLL hold|\n"
                "|     press F : feedforward SOGI/measured|\n"
                "|     press D : feedforward DC+100Hz filt|\n"
+               "|     press B : DC current loop on/off   |\n"
                "|     press + / - : current PI Kp +/-0.1 |\n"
                "|     press > / < : current PI Ti +/-1 ms|\n"
                "|     press n : step 3 inject current    |\n"
@@ -687,6 +690,15 @@ void loop_communication_task()
         current_ti = app::nextCurrentTi(current_ti, received_serial_char == '>' ? 1 : -1);
         printk("current PI: Kp %.1f V/A, Ti %.0f ms\n", (double)current_kp, (double)(1000.0F * current_ti));
         break;
+    case 'B':
+        if (inverter_stage != INV_OFF && inverter_stage != INV_SETTLE && inverter_stage != INV_OPEN_LOOP)
+        {
+            printk("DC current loop refused: inverter OFF (x) or step 1 (c) first\n");
+            break;
+        }
+        dc_loop = !dc_loop;
+        printk("DC current loop: %s (sensor offset %.4f A)\n", dc_loop ? "ON" : "OFF", (double)control.inverter.getCurrentZero());
+        break;
     case 'D':
         /* Switched only with the relay open: the control step applies it in OFF or before the relay command. */
         if (inverter_stage != INV_OFF && inverter_stage != INV_SETTLE && inverter_stage != INV_OPEN_LOOP)
@@ -762,7 +774,7 @@ void loop_application_task()
         const dqo_t idq_s = control.inverter.getIdq();
         const uint32_t load_s = critical_max_cycles / cycles_per_us;
         critical_max_cycles = 0U;
-        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f dt %u ffn %u\n",
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f dt %u ffn %u dcl %u vdc %.2f\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
                (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
@@ -772,7 +784,8 @@ void loop_application_task()
                static_cast<unsigned int>(critical_lost_ticks),
                static_cast<unsigned int>(control.sogi_feedforward_applied),
                (double)control.current_kp_applied, (double)(1000.0F * control.current_ti_applied),
-               static_cast<unsigned int>(bridge_deadtime_ns), static_cast<unsigned int>(control.ff_filter_applied));
+               static_cast<unsigned int>(bridge_deadtime_ns), static_cast<unsigned int>(control.ff_filter_applied),
+               static_cast<unsigned int>(control.dc_loop_applied), (double)control.inverter.getDcCorrection());
         task.suspendBackgroundMs(100);
         return;
     }
@@ -998,6 +1011,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     cmd.current_resonant_enabled = current_resonant_enabled;
     cmd.sogi_feedforward = sogi_feedforward;
     cmd.ff_filter = ff_filter;
+    cmd.dc_loop = dc_loop;
     cmd.current_kp = current_kp;
     cmd.current_ti = current_ti;
 
