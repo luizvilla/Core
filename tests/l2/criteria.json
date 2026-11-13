@@ -40,7 +40,9 @@
   "w": {"label": "bridge dead time +20 ns (inverter OFF)"},
   "s": {"label": "bridge dead time −20 ns, not below 100 ns (inverter OFF)"},
   "D": {"label": "feedforward filter DC + 100 Hz on/off (OFF or step 1)"},
-  "B": {"label": "DC current loop on/off (OFF or step 1)"}
+  "B": {"label": "DC current loop on/off (OFF or step 1)"},
+  "[": {"label": "IAC ADC instant −0.05 of the up-count (any stage)"},
+  "]": {"label": "IAC ADC instant +0.05 of the up-count (any stage)"}
  },
  "tests": {
   "L2-INV-10": {
@@ -305,11 +307,23 @@
    "_doc": "DC current loop (key B): removes the DC line current the dq PIs cannot see, using the current-sensor offset learnt with the relay open. Judged on the DC ammeter in series with the line (operator) and the telemetry vdc (the correction).",
    "points": ["dcl0", "dcl1"],
    "point_help": "Feedforward filter on (D, ffn 1) for both. dcl0: telemetry dcl 0, c, G, wait 5 s, Acquire, note the ammeter; x. dcl1: in OFF wait 3 s (the offset is learnt), press B (dcl 1), c, G, wait 5 s, Acquire, note the ammeter and vdc; x",
-   "keys": ["x", "D", "B", "c", "G", "q", "r"],
+   "keys": ["x", "D", "B", "c", "G", "q", "r", "[", "]"],
    "criteria": [
     {"id": ".a", "desc": "DC ammeter with the DC loop on, compared with off (sheet: removes the DC; off reads about 10 mA with the filter)", "operator": true, "limit": "on < off"},
     {"id": ".b", "desc": "DC ammeter readings off and on, and the correction vdc while connected", "operator": "info"},
     {"id": ".c", "desc": "Connection with the DC loop on without trip or fault", "operator": true, "limit": "yes"}
+   ]
+  },
+  "L2-INV-13": {
+   "_doc": "IAC sampling instant (keys [ / ]): the firmware IAC read about +145 mA too high while connected (L2-INV-12). Each point is one ADC_2 trigger instant (telemetry adt), with the relay closed and the DC loop off; the true DC is the ammeter in series. The app records adt and iacm (0.5 s average of the firmware IAC) with every capture.",
+   "points": ["adt0.00", "adt0.25", "adt0.50", "adt0.75", "adt0.95"],
+   "point_help": "Filter on (D, ffn 1), DC loop off (dcl 0). c, G, wait 3 s. For each point: step with ] (5 presses per 0.25) until the telemetry adt matches, wait 3 s for iacm, Acquire, note the ammeter. x at the end",
+   "keys": ["x", "D", "c", "G", "[", "]", "q", "r"],
+   "criteria": [
+    {"id": ".a", "desc": "An instant where the firmware DC reading (iacm) matches the DC ammeter within ±20 mA; note which (the new start-up default)", "operator": true, "limit": "|iacm − ammeter| ≤ 20 mA"},
+    {"id": ".b", "desc": "iacm, the ammeter and the scope mean at each instant", "operator": "info"},
+    {"id": ".c", "desc": "Connected throughout the sweep without trip or fault", "limit": "yes", "operator": true,
+     "telemetry": [{"field": "flt", "all": "0"}, {"console_lacks": "bench current trip"}]}
    ]
   },
   "L2-INV-03": {

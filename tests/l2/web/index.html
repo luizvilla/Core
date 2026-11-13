@@ -109,8 +109,8 @@ dialog::backdrop{background:#0006}
   </main>
   <aside>
     <div class="head"><b>Console</b><span class="tel" id="tel"></span></div>
-    <div id="log"></div>
     <div class="head"><input id="keyin" maxlength="1" placeholder="type a menu key and press Enter" onkeydown="if(event.key==='Enter'){sendKey(this.value);this.value=''}"></div>
+    <div id="log"></div>
   </aside>
 </div>
 
@@ -181,7 +181,7 @@ function renderTop(){
     `<span class="chip ${sc.connected?'ok':sc.error?'bad':''}" title="${esc(sc.error)}">scope <b>${sc.connected?'on':sc.error?'error':'idle'}</b></span> `+
     (j.busy?`<span class="chip">⏳ ${esc(j.text)}</span>`:j.error?`<span class="chip bad">${esc(j.error)}</span>`:j.done?`<span class="chip ok">${esc(j.done)}</span>`:'');
   const t=S.telemetry;
-  $('#tel').innerHTML=t?[['stage',`${t.st} ${t.stage_name}`],['inv',`${t.inv} ${t.inv_name}`],['rly',t.rly],['VAC',t.VAC],['Vbus',t.Vbus],['IAC',t.IAC],['flt',t.flt]].concat(t.kp?[['kp',t.kp],['ti ms',t.ti]]:[]).concat(t.dt?[['dt ns',t.dt]]:[]).concat(t.ffn!=null?[['ffn',t.ffn]]:[]).concat(t.dcl!=null?[['dcl',t.dcl],['vdc V',t.vdc]]:[])
+  $('#tel').innerHTML=t?[['stage',`${t.st} ${t.stage_name}`],['inv',`${t.inv} ${t.inv_name}`],['rly',t.rly],['VAC',t.VAC],['Vbus',t.Vbus],['IAC',t.IAC],['flt',t.flt]].concat(t.kp?[['kp',t.kp],['ti ms',t.ti]]:[]).concat(t.dt?[['dt ns',t.dt]]:[]).concat(t.ffn!=null?[['ffn',t.ffn]]:[]).concat(t.dcl!=null?[['dcl',t.dcl],['vdc V',t.vdc]]:[]).concat(t.adt!=null?[['adt',t.adt],['iacm mA',(1000*t.iacm).toFixed(0)]]:[])
     .map(([k,v])=>`<span class="chip ${t.age>3?'stale':''} ${k==='flt'&&t.flt!=='0'?'bad':''}">${k} <b>${esc(v)}</b></span>`).join(''):'<span class="chip stale">no telemetry</span>';
 }
 function renderSteps(){
@@ -243,7 +243,7 @@ function renderStep(){
    ${own.length?`<div class="sub"><b>This step rewires:</b> ${own.map(([ch,c])=>`${esc(ch)} = ${esc(c.signal)} (${esc(c.label||c.kind)})`).join(' · ')}. Other channels as in Setup.</div>`:''}
    ${cap?`<div class="viewer" style="margin-top:10px">
      <div><a href="${cap.screen}" target="_blank"><img src="${cap.screen}" alt="Scope screen ${esc(selPoint)} ${esc(cap.timestamp)}"></a>
-       <div class="sub">${esc(selPoint)} · ${esc(cap.timestamp.slice(11))}${cap.settings&&cap.settings.kp?` · <b>Kp ${cap.settings.kp} V/A, Ti ${cap.settings.ti_ms} ms${cap.settings.ff!=null?', ff '+cap.settings.ff:''}${cap.settings.dt_ns!=null?', dead time '+cap.settings.dt_ns+' ns':''}${cap.settings.ffn!=null?', ff filter '+(cap.settings.ffn?'on':'off'):''}${cap.settings.dcl!=null?', DC loop '+(cap.settings.dcl?'on '+cap.settings.vdc+' V':'off'):''}</b>`:''} · ${esc(cap.stats_note)} ${idx===P.pinned?'· <b>pinned as evidence</b>':idx===caps.length-1&&P.pinned==null?'· evidence (newest)':''}</div>
+       <div class="sub">${esc(selPoint)} · ${esc(cap.timestamp.slice(11))}${cap.settings&&cap.settings.kp?` · <b>Kp ${cap.settings.kp} V/A, Ti ${cap.settings.ti_ms} ms${cap.settings.ff!=null?', ff '+cap.settings.ff:''}${cap.settings.dt_ns!=null?', dead time '+cap.settings.dt_ns+' ns':''}${cap.settings.ffn!=null?', ff filter '+(cap.settings.ffn?'on':'off'):''}${cap.settings.dcl!=null?', DC loop '+(cap.settings.dcl?'on '+cap.settings.vdc+' V':'off'):''}${cap.settings.adt!=null?', IAC at '+cap.settings.adt+', iacm '+Math.round(1000*cap.settings.iacm)+' mA':''}</b>`:''} · ${esc(cap.stats_note)} ${idx===P.pinned?'· <b>pinned as evidence</b>':idx===caps.length-1&&P.pinned==null?'· evidence (newest)':''}</div>
        <div class="row" style="margin-top:4px">
         ${idx===P.pinned?`<button onclick="pin(null)">Unpin</button>`:`<button onclick="pin(${idx})">Pin as evidence</button>`}</div></div>
      <div>${pointRows.length?`<table><tr><th>Criterion</th><th>Verdict</th><th>Value</th></tr>${pointRows.map(r=>`<tr><td>${esc(r.id.slice(9))} ${esc(r.desc)}</td><td><span class="badge ${r.verdict}">${r.verdict}</span></td><td>${esc(r.measured.split(';')[0])}</td></tr>`).join('')}</table>`:''}

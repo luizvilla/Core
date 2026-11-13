@@ -17,6 +17,7 @@ The first hardware tests of the inverter: generate 230 V RMS, synchronize with t
 | dead time | `w` / `s` | `INV_OFF` only | OFF | Dead time of both bridge legs (LEG1_HIGH, LEG2_HIGH) ±20 ns within 100–400 ns; never below the board's 100 ns (shoot-through margin); refused while the bridge runs. Telemetry ends with `dt <ns>` (L2-INV-09) |
 | ff filter | `D` | OFF, step 0 or step 1 | any | Feedforward DC block and 100 Hz notch (library `0cce694`), the fundamental restored; applied only with the relay open; telemetry `ffn 0/1` (L2-INV-11) |
 | DC loop | `B` | OFF, step 0 or step 1 | any | DC current loop (library `67097f2`): integrator on the line current minus the sensor offset learnt with the relay open, a DC correction up to ±10 V while connected; applied only with the relay open; telemetry `dcl 0/1 vdc <V>` (L2-INV-12) |
+| IAC instant | `[` / `]` | any | any | ADC_2 trigger instant (IAC and ILow1) −/+0.05 of the LEG2_HIGH carrier up-count, 0 (the valley, start-up) to 0.95; CMP3 only places the ADC trigger, so it moves safely while connected. Telemetry `adt <instant> iacm <A>`: iacm is the firmware IAC averaged over 0.5 s, its DC reading (L2-INV-13) |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
 | relay test | `R` | `INV_OFF` (dead bench only) | OFF | The relay closes and opens on its own (pre-check L2-INV-10.a) |
 
@@ -271,6 +272,19 @@ Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the c
 
 **Acceptance.** .a the DC ammeter reads less with the loop on than off; .c no trip, no fault; INFO .b the readings and the correction `vdc`.
 
+## L2-INV-13 · IAC sampling instant
+
+**Why.** In L2-INV-12 the DC loop drove the line current to −140 mA while the firmware read +5 mA: with the relay closed the firmware IAC reads about +145 mA too high (the learnt zero, relay open, is right). The likely cause is the switching ripple of the line current, sampled at one fixed phase of the PWM carrier: IAC is sampled once per switching period at the carrier valley (CMP3 = 0). The line current is measured after the filter capacitors, so its ripple is shifted and the valley is no longer its mean point. Keys `[` / `]` move the ADC_2 trigger along the up-count; the instant where the firmware DC reading matches the ammeter is the one to keep. If iacm does not change with the instant, the bias is not the ripple.
+
+**Sequence.** Feedforward filter on (`D`, `ffn 1`), DC loop off (`dcl 0`), DC ammeter in series with the line.
+1. `c`, `G`, wait 3 s; note the ammeter (about −10 mA with the filter on).
+2. For each point *adt0.00*, *adt0.25*, *adt0.50*, *adt0.75*, *adt0.95*: press `]` until the telemetry `adt` matches (5 presses per 0.25), wait 3 s for `iacm` to settle, Acquire, note the ammeter.
+3. `x`. Then, with the best instant, rerun L2-INV-12 (the instant is kept until the board resets).
+
+ILow1 is sampled by the same ADC_2 trigger: watch the boost (Vbus) at each point.
+
+**Acceptance.** .a an instant where `iacm` matches the ammeter within ±20 mA; .c no trip, no fault; INFO .b `iacm`, the ammeter and the scope mean per instant.
+
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 
 **Conditions.** As step 2, in GRID_CONNECTED (state 3). The bulb makes a weak grid: the injected current raises the grid-side voltage by I·R_bulb (cold about 40 Ω, hot about 500 Ω). The firmware caps the reference at 0.1 A peak (`app::inject_current_max`), which keeps the rise below the observer's 253 V limit. Higher currents need the bulb bypassed and a new cap: a separate decision.
@@ -306,6 +320,7 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 | | L2-INV-09 | | | | | |
 | | L2-INV-11 | | | | | |
 | | L2-INV-12 | | | | | |
+| | L2-INV-13 | | | | | |
 | | L2-INV-03 | | | | | |
 
 ## Simulation counterpart

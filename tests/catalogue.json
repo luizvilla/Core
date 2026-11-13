@@ -1264,6 +1264,18 @@
    "hardware": "bench"
   },
   {
+   "id": "L2-INV-13",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "IAC sampling instant (keys [ / ])",
+   "criterion": ".a an ADC_2 trigger instant where the firmware DC reading iacm matches the DC ammeter within ±20 mA; .c connected throughout without trip or fault; INFO .b iacm, ammeter and scope mean per instant",
+   "conditions": "Step 2b connected with the feedforward filter on (D) and the DC loop off, DC ammeter in series with the line; the instant stepped with [ / ] (0 to 0.95 of the LEG2_HIGH up-count, 0.05 steps), 3 s per point",
+   "source": "docs/testing/bench/inverter-session.md; keys [ / ]; telemetry adt, iacm",
+   "status": "planned",
+   "status_note": "Defined 2026-11-13 with Luiz Villa, after L2-INV-12 found the firmware IAC about +145 mA too high while connected",
+   "hardware": "bench"
+  },
+  {
    "id": "L2-INV-02",
    "tab": "inverter",
    "level": "L2",

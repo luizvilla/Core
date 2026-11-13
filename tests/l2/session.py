@@ -539,6 +539,8 @@ def firmware_settings(tel: dict | None) -> dict:
     if tel.get('ffn') is not None: out['ffn'] = int(tel['ffn'])
     if tel.get('dcl') is not None: out['dcl'] = int(tel['dcl'])
     if tel.get('vdc') is not None: out['vdc'] = float(tel['vdc'])
+    if tel.get('adt') is not None: out['adt'] = float(tel['adt'])
+    if tel.get('iacm') is not None: out['iacm'] = float(tel['iacm'])
     return out
 
 
@@ -551,6 +553,8 @@ def settings_text(s: dict) -> str:
     if 'dt_ns' in s: parts.append(f'dead time {s["dt_ns"]} ns')
     if 'ffn' in s: parts.append('feedforward filter ' + ('on' if s['ffn'] else 'off'))
     if 'dcl' in s: parts.append('DC loop ' + ('on' if s['dcl'] else 'off') + (f' ({s["vdc"]:+.2f} V)' if s.get('dcl') and 'vdc' in s else ''))
+    if 'adt' in s: parts.append(f'IAC sampled at {s["adt"]:.2f} of the up-count')
+    if 'iacm' in s: parts.append(f'firmware IAC mean {1000 * s["iacm"]:+.0f} mA')
     return ', '.join(parts)
 
 
