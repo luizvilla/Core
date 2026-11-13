@@ -170,8 +170,6 @@ const Phase phases[] = {
     {"CONNECT_g", INV_CONNECT, BUSREG, 3U * tps},   // settle 200 ms, relay, GRID_CONNECTED
     {"INJECT_n", INV_INJECT, BUSREG, 2U * tps},     // RUN
     {"OFF_BUSREG", INV_OFF, BUSREG, tps},           // disconnect sequence
-    {"VAC_FOLLOW_a", INV_VAC_FOLLOW, BUSREG, 2U * tps},
-    {"OFF_BUSREG", INV_OFF, BUSREG, tps / 2U},
     {"FOLLOW_CONN_G", INV_FOLLOW_CONNECT, BUSREG, 3U * tps},
     {"OFF_BUSREG", INV_OFF, BUSREG, tps},
     {"OPEN_LOOP_o", INV_OPEN_LOOP, BUSREG, 2U * tps},

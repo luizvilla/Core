@@ -157,8 +157,6 @@ static float32_t inject_current = 0.0F;
 static constexpr float32_t inject_current_step = 0.01F;  /* A peak per key press */
 /* Telemetry: short line every 500 ms by default; key l toggles the full lines every 100 ms. */
 static bool telemetry_verbose = false;
-/* Bench step 1c: inverter voltage offset (fraction of VAC, keys + / -), never below the grid. */
-static float32_t inverter_vac_offset = 0.0F;
 /* Grid relay on GPIO 22: command, and feedback once held for the contact time.
  * Polarity: set = closed (check on the dead-bus relay test, session step R). */
 static constexpr uint8_t relay_pin = 22U;
@@ -459,13 +457,11 @@ void loop_communication_task()
                "|  inverter bench session (DC source):  |\n"
                "|     press o : step 0 open loop 230 V   |\n"
                "|     press c : step 1 PWM_SETTLE hold   |\n"
-               "|     press a : step 1d copy VAC, no relay|\n"
                "|     press g : step 2 connect (relay)   |\n"
-               "|     press G : step 2b connect, VAC copy|\n"
+               "|     press G : step 2b connect, PLL hold|\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
                "|     press y : step 4 bus loop (with m) |\n"
-               "|     press + / - : inverter V offset +/-|\n"
                "|     press x : inverter OFF (relay open)|\n"
                "|     press R : relay test (dead bench)  |\n"
                "|     press u : voltage reference UP     |\n"
@@ -529,15 +525,8 @@ void loop_communication_task()
         scope_trigger_on_boost = false;
         relay_test = false;
         break;
-    case 'a':
-        printk("inverter step 1d: bridge copies VAC once the grid is qualified (relay never closed)\n");
-        startStage(INV_VAC_FOLLOW);
-        scope_trigger_on_trip = false;
-        scope_trigger_on_boost = false;
-        relay_test = false;
-        break;
     case 'G':
-        printk("inverter step 2b: VAC copy until the contact, PI from the relay request, PLL frozen and feedforward held (5 ms)\n");
+        printk("inverter step 2b: PI from the relay request, PLL frozen and feedforward held (5 ms)\n");
         startStage(INV_FOLLOW_CONNECT);
         scope_trigger_on_trip = false;
         scope_trigger_on_boost = false;
@@ -571,14 +560,6 @@ void loop_communication_task()
         scope_trigger_on_boost = false;
         relay_test = false;
         scope.start();  /* re-arm: capture the relay closing (or a fault) of this stage */
-        break;
-    case '+':
-    case '-':
-        inverter_vac_offset += (received_serial_char == '+' ? 1.0F : -1.0F) * app::inverter_vac_offset_step;
-        if (inverter_vac_offset < 0.0F) inverter_vac_offset = 0.0F;  /* never below the grid voltage */
-        if (inverter_vac_offset > app::inverter_vac_offset_max) inverter_vac_offset = app::inverter_vac_offset_max;
-        printk("inverter voltage offset: +%.1f %% of VAC (feedforward gain %.3f)\n",
-               (double)(100.0F * inverter_vac_offset), (double)(1.0F + inverter_vac_offset));
         break;
     case 'j':
         inject_current += inject_current_step;
@@ -877,7 +858,8 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     (void)cmd_in;
 #endif
     /*----- Read sensors, holding the last valid value -----
-     * Newest sample of each channel read from the ADC's DMA buffer (timing-optimization.md, change 6). */
+     * Newest sample of each channel read from the ADC's DMA buffer (timing-optimization.md, change 6); VAC and IAC
+     * are the average of the samples written since the previous period (2 or 3, ADR 0007). */
     meas_data = shield.sensors.getLatestValueFast(ILow1);
     if (meas_data != NO_VALUE) i_low_1_value = meas_data;
 
@@ -885,7 +867,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     if (meas_data != NO_VALUE) v_low_value = meas_data;
 
     v_ac_updated = false;
-    meas_data = shield.sensors.getLatestValueFast(VAC);
+    meas_data = shield.sensors.getAverageValueFast(VAC);
     if (meas_data != NO_VALUE)
     {
         v_ac_updated = true;
@@ -899,7 +881,7 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     // meas_data = shield.sensors.getLatestValue(ILow2);
     // if (meas_data != NO_VALUE) i_low_2_value = meas_data;
 
-    meas_data = shield.sensors.getLatestValueFast(IAC);
+    meas_data = shield.sensors.getAverageValueFast(IAC);
     if (meas_data != NO_VALUE) i_ac_value = meas_data;
     if (trip_test_countdown != 0U && --trip_test_countdown == 0U)
     {
@@ -942,7 +924,6 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     cmd.inverter_stage = inverter_stage;
     cmd.settle_count_test = settle_count_test;
     cmd.inject_current = inject_current;
-    cmd.vac_offset = inverter_vac_offset;
     cmd.v_bus_ref = voltage_reference;
     cmd.voltage_notch_enabled = voltage_notch_enabled;
     cmd.current_resonant_enabled = current_resonant_enabled;

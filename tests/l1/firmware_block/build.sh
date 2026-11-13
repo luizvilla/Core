@@ -24,7 +24,7 @@ flags=(-std=c++20 -O1 -g -fPIC -Wall -Wextra -fsanitize=undefined -fno-sanitize-
 # L1_APP_SRC: a study copy of control_step.cpp (same interface), compiled instead of src/app/control_step.cpp
 app_src="${L1_APP_SRC:-$repo/src/app/control_step.cpp}"
 strict=("$repo/tests/l1/firmware_block/wrapper.cpp" "$app_src" "$repo/src/boost_converter/boost.cpp" "$repo/src/grid_observer/gridObserver.cpp")
-third=("$inv/src/singlePhaseInverterFollowing.cpp" "$inv/src/sogi.cpp" "$libs/control_library/src/pid.cpp" "$libs/control_library/src/transform.cpp" "$libs/control_library/src/trigo.cpp" "$libs/control_library/src/filters.cpp" "$libs/control_library/src/pr.cpp" "$libs/control_library/src/fir.cpp")
+third=("$inv/src/singlePhaseInverterFollowing.cpp" "$inv/src/sogi.cpp" "$inv/src/apf.cpp" "$libs/control_library/src/pid.cpp" "$libs/control_library/src/transform.cpp" "$libs/control_library/src/trigo.cpp" "$libs/control_library/src/filters.cpp" "$libs/control_library/src/pr.cpp" "$libs/control_library/src/fir.cpp")
 objects=()
 for src in "${strict[@]}" "${third[@]}"; do
     obj="$work/$(basename "$src").o"

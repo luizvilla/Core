@@ -855,7 +855,6 @@ int main() {
         c.near("Kp (V/A)", inv.getCurrentPiKp(), 0.001, 1e-9);
         c.near("Ti (s)", inv.getCurrentPiTi(), 0.0003, 1e-9);
         c.near("limit (V)", inv.getCurrentPiLimit(), 30.0, 1e-6);
-        c.near("current SOGI gain (rad/s)", inv.getCurrentSogiGain(), 500.0, 1e-6);
         c.near("output advance (periods)", inv.getOutputPhaseAdvance(), 0.0, 0.0);
     }
     {
@@ -867,23 +866,21 @@ int main() {
             c.check("Kp rejected", !inv.setCurrentPiGains(x, 0.005F));
             c.check("Ti rejected", !inv.setCurrentPiGains(1.0F, x));
             c.check("limit rejected", !inv.setCurrentPiLimit(x));
-            c.check("SOGI gain rejected", !inv.setCurrentSogiGain(x));
         }
-        c.check("SOGI gain with Kr·Ts = 1 rejected", !inv.setCurrentSogiGain(1.0F / Ts));
         for (float x : {-0.1F, 2.1F, f_nan, f_inf})
             c.check("advance rejected", !inv.setOutputPhaseAdvance(x));
         c.near("Kp unchanged", inv.getCurrentPiKp(), 0.001, 1e-9);
         c.near("Ti unchanged", inv.getCurrentPiTi(), 0.0003, 1e-9);
         c.near("limit unchanged", inv.getCurrentPiLimit(), 30.0, 1e-6);
-        c.near("SOGI gain unchanged", inv.getCurrentSogiGain(), 500.0, 1e-6);
         c.near("advance unchanged", inv.getOutputPhaseAdvance(), 0.0, 0.0);
     }
     {
         /** @test L0-GFL-17.c: Settings made before or after init() are kept across init() */
         tc::Criterion c("L0-GFL-17.c", "Settings made before or after init() are kept across init()");
         singlePhaseInverterFollowing inv;
-        c.check("SOGI gain accepted before init", inv.setCurrentSogiGain(2000.0F));
+        c.check("advance accepted before init", inv.setOutputPhaseAdvance(0.25F));
         c.check("init", initDefault(inv));
+        c.near("advance kept across init", inv.getOutputPhaseAdvance(), 0.25, 1e-7);
         c.check("gains accepted", inv.setCurrentPiGains(1.0F, 0.005F));
         c.check("limit accepted", inv.setCurrentPiLimit(20.0F));
         c.check("advance accepted", inv.setOutputPhaseAdvance(0.5F));
@@ -891,29 +888,26 @@ int main() {
         c.near("Kp", inv.getCurrentPiKp(), 1.0, 1e-7);
         c.near("Ti", inv.getCurrentPiTi(), 0.005, 1e-9);
         c.near("limit", inv.getCurrentPiLimit(), 20.0, 1e-6);
-        c.near("SOGI gain", inv.getCurrentSogiGain(), 2000.0, 1e-6);
         c.near("advance", inv.getOutputPhaseAdvance(), 0.5, 1e-7);
     }
     {
-        /** @test L0-GFL-17.d: While the current loop runs, gains and advance change live; limit and SOGI gain are refused */
-        tc::Criterion c("L0-GFL-17.d", "While the current loop runs, gains and advance change live; limit and SOGI gain are refused");
+        /** @test L0-GFL-17.d: While the current loop runs, gains and advance change live; the limit is refused */
+        tc::Criterion c("L0-GFL-17.d", "While the current loop runs, gains and advance change live; the limit is refused");
         singlePhaseInverterFollowing inv;
         Grid grid;
         if (reachRun(c, inv, grid)) {
             // I_d ref 1 A, measured 0: the PI correction is Kp · 1 A on the first step after the change.
             step(inv, grid);
-            const float low = inv.getVdqOut().d - inv.getVdq().d;
+            const float low = inv.getVdqOut().d - inv.getVdqFeedforward().d;
             c.check("gains accepted in RUN", inv.setCurrentPiGains(5.0F, 0.005F));
             step(inv, grid);
-            const float high = inv.getVdqOut().d - inv.getVdq().d;
+            const float high = inv.getVdqOut().d - inv.getVdqFeedforward().d;
             c.check("still RUN", inv.getMode() == VSI_RUN);
             c.check("default correction below 0.1 V", std::fabs(low) < 0.1F);
             c.check("Kp 5 V/A: correction above 4 V", high > 4.0F);
             c.check("limit refused in RUN", !inv.setCurrentPiLimit(10.0F));
-            c.check("SOGI gain refused in RUN", !inv.setCurrentSogiGain(2000.0F));
             c.check("advance accepted in RUN", inv.setOutputPhaseAdvance(1.0F));
             c.near("limit unchanged", inv.getCurrentPiLimit(), 30.0, 1e-6);
-            c.near("SOGI gain unchanged", inv.getCurrentSogiGain(), 500.0, 1e-6);
         }
     }
     {
@@ -953,7 +947,7 @@ int main() {
         c.check("reach GRID_CONNECT (gain 1)", reachConnect(c, a, ga));
         c.check("reach GRID_CONNECT (gain 1.02)", reachConnect(c, b, gb));
         const clarke_t va = a.getVabOutput(), vb = b.getVabOutput();
-        const dqo_t qa = a.getVdq(), qb = b.getVdq();
+        const dqo_t qa = a.getVdqFeedforward(), qb = b.getVdqFeedforward();
         c.near("|V_out| / |V_dq| = 1.02", std::hypot(vb.alpha, vb.beta) / std::hypot(qb.d, qb.q), 1.02, 1e-4);
         c.near("|V_out| / |V_dq| = 1 without gain", std::hypot(va.alpha, va.beta) / std::hypot(qa.d, qa.q), 1.0, 1e-4);
         const double angle = wrap((std::atan2(vb.beta, vb.alpha) - b.getTheta()) - (std::atan2(va.beta, va.alpha) - a.getTheta()));
@@ -968,7 +962,7 @@ int main() {
             c.check("gain accepted in RUN", inv.setFeedforwardGain(1.05F));
             step(inv, grid);
             // Default PI (Kp 0.001 V/A): the correction is negligible next to 5 % of Vd.
-            c.near("V_out,d / V_d = 1.05", inv.getVdqOut().d / inv.getVdq().d, 1.05, 1e-3);
+            c.near("V_out,d / V_d = 1.05", inv.getVdqOut().d / inv.getVdqFeedforward().d, 1.05, 1e-3);
             c.check("still RUN", inv.getMode() == VSI_RUN);
         }
     }
@@ -981,7 +975,7 @@ int main() {
         c.check("from-connect off", !inv.getCurrentLoopFromConnect());
         if (reachConnect(c, inv, grid)) {
             step(inv, grid);
-            c.near("GRID_CONNECT output = feedforward only (V)", inv.getVdqOut().d - inv.getVdq().d, 0.0, 1e-4);
+            c.near("GRID_CONNECT output = feedforward only (V)", inv.getVdqOut().d - inv.getVdqFeedforward().d, 0.0, 1e-4);
             c.check("not frozen, not held", !inv.isPllFrozen() && !inv.isFeedforwardHeld());
         }
     }
@@ -994,7 +988,7 @@ int main() {
             c.check("gains", inv.setCurrentPiGains(1.0F, 0.005F));
             grid.current = 0.5;
             for (int k = 0; k < 20; ++k) step(inv, grid);
-            c.check("PI correction present in GRID_CONNECT (|ΔVd| > 0.1 V)", std::fabs(inv.getVdqOut().d - inv.getVdq().d) > 0.1F);
+            c.check("PI correction present in GRID_CONNECT (|ΔVd| > 0.1 V)", std::fabs(inv.getVdqOut().d - inv.getVdqFeedforward().d) > 0.1F);
             c.check("still GRID_CONNECT", inv.getMode() == VSI_GRID_CONNECT);
         }
     }
@@ -1027,7 +1021,7 @@ int main() {
             int held = 1; while (inv.isFeedforwardHeld() && held < 100) { step(inv, grid); ++held; }
             c.near("held for 50 periods (5 ms)", held, 50.0, 1.0);
             for (int k = 0; k < 400; ++k) step(inv, grid);
-            c.near("released: output follows the measured Vd again (V)", inv.getVdqOut().d, inv.getVdq().d, 0.05);
+            c.near("released: output follows the measured Vd again (V)", inv.getVdqOut().d, inv.getVdqFeedforward().d, 0.05);
         }
     }
     {
@@ -1045,7 +1039,7 @@ int main() {
             c.check("hold overrides the external feedforward", std::fabs(duty_h - duty) > 1e-3F);
             inv.setExternalFeedforward(f_nan, true);
             for (int k = 0; k < 20; ++k) step(inv, grid);
-            c.near("non-finite disables it: output = measured feedforward (V)", inv.getVdqOut().d, 1.02 * inv.getVdq().d, 0.05);
+            c.near("non-finite disables it: output = measured feedforward (V)", inv.getVdqOut().d, 1.02 * inv.getVdqFeedforward().d, 0.05);
         }
     }
 
@@ -1090,6 +1084,104 @@ int main() {
             else c.near("GRID_CONNECTED on the feedback at 20 ms (periods)", k_conn, 200.0, 2.0);
             c.check("no fault", inv.getFaultReason() == VSI_FAULT_NONE);
         }
+    }
+
+    // ---------------------------------------------------------------- L0-GFL-20 (ADR 0007)
+    {
+        /** @test L0-GFL-20.a: The APF has gain 1 and lags 90° at w0 (47.5, 50, 52.5 Hz), gain 1 at DC and at the 3rd harmonic */
+        tc::Criterion c("L0-GFL-20.a", "APF: gain 1 and -90° at w0 (47.5, 50, 52.5 Hz); gain 1 at DC and at the 3rd harmonic");
+        // Steady-state response to cos(w n Ts) with the APF tuned to w0, measured by projection over whole periods.
+        auto response = [](double hz_signal, double hz_tuned, double &gain, double &phase) {
+            Apf apf;
+            apf.init(Ts);
+            const double w = two_pi * hz_signal;
+            const float w_tuned = static_cast<float>(two_pi * hz_tuned);
+            const int settle = 2 * ticks_per_s, n_avg = static_cast<int>(std::lround(ticks_per_s * 10.0 / hz_tuned));
+            double re = 0.0, im = 0.0;
+            for (int n = 0; n < settle + n_avg; ++n) {
+                const float y = apf.calc(static_cast<float>(std::cos(w * n * Ts)), w_tuned);
+                if (n >= settle) { re += y * std::cos(w * n * Ts); im += y * std::sin(w * n * Ts); }
+            }
+            gain = 2.0 * std::hypot(re, im) / n_avg;
+            phase = std::atan2(im, re);  // y = g cos(wt - phi) gives phase = +phi; report -phi below
+            phase = -phase;
+        };
+        for (double hz : {47.5, 50.0, 52.5}) {
+            double g, ph;
+            response(hz, hz, g, ph);
+            c.near("gain at w0", g, 1.0, 2e-3);
+            c.near("phase at w0 (deg)", ph * 180.0 / M_PI, -90.0, 0.2);
+        }
+        double g3, ph3;
+        response(150.0, 50.0, g3, ph3);
+        c.near("gain at the 3rd harmonic", g3, 1.0, 2e-3);
+        Apf dc;
+        dc.init(Ts);
+        float y = 0.0F;
+        for (int n = 0; n < ticks_per_s; ++n) y = dc.calc(5.7F, w0);
+        c.near("DC gain (5.7 V in)", y, 5.7, 1e-4);
+    }
+    {
+        /** @test L0-GFL-20.b: Locked on a clean grid, the PLL beta is APF(SOGI alpha) and the feedforward and current alpha are the measurements, their betas in quadrature (|dq| = peak) */
+        tc::Criterion c("L0-GFL-20.b", "Locked at 50 Hz: PLL beta = APF(SOGI alpha); feedforward and current alpha = measurements, |dq| = peak");
+        singlePhaseInverterFollowing inv; Grid grid;
+        grid.current = 2.0;
+        c.check("init", initDefault(inv));
+        inv.requestSync();
+        for (int n = 0; n < 3 * ticks_per_s; ++n) step(inv, grid);
+        c.check("synchronized", inv.getSync());
+        // The PLL angle locks on the SOGI alpha, which leads its input by about one sample (w·Ts, 1.8° at 100 µs):
+        // the feedforward and current dq of the raw measurements are rotated by that angle, Vq ≈ -V·sin(w·Ts).
+        double vab_min = 1e9, vab_max = 0.0, vff_err = 0.0, i_err = 0.0, alpha_err = 0.0, angle_ff = 0.0;
+        for (int n = 0; n < ticks_per_s / 10; ++n) {
+            const float v = grid.v(), i = grid.i();
+            step(inv, grid);
+            const clarke_t vab = inv.getVab();
+            const double r = std::hypot(vab.alpha, vab.beta);
+            vab_min = std::fmin(vab_min, r); vab_max = std::fmax(vab_max, r);
+            alpha_err = std::fmax(alpha_err, std::fabs(inv.getVabFeedforward().alpha - v) + std::fabs(inv.getIab().alpha - i));
+            const dqo_t ff = inv.getVdqFeedforward(), idq = inv.getIdq();
+            vff_err = std::fmax(vff_err, std::fabs(std::hypot(ff.d, ff.q) - V_pk));
+            i_err = std::fmax(i_err, std::fabs(std::hypot(idq.d, idq.q) - 2.0));
+            angle_ff = std::atan2(ff.q, ff.d);
+        }
+        c.near("|Vab| of the PLL constant (APF beta in quadrature with SOGI alpha): ripple (V)", vab_max - vab_min, 0.0, 0.5);
+        c.near("feedforward and current alpha = measurements", alpha_err, 0.0, 1e-6);
+        c.near("|Vdq| of the feedforward = peak (V)", vff_err, 0.0, 1.5);
+        c.near("|Idq| = 2 A", i_err, 0.0, 0.01);
+        c.near("feedforward dq angle = -w·Ts (the SOGI's one-sample lead) (rad)", angle_ff, -w0 * Ts, 0.005);
+    }
+    {
+        /** @test L0-GFL-20.c: At 52 Hz the APFs follow the PLL frequency: the feedforward stays in quadrature (|Vdq| ripple below 2 V; a 50 Hz APF leaves 2.2° of error, about 12 V of ripple) */
+        tc::Criterion c("L0-GFL-20.c", "At 52 Hz the APFs follow the PLL frequency: feedforward |Vdq| ripple below 2 V (50 Hz APF: about 12 V)");
+        singlePhaseInverterFollowing inv; Grid grid;
+        grid.hz = 52.0;
+        c.check("init", initDefault(inv));
+        inv.requestSync();
+        for (int n = 0; n < 3 * ticks_per_s; ++n) step(inv, grid);
+        c.check("synchronized", inv.getSync());
+        double r_min = 1e9, r_max = 0.0;
+        for (int n = 0; n < ticks_per_s / 10; ++n) {
+            step(inv, grid);
+            const dqo_t ff = inv.getVdqFeedforward();
+            r_min = std::fmin(r_min, std::hypot(ff.d, ff.q)); r_max = std::fmax(r_max, std::hypot(ff.d, ff.q));
+        }
+        c.range("feedforward |Vdq| ripple (V)", r_max - r_min, 0.0, 2.0);
+        c.near("PLL frequency (Hz)", inv.getw() / two_pi, 52.0, 0.05);
+    }
+    {
+        /** @test L0-GFL-20.d: The current feedback has no SOGI: a current step appears in Id at once (half through alpha) */
+        tc::Criterion c("L0-GFL-20.d", "No current SOGI: a 2 A current step shows in Idq on the same sample");
+        singlePhaseInverterFollowing inv; Grid grid;
+        c.check("init", initDefault(inv));
+        inv.requestSync();
+        for (int n = 0; n < 2 * ticks_per_s; ++n) step(inv, grid);
+        // Step at a current peak (grid phase 0): the alpha half reaches Id at once.
+        while (std::cos(grid.phase) < 0.999) step(inv, grid);
+        grid.current = 2.0;
+        step(inv, grid);
+        const dqo_t idq = inv.getIdq();
+        c.range("|Idq| on the first sample (A)", std::hypot(idq.d, idq.q), 1.0, 3.0);
     }
 
     return tc::finish();

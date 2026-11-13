@@ -192,6 +192,9 @@ int main() {
         state.boost.setMode(IDLE);
         c.check("observer not yet operable", !state.grid_observer.canOperate());
         c.check("inverter OFF", state.inverter.getMode() == VSI_OFF);
+        c.near("current PI Kp 3.5 V/A (ADR 0007)", state.inverter.getCurrentPiKp(), 3.5, 1e-6);
+        c.near("current PI Ti 20 ms (ADR 0007)", state.inverter.getCurrentPiTi(), 0.020, 1e-9);
+        c.near("current PI limit 30 V", state.inverter.getCurrentPiLimit(), 30.0, 1e-6);
     }
     {
         /** @test L0-APP-01.b: A mode change is flagged on its tick only and runs the cold loop on that tick */
@@ -742,102 +745,62 @@ int main() {
         c.check("GRID_CONNECTED within 1 s", connected > 0);
     }
 
-    // ---------------------------------------------------------------- L0-APP-10
+    // ---------------------------------------------------------------- L0-APP-14 (ADR 0007; replaces L0-APP-10 and -11)
     {
-        /** @test L0-APP-10.a: The inverter voltage offset sets the feedforward gain 1 + offset, clamped to [0, 5 %] */
-        tc::Criterion c("L0-APP-10.a", "The inverter voltage offset sets the feedforward gain 1 + offset, clamped to [0, 5 %]");
+        /** @test L0-APP-14.a: Steps 1c and 1d removed: the feedforward gain stays 1 in every stage */
+        tc::Criterion c("L0-APP-14.a", "Steps 1c and 1d removed: the feedforward gain stays 1 in every stage");
         ControlState state;
         Grid grid;
         float held = 0.0F;
         OperatorCommands cmd;
         c.check("controlInit", controlInit(state) == 0);
-        for (float off : {0.0F, 0.01F, 0.03F, app::inverter_vac_offset_max}) {
-            cmd.vac_offset = off; gridStep(state, grid, cmd, true, held);
-            c.near("gain = 1 + offset", state.inverter.getFeedforwardGain(), 1.0 + off, 1e-6);
+        for (InverterStage st : {INV_OFF, INV_SETTLE, INV_CONNECT, INV_FOLLOW_CONNECT}) {
+            cmd.inverter_stage = st;
+            for (int k = 0; k < grid_period_ticks; ++k) gridStep(state, grid, cmd, true, held);
+            c.near("feedforward gain 1", state.inverter.getFeedforwardGain(), 1.0, 0.0);
         }
-        cmd.vac_offset = -0.02F; gridStep(state, grid, cmd, true, held);
-        c.near("negative offset: gain 1 (never below the grid)", state.inverter.getFeedforwardGain(), 1.0, 1e-6);
-        cmd.vac_offset = 0.2F; gridStep(state, grid, cmd, true, held);
-        c.near("offset above the limit: gain 1 + 5 %", state.inverter.getFeedforwardGain(), 1.0 + app::inverter_vac_offset_max, 1e-6);
-    }
-
-    // ---------------------------------------------------------------- L0-APP-11
-    {
-        /** @test L0-APP-11.a: Step 1d: no bridge until the grid is qualified; then the bridge copies VAC, the relay is never commanded */
-        tc::Criterion c("L0-APP-11.a", "Step 1d: no bridge until the grid is qualified; then the bridge copies VAC, the relay is never commanded");
-        ControlState state;
-        Grid grid; grid.offset = -5.7;  // bench VAC offset
-        float held = 0.0F;
-        OperatorCommands cmd; cmd.inverter_stage = INV_VAC_FOLLOW;
-        c.check("controlInit", controlInit(state) == 0);
-        bool early = false, relay = false; int n = 0;
-        for (; n < 3 * ticks_per_s && !state.grid_observer.canOperate(); ++n) {
-            const ControlOutputs out = gridStep(state, grid, cmd, true, held);
-            early |= out.bridge_enable && !state.grid_observer.canOperate(); relay |= out.relay_close;
-        }
-        c.check("no bridge before the grid is qualified", !early);
-        double worst = 0.0, amp = 0.0;
-        for (int k = 0; k < 2 * ticks_per_s; ++k) {  // 1 s ramp, then 1 s copying
-            const float v_now = grid.v(), v_prev = static_cast<float>(state.vac_prev);
-            const float dc = state.vac_dc;
-            const ControlOutputs out = gridStep(state, grid, cmd, true, held);
-            relay |= out.relay_close;
-            if (k >= ticks_per_s) {
-                const double dc_next = dc + (v_now - dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
-                const double expect = 0.5 + (v_now + app::vac_follow_advance * (v_now - v_prev) - dc_next) / (2.0 * v_bus);
-                worst = std::max(worst, std::fabs(out.bridge_duty - expect));
-                amp = std::max(amp, std::fabs(2.0 * v_bus * (out.bridge_duty - 0.5)));
-                c.check("bridge enabled", out.bridge_enable);
-            }
-        }
-        c.near("duty = 0.5 + (VAC extrapolated 1.3 periods − DC) / (2 Vbus)", worst, 0.0, 1e-5);
-        c.near("copied amplitude ≈ 325 V peak, offset partly removed after 3 s (V)", amp, 230.0 * std::sqrt(2.0), 4.0);
-        c.check("DC estimate moving towards the VAC offset (between -5.7 and 0 V, 3 s after boot)", state.vac_dc < -2.0F && state.vac_dc > -6.5F);
-        c.check("relay never commanded", !relay);
-        c.check("inverter controller stays OFF", state.inverter.getMode() == VSI_OFF);
     }
     {
-        /** @test L0-APP-11.b: Step 1d: the offset of step 1c scales the copy; a bench trip stops the bridge */
-        tc::Criterion c("L0-APP-11.b", "Step 1d: the offset of step 1c scales the copy; a bench trip stops the bridge");
+        /** @test L0-APP-14.b: The stage value 5 (old step 1d) drives no bridge and never commands the relay */
+        tc::Criterion c("L0-APP-14.b", "Stage value 5 (old step 1d) drives no bridge and never commands the relay");
         ControlState state;
         Grid grid;
         float held = 0.0F;
-        OperatorCommands cmd; cmd.inverter_stage = INV_VAC_FOLLOW;
+        OperatorCommands cmd; cmd.inverter_stage = static_cast<InverterStage>(5);
         c.check("controlInit", controlInit(state) == 0);
-        c.check("qualified", qualifyGrid(c, state, grid, cmd, held));
-        for (int k = 0; k < ticks_per_s + grid_period_ticks; ++k) gridStep(state, grid, cmd, true, held);
-        double a0 = 0.0, a3 = 0.0;
-        for (int k = 0; k < 2 * grid_period_ticks; ++k) a0 = std::max(a0, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
-        cmd.vac_offset = 0.03F;
-        for (int k = 0; k < 2 * grid_period_ticks; ++k) a3 = std::max(a3, std::fabs(gridStep(state, grid, cmd, true, held).bridge_duty - 0.5));
-        c.near("amplitude ratio with a 3 % offset", a3 / a0, 1.03, 2e-3);
-        Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.i_ac = 4.0F;
-        state.bridge_pwm_applied = true;
-        const ControlOutputs out = controlStep(state, m, cmd);
-        c.check("4 A trips the bench protection", state.bench_tripped);
-        c.check("bridge stopped on the trip tick", !out.bridge_enable);
+        bool bridge = false, relay = false;
+        for (int k = 0; k < 3 * ticks_per_s; ++k) {
+            const ControlOutputs out = gridStep(state, grid, cmd, true, held);
+            bridge |= out.bridge_enable; relay |= out.relay_close;
+        }
+        c.check("grid qualified meanwhile", state.grid_observer.canOperate());
+        c.check("no bridge", !bridge);
+        c.check("no relay command", !relay);
+        c.check("inverter OFF", state.inverter.getMode() == VSI_OFF);
     }
 
     // ---------------------------------------------------------------- L0-APP-12
     {
-        /** @test L0-APP-12.a: Step 2b: VAC copy in PWM_SETTLE, PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */
-        tc::Criterion c("L0-APP-12.a", "Step 2b: VAC copy in PWM_SETTLE, PI from the relay request, blanking 15 ms from the command, GRID_CONNECTED 20 ms after it; advance 0.3 in this stage only");
+        /** @test L0-APP-12.a: Step 2b: measured feedforward in PWM_SETTLE (ADR 0007, no VAC copy), PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */
+        tc::Criterion c("L0-APP-12.a", "Step 2b: measured feedforward in PWM_SETTLE (no VAC copy), PI from the relay request, blanking 15 ms from the command, GRID_CONNECTED 20 ms after it; advance 0.3 in this stage only");
         ControlState state; Grid grid; Relay relay;
         OperatorCommands cmd; cmd.inverter_stage = INV_FOLLOW_CONNECT;
         c.check("controlInit", controlInit(state) == 0);
         bool settle_seen = false, copy_ok = true, froze = false, held_ff = false, faulted = false;
         int k_cmd = -1, k_freeze_end = -1, k_hold = -1, k_hold_end = -1, k_conn = -1;
         for (int k = 0; k < 4 * ticks_per_s; ++k) {
-            const float v_now = grid.v(), v_prev = state.vac_prev; const float dc = state.vac_dc;
+            const float v_now = grid.v();
             Measurements m; m.v_dc_bus = v_bus; m.v_ac = v_now; m.v_ac_updated = true; m.i_ac = 0.0F; m.relay_closed = relay.closed;
             const ControlOutputs out = controlStep(state, m, cmd);
             state.bridge_pwm_applied = out.bridge_enable; relay.apply(out); grid.advance();
             const vsi_mode_t mode = state.inverter.getMode();
             if (mode == VSI_PWM_SETTLE) {
                 settle_seen = true;
-                const double dc_next = dc + (v_now - dc) * (app::hot_loop_period / app::vac_follow_dc_tau);
-                const double expect = 0.5 + (v_now + app::vac_follow_advance * (v_now - v_prev) - dc_next) / (2.0 * v_bus);
-                copy_ok &= std::fabs(out.bridge_duty - expect) < 1e-4;
+                // Feedforward park(VAC, APF(VAC)) rotated back by theta + advance·w·Ts: alpha cos δ − beta sin δ.
+                const clarke_t ff = state.inverter.getVabFeedforward();
+                const double delta = app::follow_connect_advance * state.inverter.getw() * app::hot_loop_period;
+                const double expect = 0.5 + (ff.alpha * std::cos(delta) - ff.beta * std::sin(delta)) / (2.0 * v_bus);
+                copy_ok &= std::fabs(out.bridge_duty - expect) < 1e-5 && ff.alpha == v_now;
             }
             if (out.relay_close && k_cmd < 0) k_cmd = k;
             if (state.inverter.isPllFrozen()) froze = true; else if (froze && k_freeze_end < 0) k_freeze_end = k;
@@ -846,7 +809,7 @@ int main() {
             if (mode == VSI_GRID_CONNECTED && k_conn < 0) k_conn = k;
         }
         c.check("PWM_SETTLE reached", settle_seen);
-        c.check("duty = VAC copy in PWM_SETTLE", copy_ok);
+        c.check("duty = measured feedforward (VAC and its APF, rotated by the advance) in PWM_SETTLE", copy_ok);
         c.check("PI from the relay request", state.inverter.getCurrentLoopFromConnect());
         c.near("advance 0.3 in step 2b", state.inverter.getOutputPhaseAdvance(), app::follow_connect_advance, 1e-6);
         c.check("relay commanded", k_cmd >= 0);

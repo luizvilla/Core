@@ -40,6 +40,7 @@
 
 /* Current module private functions */
 #include "./data/data_conversion.h"
+#include "./data/data_fast_average.h"
 
 /**
  *  Type definitions
@@ -120,7 +121,12 @@ struct DataFastChannel
 	uint32_t  last_remaining;               /* CNDTR at the previous read */
 	uint8_t   adc_index;
 	uint8_t   dma_size;                     /* S */
+	uint8_t   sequence_length;              /* n: channels in the ADC sequence */
 	uint8_t   newest_slot[DATA_FAST_MAX_DMA_SIZE + 1]; /* CNDTR -> slot */
+	/* Average read (SensorsAPI::getAverageValueFast, Core2 ADR 0007) */
+	uint8_t   average_slot;                 /* newest slot at the previous average read */
+	bool      average_started;              /* average_slot is valid */
+	float32_t last_average;                 /* previous average (returned when nothing is new) */
 };
 
 /**

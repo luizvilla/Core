@@ -170,36 +170,24 @@ inline constexpr float32_t relay_close_delay = 0.0097F;
 
 /*
  * Inverter current loop: initial values set on the library at controlInit() (the library defaults are
- * Kp 0.001 V/A, Ti 0.3 ms, current SOGI 500 rad/s, no advance: no current control in practice). Candidate C of
- * docs/testing/inverter-current-loop-design.md, 500 µH without output chokes; L1-GFL-09…13.
+ * Kp 0.001 V/A, Ti 0.3 ms, no advance: no current control in practice). ADR 0007: the current feedback is
+ * park(averaged IAC, APF(averaged IAC)), no current SOGI; Kp 3.5 V/A and Ti 20 ms chosen by the team for the phase
+ * margin at a 450 Hz bandwidth (was candidate C, Kp 1 V/A, Ti 5 ms, of docs/testing/inverter-current-loop-design.md).
+ * To confirm on L1 (L1-GFL-20); on a pure 500 µH plant Kp/L puts the crossover near 1.1 kHz.
  */
 /** @brief Current PI proportional gain, in V/A. */
-inline constexpr float32_t inverter_current_kp = 1.0F;
+inline constexpr float32_t inverter_current_kp = 3.5F;
 /** @brief Current PI integral time, in s. */
-inline constexpr float32_t inverter_current_ti = 0.005F;
+inline constexpr float32_t inverter_current_ti = 0.020F;
 /** @brief Current PI output limit (correction added to the voltage feedforward), in V. */
 inline constexpr float32_t inverter_current_limit = 30.0F;
-/** @brief Current SOGI resonance gain, in rad/s (dq low-pass at half this value on the measured current). */
-inline constexpr float32_t inverter_current_sogi_gain = 2000.0F;
 /** @brief Output rotation advance compensating the actuation delay, in control periods. */
 inline constexpr float32_t inverter_output_phase_advance = 0.5F;
-/** @brief Bench step 1c: inverter voltage offset step per key press, as a fraction of the measured grid voltage
- * (0.01: the inverter aims 1 % above VAC, about 3.3 V peak). Applied as the feedforward gain 1 + offset. */
-inline constexpr float32_t inverter_vac_offset_step = 0.01F;
-/** @brief Largest inverter voltage offset (fraction of VAC). 5 % is 16 V peak: 0.4 A peak through the cold bulb
- * (40 Ω) at the contact, below the 3 A bench trip. The offset is never negative (never below the grid). */
-inline constexpr float32_t inverter_vac_offset_max = 0.05F;
-/** @brief Step 1d (VAC follower): VAC extrapolated this many control periods ahead, to compensate the actuation
- * delay (80 µs to the next carrier period, plus half the 100 µs hold): 1.3. */
-inline constexpr float32_t vac_follow_advance = 1.3F;
-/** @brief Step 1d: time constant of the VAC DC estimate (bench offset about -5.7 V), in s. A first-order filter,
- * two operations per period: 50 Hz ripple on the estimate about Vpk/(w·tau) = 0.5 V; 95 % settled 6 s after boot. */
-inline constexpr float32_t vac_follow_dc_tau = 2.0F;
 /** @brief Step 2b: output advance, in control periods (D-GFL-04 optimum: 80 µs + half a period of hold, minus the
  * one-sample lead of the PLL angle). Other stages keep inverter_output_phase_advance. */
 inline constexpr float32_t follow_connect_advance = 0.3F;
-/** @brief Step 2b: connection blanking, from the relay command, in s: the PLL frozen, the VAC copy until the predicted
- * contact (relay_close_delay), then the synthesized feedforward to the end. 15 ms = 9.7 ms relay + the D-GFL-04
+/** @brief Step 2b: connection blanking, from the relay command, in s: the PLL frozen, the measured feedforward until the
+ * predicted contact (relay_close_delay), then the synthesized feedforward to the end. 15 ms = 9.7 ms relay + the D-GFL-04
  * optimum (5 ms after the contact), rounded up for the relay spread. Longer blanks raised the peak in D-GFL-04
  * (0.37 A at 5 ms after the contact, 0.76 A from 20 ms on) and only postpone the PLL's settling tail. */
 inline constexpr float32_t follow_connect_blanking = 0.015F;
@@ -255,9 +243,9 @@ enum InverterStage : uint8_t {
     INV_OPEN_LOOP = 2,  ///< Step 0: fixed 50 Hz modulation to 230 V RMS, no grid controller, relay open (menu 'o').
     INV_CONNECT = 3,    ///< Step 2: settle, close the relay, regulate zero current (GRID_CONNECTED) (menu 'g').
     INV_INJECT = 4,     ///< Step 3: as CONNECT, then inject a fixed d-axis current (RUN) (menu 'n').
-    INV_VAC_FOLLOW = 5, ///< Step 1d: once the grid is qualified, the bridge copies the measured VAC; relay never closed (menu 'a').
-    INV_FOLLOW_CONNECT = 6, ///< Step 2b: as CONNECT, with the VAC copy as feedforward until the contact, the current PI from the
-                            ///< relay request, the PLL frozen from the command and the feedforward held after the contact (menu 'G').
+    /* 5 was step 1d (VAC follower, menu 'a'), removed by ADR 0007; 6 and 7 keep their numbers. */
+    INV_FOLLOW_CONNECT = 6, ///< Step 2b: as CONNECT, with the current PI from the relay request, the PLL frozen from the
+                            ///< command and the feedforward held after the contact (menu 'G').
     INV_BUS_LOOP = 7        ///< Step 4: as INJECT, the d-axis current set by the bus voltage loop (pair with the boost in MPPT) (menu 'y').
 };
 
@@ -268,7 +256,6 @@ struct OperatorCommands {
     float32_t inject_current = 0.0F; ///< INJECT d-axis current reference, A peak (clamped to app::inject_current_max).
     float32_t v_bus_ref = app::initial_voltage_reference;  ///< VDCBus reference (V).
     bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
-    float32_t vac_offset = 0.0F;     ///< Inverter voltage offset, fraction of VAC, clamped to [0, app::inverter_vac_offset_max].
     bool voltage_notch_enabled = false; ///< Reject 100 Hz in boost voltage feedback (menu 'N').
     bool current_resonant_enabled = false; ///< Add 100 Hz boost current correction (menu 'K').
 };
@@ -302,11 +289,8 @@ struct ControlState {
     float32_t open_loop_m = 0.0F;               ///< Open-loop stage: current modulation index (ramped).
     float32_t open_loop_theta = 0.0F;           ///< Open-loop stage: oscillator angle (rad).
     bool bench_tripped = false;                 ///< Bench current protection latched (cleared in the OFF stage).
-    bool open_loop_active = false;              ///< The open-loop or VAC-follower stage drove the bridge last period.
-    float32_t vac_prev = 0.0F;                  ///< Previous VAC sample (V), for the VAC-follower extrapolation.
-    float32_t vac_dc = 0.0F;                    ///< VAC DC estimate (V), first-order filter, removed by the VAC follower.
+    bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
     bool follow_connect_applied = false;        ///< Step 2b settings currently applied to the inverter.
-    float32_t applied_vac_offset = 0.0F;        ///< Offset currently applied as the feedforward gain.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
     Pid bus_pid;                                ///< DC bus voltage loop (stage INV_BUS_LOOP), d-axis current out.
     float32_t bus_current_ref = 0.0F;           ///< Bus loop output, A peak (held between its runs; 0 outside RUN).

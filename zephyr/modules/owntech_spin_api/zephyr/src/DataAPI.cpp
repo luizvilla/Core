@@ -790,6 +790,10 @@ int8_t DataAPI::prepareFastChannel(adc_t adc_num,
 	channel.last_remaining = UINT32_MAX;
 	channel.adc_index      = adc_index;
 	channel.dma_size       = (uint8_t)size;
+	channel.sequence_length = count;
+	channel.average_slot    = 0;
+	channel.average_started = false;
+	channel.last_average    = NO_VALUE;
 
 	return 0;
 }

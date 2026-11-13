@@ -325,6 +325,25 @@ public:
 	float32_t getLatestValueFast(sensor_t sensor_name, uint8_t* dataValid = nullptr);
 
 	/**
+	 * @brief Average of the sensor's samples written in the ADC's circular
+	 *        DMA buffer since the previous call for this sensor (Core2
+	 *        ADR 0007): at a control period of 50 us and one ADC sequence
+	 *        every 20 us, 2 or 3 samples. Same preparation, fallback and
+	 *        validity codes as getLatestValueFast(), except:
+	 *
+	 *        - `DATA_IS_OLD` when no new sample arrived: the previous average
+	 *          is returned again.
+	 *        - The first call after preparation (or after an overrun) returns
+	 *          the newest sample alone.
+	 *        - The call must come more often than one lap of the DMA buffer
+	 *          (a whole lap between two calls looks like fewer samples).
+	 *        - Use either this call or getLatestValueFast() for a sensor's
+	 *          validity code: they keep separate positions, but the same
+	 *          overrun handling.
+	 */
+	float32_t getAverageValueFast(sensor_t sensor_name, uint8_t* dataValid = nullptr);
+
+	/**
 	 * @brief Prepare getLatestValueFast() for every enabled sensor. Call it
 	 *        from a thread once the acquisition has started (after
 	 *        task.startCritical()). Sensors already prepared are skipped.

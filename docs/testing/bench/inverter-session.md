@@ -7,15 +7,15 @@ The first hardware tests of the inverter: generate 230 V RMS, synchronize with t
 | 0 | `o` | `INV_OPEN_LOOP` | not used (OFF) | The bridge and filter make a 230 V RMS, 50 Hz wave with no grid |
 | 1 | `c` | `INV_SETTLE` | PWM_SETTLE, held | The inverter-side voltage matches the grid before the relay |
 | 1b | `g` | `INV_CONNECT`, relay power contacts unwired | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | Dry run of step 2: the sequence and the relay timing, with nothing connected (L2-INV-04) |
-| 1c | `c`, then `+`/`-` | `INV_SETTLE`, grid on the other side of the relay | PWM_SETTLE, held | The inverter-side voltage raised a little above the grid, so current flows out of the inverter at the contact (L2-INV-05) |
-| 1d | `a` | `INV_VAC_FOLLOW`, grid on the other side of the relay | OFF (PLL running); the bridge copies VAC | The inverter-side wave copies the measured grid voltage sample by sample: the smallest difference the hardware allows, relay never closed (L2-INV-06) |
-| 2 | `g` | `INV_CONNECT`, grid on the other side, offset from step 1c | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
-| 2b | `G` | `INV_FOLLOW_CONNECT`, grid on the other side | PWM_SETTLE (10 periods, VAC copy) → GRID_CONNECT (PI on, blanking) → GRID_CONNECTED 20 ms after the relay command | The connection with the VAC copy until the contact, the current PI from the relay request and the PLL frozen around the contact (L2-INV-07) |
+| ~~1c~~ | — | removed by [ADR 0007](../../adr/0007-apf-quadrature-and-averaged-ac-reads.md) (keys `+`/`-` gone, feedforward gain fixed at 1) | — | (L2-INV-05 retired) |
+| ~~1d~~ | — | removed by ADR 0007 (key `a` and stage 5 gone) | — | (L2-INV-06 retired) |
+| 2 | `g` | `INV_CONNECT`, grid on the other side | PWM_SETTLE (10 periods) → GRID_CONNECT → GRID_CONNECTED | The relay closing disturbance, then zero current on the grid |
+| 2b | `G` | `INV_FOLLOW_CONNECT`, grid on the other side | PWM_SETTLE (10 periods) → GRID_CONNECT (PI on, blanking) → GRID_CONNECTED 20 ms after the relay command | The connection with the current PI from the relay request and the PLL frozen around the contact (L2-INV-07) |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
 | relay test | `R` | `INV_OFF` (dead bench only) | OFF | The relay closes and opens on its own (pre-check L2-INV-10.a) |
 
-Firmware: branch `test/microinverter-validation-v2`, the commit that adds this file or later. Build and flash with `pio run -e USB -t upload`. The stage logic is tested at L0 (`L0-APP-06…08`). The boost stays in IDLE for the whole session: the DC bus comes from the bench source.
+Firmware: branch `test/microinverter-validation-v2`, the commit that adds this file or later. **Since [ADR 0007](../../adr/0007-apf-quadrature-and-averaged-ac-reads.md) (branch `apf_quadrature`, 2026-11-13)** the inverter builds its quadrature signals with an all-pass filter (PLL β = APF(SOGI α), feedforward and current from the measurements and their APF), reads VAC and IAC as the average of the ADC samples of the period, and runs the current PI at Kp 3.5 V/A, Ti 20 ms; steps 1c and 1d are removed. Build and flash with `pio run -e USB -t upload`. The stage logic is tested at L0 (`L0-APP-06…08`). The boost stays in IDLE for the whole session: the DC bus comes from the bench source.
 
 ## Bench setup
 
@@ -39,7 +39,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 ## Telemetry
 
-**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs>`. Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending `+` / `-` so the menu stays responsive.
+**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs>` (`off` is always 0 since ADR 0007; it stays in the line for the L2 console parser). Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending keys so the menu stays responsive.
 
 **Full (`l`):** every 100 ms one line, fields separated by `:`:
 
@@ -48,7 +48,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 - `stage`: 0 OFF, 1 SETTLE, 2 OPEN_LOOP, 3 CONNECT, 4 INJECT, 5 VAC_FOLLOW, 6 FOLLOW_CONNECT.
 - `inverter_state`: 0 OFF, 1 VOLTAGE_SYNC, 2 GRID_CONNECT, 3 GRID_CONNECTED, 4 RUN, 5 STOPPING, 6 DISCONNECT, 7 FAULT, 8 PWM_SETTLE, 9 PWM_WAIT.
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
-- A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF), `fault` (inverter fault reason), `offset` (inverter voltage offset of step 1c, % of VAC). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.
+- A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF), `fault` (inverter fault reason), `offset` (feedforward gain − 1, always 0 % since ADR 0007). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.
 - A `load us:` line: the critical task's longest run (total and per part).
 - `load_us`: the critical task's longest run since the previous line, in µs. Its period is 100 µs: above about 80 µs the serial menu and the telemetry slow down or stop.
 - `Id`, `Iq` in A peak (dq frame of the grid voltage: Id in phase), `P` in W and `Q` in var from the inverter's measurements.
@@ -152,61 +152,17 @@ Step 2 run with nothing behind the relay: the firmware goes through the whole co
 | .e INFO: the three closing times, bounces and release times; IAC and `Id`, `Iq` in state 3 | record | sets `app::relay_contact_ticks` | |
 | .f Protection test (`z`, 4 A for one period in state 3; 3 A when the trip was 1.5 A): fault in the same period, bridge stopped, relay command dropped, latched until `x` | yes | checks the bench current trip end to end before the relay connects to the mains | **Pass** (4 captures, e.g. 2026-11-09_21-44-56): on sample 129, IAC 3.00 A, `inverter_mode` 3 → 7, `bridge_duty` 0.71 → 0, `relay_cmd` 1 → 0, all in the same 100 µs period; latched until `x`. A 2 kHz capture misses the single 3 A sample (one period in five recorded) |
 
-## L2-INV-05 · Step 1c: inverter voltage offset, relay open, grid on the other side
+## L2-INV-05 · Step 1c (retired)
 
-**Why.** At the contact the current is driven by the voltage across the open relay: the inverter-side voltage minus the grid voltage. Raising the inverter side a little above the grid (an offset on the feedforward) makes that current flow out of the inverter, with a size set on purpose instead of by chance. The design tests found that the mismatch, not the current loop, drives the connection transient (D-GFL-02), and that the phase matters more than the amplitude (1° is about 5.7 V at the peak, D-GFL-07). The switched model also predicts that the bridge alone already puts the inverter side about 1.1 % and 0.3° above the grid (D-GFL-07): measure it at offset 0 first.
+Removed by [ADR 0007](../../adr/0007-apf-quadrature-and-averaged-ac-reads.md) on 2026-11-13: the keys `+` / `-` and the inverter voltage offset are gone, and the feedforward gain stays 1. The procedure as it was is in the git history of this file (commit `9f9db15` and earlier).
 
-**Firmware.** Keys `+` / `-`: the inverter aims `offset` above the measured grid voltage, as a feedforward gain 1 + offset (`setFeedforwardGain`, library `2f6616f`). Step `app::inverter_vac_offset_step` = 1 % of VAC (about 3.3 V peak) per press, limited to 0–5 % (`app::inverter_vac_offset_max`): never below the grid, at most 16 V peak, which drives at most about 0.4 A peak through the cold bulb (40 Ω) at the contact. The value is printed on each press and in the `sync:` line (`offset`); it is kept across stages until changed or the board restarts. Tested at L0 (`L0-GFL-18`, `L0-APP-10`).
+## L2-INV-06 · Step 1d (retired)
 
-**Conditions.** As step 1, with the grid wired on the other side of the relay through the bulb (as for step 2). Relay open. Scope: CH1 inverter-side L–N, CH2 grid side L–N (both on the same differential-probe scale), or one mains-rated differential probe across the open relay contacts (it shows the mismatch directly). 5 ms/div, trigger on the grid voltage.
-
-**Sequence.**
-1. Press `c`; wait for PWM_SETTLE (state 8) and `offset 0.0 %` in the telemetry.
-2. At offset 0, record the inverter-side and grid RMS, the phase between them, and the voltage across the relay (peak and RMS).
-3. Press `+` once (1 %), wait one second, record the same; repeat up to the offset you want to try (at most 5 %). `-` lowers it, never below 0 %.
-4. Choose the offset for step 2: the inverter side clearly above the grid, by a measured amount (1–3 % is 3–10 V peak, 80–250 mA peak out of the inverter through the cold bulb at the contact).
-5. Keep it and go to step 2 (`g`).
-
-**Acceptance.**
-
-| Criterion | Limit | Why | Result |
-|---|---|---|---|
-| .a `offset` follows the keys | 0 → 5 % in 1 % steps; never below 0, never above 5 % | the firmware limits | |
-| .b Inverter-side amplitude follows the offset | rises by offset × VAC within ±0.5 % of VAC, phase unchanged within ±1° | the gain scales the feedforward only | |
-| .c INFO: voltage across the open relay at each offset (peak, RMS, phase), including offset 0 | record | the voltage that drives the contact current; compare offset 0 with the simulation (+1.1 %, +0.3°) | |
-| .d INFO: offset chosen for step 2 | record | — | |
-
-## L2-INV-06 · Step 1d: the bridge copies VAC, relay open (test only)
-
-**Why.** In steps 1 and 1c the inverter-side wave is rebuilt by the controller (SOGI, PLL, feedforward). Here the bridge copies the measured grid voltage directly, so the voltage left across the open relay is what the hardware and the actuation delay alone produce. Comparing it with step 1 separates the controller's share of the mismatch from the hardware's. **The relay is never closed in this stage** (the inverter controller stays OFF and never requests the connection).
-
-**Firmware.** Key `a` (`INV_VAC_FOLLOW`). Once the grid observer has qualified the grid (`grid_ok` 1), the duty is 0.5 + k · (1 + offset) · (VAC extrapolated 1.3 periods ahead − VAC DC estimate) / (2 · VDCBus):
-- the extrapolation (`app::vac_follow_advance`) compensates the actuation delay (80 µs to the next carrier period, plus half the 100 µs hold);
-- a slow first-order filter (`app::vac_follow_dc_tau`, 2 s) removes the VAC offset (about −5.7 V on the bench); it runs from boot and is settled about 6 s after it (0.5 V of 50 Hz ripple left);
-- k ramps from 0 to 1 in 1 s, as in step 0; the offset of step 1c (`+` / `-`) applies;
-- the bench current trip stays active. `x` stops it. Tested at L0 (`L0-APP-11`).
-
-**Conditions.** As step 1c: grid wired on the other side of the relay through the bulb, relay open. Same scope setup (CH1 inverter side, CH2 grid side, or a differential probe across the open relay contacts).
-
-**Sequence.**
-1. From OFF (`x`), press `a`. Wait for `grid_ok` 1 and one second of ramp.
-2. Record the inverter-side and grid RMS, the phase between them and the voltage across the relay (peak, RMS), at offset 0.
-3. Optionally, `+` / `-` as in step 1c and record again.
-4. Press `c` (step 1) and record the same, to compare with the controller-built wave.
-5. Press `x`.
-
-**Acceptance.**
-
-| Criterion | Limit | Why | Result |
-|---|---|---|---|
-| .a No bridge before `grid_ok` 1; relay never commanded (`relay` 00 throughout) | yes | test-only stage | |
-| .b Inverter-side amplitude | within ±2 % of the grid amplitude | the bridge copies VAC | |
-| .c Phase between the two sides | within ±1° | the extrapolation compensates the delay | |
-| .d INFO: voltage across the open relay (peak, RMS, phase), step 1d against step 1 | record | the controller's share of the mismatch | |
+Removed by ADR 0007 on 2026-11-13: the key `a` and the VAC follower stage (value 5) are gone. The procedure as it was is in the git history of this file.
 
 ## L2-INV-02 · Step 2: close the relay, then zero current (GRID_CONNECT → GRID_CONNECTED)
 
-**Conditions.** As step 1c: grid wired on the other side of the relay through the cold bulb, inverter in PWM_SETTLE (state 8) with the offset chosen in L2-INV-05 (telemetry `offset`). Scope: trigger on CH4 (relay command) rising, 2 ms/div; CH3 current, CH1 and CH2 voltages.
+**Conditions.** Grid wired on the other side of the relay through the cold bulb, inverter in PWM_SETTLE (state 8). Scope: trigger on CH4 (relay command) rising, 2 ms/div; CH3 current, CH1 and CH2 voltages.
 
 **What the simulation predicts.** Through the cold bulb the switched model (L1-GFL-09/11) trips the bench protection (then 1.5 A) 20–60 ms after the contact: once connected, VAC is measured on the inverter side of the bulb and the PLL follows the inverter's own voltage. The protection stops it (L2-INV-04.f); a trip here is a result to record, not a failure of the bench.
 
@@ -226,21 +182,21 @@ Step 2 run with nothing behind the relay: the firmware goes through the whole co
 | .c Residual current in GRID_CONNECTED | < 0.05 A RMS; bulb dark | the current loop regulates to zero | |
 | .d Opening with `x`: relay opens only after the current is at zero; no trip | yes | STOPPING then DISCONNECT | |
 | .e INFO: voltage disturbance at closing (peak, duration), relay bounce visible on CH3 | record | — | |
-| .f INFO: direction of the current at the contact (out of the inverter with a positive offset) and the offset used | record | step 1c | |
+| .f INFO: direction of the current at the contact | record | — | |
 
-## L2-INV-07 · Step 2b: connection with the VAC copy, the PI from the relay request and the blanking
+## L2-INV-07 · Step 2b: connection with the PI from the relay request and the blanking
 
-**Why.** Steps 1c/1d minimize the voltage across the relay before the contact; the design tests (D-GFL-04) found that freezing the PLL and holding the feedforward around the contact, with the current PI already running, gives the smallest connection transient. Step 2b puts these together.
+**Why.** The design tests (D-GFL-04) found that freezing the PLL and holding the feedforward around the contact, with the current PI already running, gives the smallest connection transient. Step 2b puts these together.
 
-**Firmware (`G`, `INV_FOLLOW_CONNECT`, library `80de00a`).** Kp 1 V/A, Ti 5 ms (the application's values), output advance 0.3 (this stage only).
-1. PWM_SETTLE, 10 periods: the bridge follows the VAC copy of step 1d (extrapolated 1.3 periods, DC removed, offset of step 1c applied), started at neutral as in step 2.
+**Firmware (`G`, `INV_FOLLOW_CONNECT`, library `1db5b89`, ADR 0007).** Kp 3.5 V/A, Ti 20 ms (the application's values), output advance 0.3 (this stage only).
+1. PWM_SETTLE, 10 periods: the bridge follows the measured feedforward (park of the averaged VAC and its APF), started at neutral as in step 2. Until ADR 0007 it followed an extrapolated copy of VAC.
 2. GRID_CONNECT: the current PI (zero reference) runs from the relay request. The application latches the relay command 9.7 ms before a voltage zero crossing and tells the inverter (`notifyRelayCommand`).
-3. From the command, the inverter counts: **blanking 15 ms** (`app::follow_connect_blanking`): the PLL frozen at its period-averaged frequency (synchronization not judged meanwhile); the VAC copy until the predicted contact (9.7 ms); from there to the end of the blanking, the synthesized feedforward (period-averaged Vd rotated by the frozen angle).
+3. From the command, the inverter counts: **blanking 15 ms** (`app::follow_connect_blanking`): the PLL frozen at its period-averaged frequency (synchronization not judged meanwhile); the measured feedforward until the predicted contact (9.7 ms); from there to the end of the blanking, the synthesized feedforward (period-averaged Vd rotated by the frozen angle).
 4. **GRID_CONNECTED 20 ms after the command** (`app::follow_connect_window`), counted by the inverter (there is no contact sensing: the application reports the relay closed at the same instant); then the normal feedforward and the PI regulate zero current.
 
-Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the contact gave 0.37 A; 20–80 ms after it, 0.76 A, with the settling only postponed (the slow tail comes from the PLL when it is released). The 20 ms connect window counts the state change, not the blanking. Tested at L0 (`L0-GFL-19`, `L0-APP-12`); switched-model check prepared (L1-GFL-14).
+Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the contact gave 0.37 A; 20–80 ms after it, 0.76 A, with the settling only postponed (the slow tail comes from the PLL when it is released). The 20 ms connect window counts the state change, not the blanking. Tested at L0 (`L0-GFL-19`, `L0-APP-12`); switched-model check defined (L1-GFL-16, replacing L1-GFL-14).
 
-**Conditions.** As step 2: grid on the other side through the cold bulb, offset from step 1c if used. Scope as step 2 (trigger on the relay command, 2 ms/div); the 10 kHz firmware capture (`v`) covers the sequence.
+**Conditions.** As step 2: grid on the other side through the cold bulb. Scope as step 2 (trigger on the relay command, 2 ms/div); the 10 kHz firmware capture (`v`) covers the sequence.
 
 **Sequence.** From step 1 (`c`, state 8), press `G`. Record as step 2 (.a–.f of L2-INV-02), plus the state sequence 8 → 2 → 3 with 20 ms between the relay command and state 3. `x` disconnects.
 
@@ -249,7 +205,7 @@ Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the c
 | Criterion | Limit | Why | Result |
 |---|---|---|---|
 | .g State 3 (GRID_CONNECTED) 20 ms after the relay command | ±2 ms | counted by the inverter | |
-| .h INFO: closing peak and settling against step 2 | record | the effect of the copy, the PI from the request and the blanking | |
+| .h INFO: closing peak and settling against step 2 | record | the effect of the PI from the request and the blanking | |
 
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 

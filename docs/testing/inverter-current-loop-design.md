@@ -1,5 +1,7 @@
 # Inverter current loop: analytic design
 
+> **Superseded for the application on 2026-11-13 by [ADR 0007](../adr/0007-apf-quadrature-and-averaged-ac-reads.md):** the current feedback is park(averaged IAC, APF(averaged IAC)) with no current SOGI, and the PI is Kp 3.5 V/A, Ti 20 ms. The analysis below (current SOGI in the loop, candidate C) stays as the reference for the L1 comparison L1-GFL-15.
+
 Status: draft, 2026-11-10. No production change yet; the gains are a decision for Luiz Villa (library `single_phase_inverter`, then a PR to Jean Alinei). Tests: L1-GFL-09…13 ([catalogue](../../tests/catalogue.json)).
 
 ## 1. What the loop is today

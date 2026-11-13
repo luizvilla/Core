@@ -50,6 +50,7 @@ object_code() {
         grid_observer) echo GOB ;;
         inverter_following) echo GFL ;;
         app) echo APP ;;
+        fast_average) echo FAV ;;
         timing) echo TIM-01 ;;
         l1) echo INT-00 ;;
         *) echo "$1" | tr '[:lower:]' '[:upper:]' ;;

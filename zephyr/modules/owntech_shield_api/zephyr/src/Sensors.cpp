@@ -324,6 +324,61 @@ OWNTECH_FAST_CODE float32_t SensorsAPI::getLatestValueFast(sensor_t sensor_name,
 	return value;
 }
 
+OWNTECH_FAST_CODE float32_t SensorsAPI::getAverageValueFast(sensor_t sensor_name, uint8_t* dataValid)
+{
+	const uint32_t index = (uint32_t)sensor_name - 1U;
+	if ( (index >= DT_SUBSENSORS_COUNT) ||
+		 (fast_states[index] != FAST_READ_READY) )
+	{
+		/* Not prepared (yet) or not possible */
+		return getLatestValue(sensor_name, dataValid);
+	}
+
+	DataFastChannel& channel = fast_channels[index];
+	const uint32_t remaining = *channel.dma_remaining;
+
+	/* Overrun: the slot-to-rank mapping may be lost until the resync */
+	if ( ((*channel.adc_isr & DATA_FAST_ADC_ISR_OVR) != 0) ||
+		 (*channel.resync_pending != 0) ||
+		 (remaining > channel.dma_size) )
+	{
+		DataAPI::noteFastOverrun(channel.adc_index);
+		channel.average_started = false;
+		if (dataValid != nullptr) *dataValid = DATA_IS_MISSING;
+		return NO_VALUE;
+	}
+
+	const uint32_t newest = channel.newest_slot[remaining];
+	const uint32_t n = channel.sequence_length;
+	/* First read: the newest sample alone */
+	const uint32_t previous = channel.average_started ?
+							  channel.average_slot :
+							  (newest + channel.dma_size - n) % channel.dma_size;
+	uint32_t raw_sum = 0;
+	const uint32_t count = data_fast_sum_new_samples(channel.dma_buffer,
+													 channel.dma_size, n,
+													 newest, previous,
+													 DATA_FAST_EMPTY_SAMPLE,
+													 &raw_sum);
+	if (count == 0)
+	{
+		/* Nothing new (or only empty slots): the previous average, if any */
+		if (dataValid != nullptr)
+		{
+			*dataValid = channel.average_started ? DATA_IS_OLD
+												 : DATA_IS_MISSING;
+		}
+		return channel.average_started ? channel.last_average : NO_VALUE;
+	}
+
+	channel.average_slot = (uint8_t)newest;
+	channel.average_started = true;
+	channel.last_average = ((float32_t)raw_sum / (float32_t)count) *
+						   channel.gain + channel.offset;
+	if (dataValid != nullptr) *dataValid = DATA_IS_OK;
+	return channel.last_average;
+}
+
 void SensorsAPI::prepareFastRead(sensor_t sensor_name)
 {
 	const uint32_t index = (uint32_t)sensor_name - 1U;

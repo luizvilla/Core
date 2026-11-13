@@ -29,7 +29,7 @@ l0_build test_app \
              "$REPO_ROOT/src/app/control_step.cpp" \
              "$REPO_ROOT/src/boost_converter/boost.cpp" \
              "$REPO_ROOT/src/grid_observer/gridObserver.cpp" \
-    --lib    "$INV/singlePhaseInverterFollowing.cpp" "$INV/sogi.cpp" \
+    --lib    "$INV/singlePhaseInverterFollowing.cpp" "$INV/sogi.cpp" "$INV/apf.cpp" \
              "$CTL/pid.cpp" "$CTL/transform.cpp" "$CTL/trigo.cpp" \
              "$CTL/filters.cpp" "$CTL/pr.cpp" "$CTL/fir.cpp"
 "$L0_BIN/test_app"

@@ -885,11 +885,11 @@
    "id": "L0-GFL-17",
    "tab": "inverter",
    "level": "L0",
-   "title": "Current-loop settings from the application (PI gains, limit, current SOGI gain, output advance)",
-   "criterion": ".a defaults equal the historical values (Kp 0.001 V/A, Ti 0.3 ms, ±30 V, current SOGI 500 rad/s, no advance); .b invalid values (zero, negative, NaN, infinity, Kr·Ts ≥ 1, advance outside 0–2) rejected, configuration unchanged; .c settings kept across init(), also when made before it; .d in RUN, gains change live (correction Kp·error on the next step) and the advance is accepted, while the limit and the SOGI gain are refused; .e the advance rotates the output by advance·ω·Ts with the magnitude unchanged",
-   "source": "`setCurrentPiGains`, `setCurrentPiLimit`, `setCurrentSogiGain`, `setOutputPhaseAdvance` (library ab35e2f)",
+   "title": "Current-loop settings from the application (PI gains, limit, output advance)",
+   "criterion": ".a defaults equal the historical values (Kp 0.001 V/A, Ti 0.3 ms, ±30 V, no advance); .b invalid values (zero, negative, NaN, infinity, advance outside 0–2) rejected, configuration unchanged; .c settings kept across init(), also when made before it; .d in RUN, gains change live (correction Kp·error on the next step) and the advance is accepted, while the limit is refused; .e the advance rotates the output by advance·ω·Ts with the magnitude unchanged",
+   "source": "`setCurrentPiGains`, `setCurrentPiLimit`, `setOutputPhaseAdvance` (library ab35e2f; current SOGI gain removed in 1db5b89, ADR 0007)",
    "status": "implemented",
-   "status_note": "Implemented 2026-11-10"
+   "status_note": "Implemented 2026-11-10; current SOGI gain checks removed 2026-11-13 (ADR 0007)"
   },
   {
    "id": "L0-GFL-18",
@@ -910,6 +910,16 @@
    "source": "library 80de00a",
    "status": "implemented",
    "status_note": "Implemented 2026-11-10"
+  },
+  {
+   "id": "L0-GFL-20",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "APF quadrature (ADR 0007): the all-pass filter, PLL beta = APF(SOGI alpha), feedforward and current from the measurements",
+   "criterion": ".a APF gain 1 (±0.002) and phase −90° (±0.2°) at ω0 for 47.5, 50 and 52.5 Hz, gain 1 at the 3rd harmonic and at DC; .b locked at 50 Hz: |Vab| of the PLL constant within 0.5 V (beta in quadrature with the SOGI alpha), feedforward and current alpha equal to the measurements, |Vdq_ff| = peak within 1.5 V, |Idq| = 2 A within 0.01 A, feedforward dq angle = −ω·Ts (the SOGI's one-sample lead); .c at 52 Hz the APFs follow the PLL frequency: feedforward |Vdq| ripple below 2 V (a 50 Hz APF leaves about 12 V); .d no current SOGI: a 2 A current step shows in |Idq| (1–3 A) on the same sample",
+   "source": "`Apf`, `calculateDuty`, `getVabFeedforward`, `getVdqFeedforward` (library 1db5b89)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 (ADR 0007)"
   },
   {
    "id": "L1-GFL-01",
@@ -1069,7 +1079,40 @@
    "source": "tests/l1/design/connection_l1.py; D-GFL-04, D-GFL-06",
    "status": "implemented",
    "report": "docs/testing/design/L1-GFL-14_IEC/report.md",
-   "status_note": "Prepared 2026-11-10 for Jean Alinei's machine (about 30 min with the six runs in parallel); rebuilt the same day on the production step 2b; not run yet"
+   "status_note": "Prepared 2026-11-10 for Jean Alinei's machine (about 30 min with the six runs in parallel); rebuilt the same day on the production step 2b; not run yet; superseded by L1-GFL-16 on 2026-11-13: the VAC copy of step 2b is removed (ADR 0007)"
+  },
+  {
+   "id": "L1-GFL-15",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "Current loop with APF feedback and Kp 3.5 V/A, Ti 20 ms: I_d and I_q steps against candidate C",
+   "criterion": "IEC 60725 grid, I_d step 0 → 0.1 A, then I_q step 0 → 0.1 A with I_d held: .a overshoot ≤ 20 %; .b 5 % settling ≤ 20 ms; .c final value within ±5 % (fundamental of the line current); .d cross-axis disturbance (the other axis) ≤ 0.02 A peak after 20 ms; .e 2ω (100 Hz) ripple on I_d and I_q in steady state ≤ 0.01 A; cold bulb: .f no bench trip, final I_d within ±10 % after 0.4 s; INFO .g the same metrics for candidate C (current SOGI 2000 rad/s, Kp 1 V/A, Ti 5 ms, library 80de00a) side by side; .h 10 kHz content of the line current and of the bridge duty (alternating 2/3-sample averaging window), only once the runtime feeds the average",
+   "conditions": "Switched model, real application (C-Block, contract app-v3), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command, control period 50 µs, library 1db5b89 (APF quadrature, no current SOGI), current PI Kp 3.5 V/A, Ti 20 ms. Prerequisite: the L1 runtime samples VAC and IAC once per control tick; to cover the averaging of ADR 0007 the firmware block must receive the mean of the samples taken every 20 µs since the previous tick (2 or 3), with the same flag as v_ac_updated; until then the averaging and its 10 kHz ripple are not covered and the criterion says so. Scenarios: tests/l1/scenarios/inverter/bench_iec.json and bench_bulb.json with an INJECT step on I_q added; candidate C built with tests/l1/design/variant.py.",
+   "source": "ADR 0007; `single_phase_inverter` 1db5b89; `app::inverter_current_kp/ti`",
+   "status": "planned",
+   "status_note": "Defined 2026-11-13 (ADR 0007) to run on the L1 machine; not run on this machine (time)"
+  },
+  {
+   "id": "L1-GFL-16",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "Connection on the switched model: step 2b on the measured feedforward (ADR 0007) against step 2",
+   "criterion": ".a sequence PWM_SETTLE → GRID_CONNECT → GRID_CONNECTED with no fault and no bench trip; .b closing current peak < 1.5 A; .c residual current in GRID_CONNECTED < 0.05 A RMS from 100 ms after the contact; INFO .d peak line current at the contact, step 2b against step 2 and against L1-GFL-14's prediction for the VAC copy; .e the same on the cold bulb",
+   "conditions": "Switched model, real application (C-Block, contract app-v3), ideal 400 V bus, output filter 500 µH without the FL chokes (bench board), duty 0.05–0.95, relay contact 9.7 ms after the command, control period 50 µs, library 1db5b89 (APF quadrature, no current SOGI), current PI Kp 3.5 V/A, Ti 20 ms. Prerequisite: the L1 runtime samples VAC and IAC once per control tick; to cover the averaging of ADR 0007 the firmware block must receive the mean of the samples taken every 20 µs since the previous tick (2 or 3), with the same flag as v_ac_updated; until then the averaging and its 10 kHz ripple are not covered and the criterion says so. Runs: step 2 and step 2b (stage 6) on IEC and cold bulb, built as in L1-GFL-14 (tests/l1/design/connection_l1.py) on the new library.",
+   "source": "ADR 0007; `controlStep` INV_FOLLOW_CONNECT; replaces L1-GFL-14",
+   "status": "planned",
+   "status_note": "Defined 2026-11-13 (ADR 0007) to run on the L1 machine; not run on this machine (time)"
+  },
+  {
+   "id": "L1-GFL-17",
+   "tab": "inverter",
+   "level": "L1",
+   "title": "PLL with APF(SOGI alpha) beta on a distorted grid with a DC offset: lock time and angle ripple, before against after",
+   "criterion": "Per grid (clean; 3rd 3.4 %, 5th 4.6 %, 7th 2 % with −5.7 V offset; EN 50160 limit harmonics with ±10 V offset) at 47.5, 50 and 52.5 Hz: .a synchronizes (one-period criteria) within 0.5 s from a 1 rad offset; .b steady θ ripple (peak, against the grid fundamental) no larger than with the SOGI beta (library 80de00a); .c steady mean θ error ≤ 2°; INFO .d lock time and instantaneous |Vq| peak, before and after. The PLL PI gains stay unchanged unless .a or .b fails",
+   "conditions": "Switched model (or the library alone through the L1 inverter harness), grid sources as in L0-GFL-10/13, control period 50 µs, library 1db5b89 against 80de00a. L0 reference: L0-GFL-10.b/10.e (instantaneous |Vq| with harmonics 59.3 → 13.5 V and 130.6 → 23.9 V at 100 µs)",
+   "source": "ADR 0007 (review question 14)",
+   "status": "planned",
+   "status_note": "Catalogued 2026-11-13 at the team's request: not to be run now (time)"
   },
   {
    "id": "L2-INV-00",
@@ -1108,37 +1151,15 @@
    "hardware": "bench"
   },
   {
-   "id": "L2-INV-05",
-   "tab": "inverter",
-   "level": "L2",
-   "title": "Step 1c: inverter voltage offset with the relay open and the grid on the other side",
-   "criterion": ".a offset follows the + / - keys, 0–5 % in 1 % steps, never below 0; .b inverter-side amplitude rises by offset × VAC (±0.5 % of VAC), phase unchanged (±1°); INFO .c voltage across the open relay at each offset, including 0; .d offset chosen for step 2",
-   "conditions": "Bench session (docs/testing/bench/inverter-session.md), stage INV_SETTLE (c), grid wired through the bulb on the other side of the relay, relay open",
-   "source": "`setFeedforwardGain` (library 2f6616f), `app::inverter_vac_offset_step`, `app::inverter_vac_offset_max`",
-   "status": "planned",
-   "status_note": "Defined 2026-11-10 with Luiz Villa"
-  },
-  {
-   "id": "L2-INV-06",
-   "tab": "inverter",
-   "level": "L2",
-   "title": "Step 1d: the bridge copies VAC with the relay open (test only)",
-   "criterion": ".a no bridge before the grid is qualified, relay never commanded; .b inverter-side amplitude within ±2 % of the grid; .c phase within ±1°; INFO .d voltage across the open relay, step 1d against step 1",
-   "conditions": "Bench session, stage INV_VAC_FOLLOW (a), grid wired through the bulb on the other side of the relay, relay open",
-   "source": "`controlStep` INV_VAC_FOLLOW, `app::vac_follow_advance`, `app::vac_follow_window`",
-   "status": "planned",
-   "status_note": "Defined 2026-11-10 with Luiz Villa"
-  },
-  {
    "id": "L2-INV-07",
    "tab": "inverter",
    "level": "L2",
-   "title": "Step 2b: connection with the VAC copy, the current PI from the relay request and a 15 ms blanking",
+   "title": "Step 2b: connection with the current PI from the relay request and a 15 ms blanking",
    "criterion": "As L2-INV-02 .a–.f (closing peak < 3 A without trip, settled within 100 ms, residual < 0.05 A RMS, orderly opening), plus .g GRID_CONNECTED 20 ms (±2 ms) after the relay command; INFO .h closing peak and settling against step 2",
    "conditions": "Bench session, stage INV_FOLLOW_CONNECT (G), grid through the cold bulb on the other side of the relay",
-   "source": "`setCurrentLoopFromConnect`, `setExternalFeedforward`, `setConnectionBlanking`, `setConnectWindow`, `notifyRelayCommand` (library 80de00a); `app::follow_connect_blanking`, `app::follow_connect_window`",
+   "source": "`setCurrentLoopFromConnect`, `setConnectionBlanking`, `setConnectWindow`, `notifyRelayCommand` (library 1db5b89, feedforward park(VAC, APF(VAC)) since ADR 0007); `app::follow_connect_blanking`, `app::follow_connect_window`",
    "status": "planned",
-   "status_note": "Defined 2026-11-10 with Luiz Villa"
+   "status_note": "Defined 2026-11-10 with Luiz Villa; VAC copy removed 2026-11-13 (ADR 0007)"
   },
   {
    "id": "L2-INV-02",
@@ -1181,7 +1202,7 @@
    "tab": "app",
    "level": "L0",
    "title": "`controlInit` applies the app tuning; a mode change is flagged on its tick only and runs the cold loop on that tick; leg enables follow the controller",
-   "criterion": "",
+   "criterion": "; current PI Kp 3.5 V/A, Ti 20 ms, limit 30 V (ADR 0007)",
    "source": "critical task, mode-change block",
    "status": "implemented",
    "status_note": "Implemented"
@@ -1267,34 +1288,14 @@
    "status_note": "Implemented 2026-11-09 (#7)"
   },
   {
-   "id": "L0-APP-10",
-   "tab": "app",
-   "level": "L0",
-   "title": "Inverter voltage offset from the operator command",
-   "criterion": ".a the feedforward gain is 1 + offset, the offset clamped to [0, app::inverter_vac_offset_max]: a negative offset gives 1 (never below the grid)",
-   "source": "`OperatorCommands::vac_offset`, `app::inverter_vac_offset_max`",
-   "status": "implemented",
-   "status_note": "Implemented 2026-11-10"
-  },
-  {
-   "id": "L0-APP-11",
-   "tab": "app",
-   "level": "L0",
-   "title": "Step 1d: the bridge copies VAC once the grid is qualified, relay never commanded",
-   "criterion": ".a no bridge before qualification; then duty = 0.5 + (VAC extrapolated 1.3 periods − one-period mean) / (2 Vbus), amplitude 325 V peak with a −5.7 V VAC offset removed, relay never commanded, inverter controller OFF; .b the offset of step 1c scales the copy; a bench trip stops the bridge on its tick",
-   "source": "`controlStep` INV_VAC_FOLLOW",
-   "status": "implemented",
-   "status_note": "Implemented 2026-11-10"
-  },
-  {
    "id": "L0-APP-12",
    "tab": "app",
    "level": "L0",
-   "title": "Step 2b: connection with the VAC copy, PI from the relay request, blanking 15 ms, CONNECTED at 20 ms",
-   "criterion": ".a duty = VAC copy in PWM_SETTLE; PI from the relay request; PLL frozen 15 ms from the relay command; feedforward held from the predicted contact to the end of the blanking; GRID_CONNECTED 20 ms after the command without fault; advance 0.3 in this stage, 0.5 and feedback-driven connection back in step 2",
+   "title": "Step 2b: connection on the measured feedforward, PI from the relay request, blanking 15 ms, CONNECTED at 20 ms",
+   "criterion": ".a duty in PWM_SETTLE = the measured feedforward (park of VAC and APF(VAC), rotated back by θ + 0.3·ω·Ts: α·cos δ − β·sin δ, within 1e-5) with α equal to VAC (no VAC copy, ADR 0007); PI from the relay request; PLL frozen 15 ms from the relay command; feedforward held from the predicted contact to the end of the blanking; GRID_CONNECTED 20 ms after the command without fault; advance 0.3 in this stage, 0.5 and feedback-driven connection back in step 2",
    "source": "`controlStep` INV_FOLLOW_CONNECT",
    "status": "implemented",
-   "status_note": "Implemented 2026-11-10"
+   "status_note": "Implemented 2026-11-10; VAC copy replaced by the measured feedforward 2026-11-13 (ADR 0007)"
   },
   {
    "id": "L0-APP-13",
@@ -1305,6 +1306,36 @@
    "source": "`controlStep`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-09 (Jean, as L0-APP-06; renumbered at the merge)"
+  },
+  {
+   "id": "L0-APP-14",
+   "tab": "app",
+   "level": "L0",
+   "title": "Steps 1c and 1d removed (ADR 0007): fixed feedforward gain, stage value 5 inert",
+   "criterion": ".a the feedforward gain stays 1 in OFF, SETTLE, CONNECT and FOLLOW_CONNECT; .b the stage value 5 (old step 1d) for 3 s on a healthy grid: grid qualified, no bridge, no relay command, inverter OFF",
+   "source": "`controlStep`, `InverterStage`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 (ADR 0007)"
+  },
+  {
+   "id": "L0-FAV-01",
+   "tab": "app",
+   "level": "L0",
+   "title": "Averaged AC reads: the samples written in the DMA buffer since the previous control period (ADR 0007)",
+   "criterion": ".a ADC1 layout (S 42, 3 channels, VAC rank 2) and .b ADC2 layout (S 42, 2 channels, IAC rank 2), one sequence per 20 µs and one read per 50 µs at every phase within a sequence, 1000 reads each: the count equals the samples the rank received since the previous read and the average equals their mean (exact in raw counts); reads of 2 and of 3 samples both occur, no other count",
+   "source": "`data_fast_sum_new_samples` (data_fast_average.h), used by `SensorsAPI::getAverageValueFast`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 (ADR 0007). The CNDTR read, overruns and the conversion are in Sensors.cpp, exercised on the target by L0-TIM"
+  },
+  {
+   "id": "L0-FAV-02",
+   "tab": "app",
+   "level": "L0",
+   "title": "Averaged AC reads: nothing new, empty slots, the largest gap",
+   "criterion": ".a nothing new since the previous read (also after a conversion of another rank): no sample summed; .b never-written slots skipped, only empty slots give no sample; .c the largest gap, one sequence short of a lap, sums S/n − 1 samples and gives their mean",
+   "source": "`data_fast_sum_new_samples` (data_fast_average.h)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 (ADR 0007)"
   },
   {
    "id": "L1-APP-01",
@@ -1541,6 +1572,10 @@
  ],
  "retired": {
   "L1-FWB-01": "superseded by L1-INT-01/-02 (procedure 1.3)",
-  "L0-BST-05 (ramp)": "STARTUP ramp removed by ADR 0003; L0-BST-05 now tests the STARTUP clamp"
+  "L0-BST-05 (ramp)": "STARTUP ramp removed by ADR 0003; L0-BST-05 now tests the STARTUP clamp",
+  "L0-APP-10": "step 1c (inverter voltage offset) removed by ADR 0007; the fixed feedforward gain is checked by L0-APP-14.a",
+  "L0-APP-11": "step 1d (VAC follower) removed by ADR 0007; stage value 5 is checked by L0-APP-14.b",
+  "L2-INV-05": "step 1c (inverter voltage offset, keys + / -) removed by ADR 0007",
+  "L2-INV-06": "step 1d (VAC follower, key a) removed by ADR 0007"
  }
 }
