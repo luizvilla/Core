@@ -322,7 +322,7 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 | | L2-INV-09 | | | | | |
 | | L2-INV-11 | | | | | |
 | | L2-INV-12 | | | | | |
-| | L2-INV-13 | | | | | |
+| 2026-11-13 | L2-INV-13 | `019d33c` | 400–402 V | not judged: connected 28 s with `iacm` 7–8 mA, then the console stopped at the dump (`r`) and a bridge transistor (bottom left) exploded | `tests/out/2026-11-13_019d33c_223503_bench` | incident in the worklog (2026-11-13); board not to be powered again |
 | | L2-INV-03 | | | | | |
 
 ## Simulation counterpart

@@ -1272,7 +1272,7 @@
    "conditions": "Step 2b connected with the feedforward filter on (D) and the DC loop off, DC ammeter in series with the line; ADC_2 on CMP3 up and down (overlay EdgeTrigger_Both); the instant moved with [ / ] for the contrast points, 3 s per point",
    "source": "docs/testing/bench/inverter-session.md; docs/adr/0008-iac-two-samples-per-switching-period.md; keys [ / ]; telemetry adt, iacm",
    "status": "planned",
-   "status_note": "Defined 2026-11-13 with Luiz Villa. First session (one sample per period, adt 0.00): iacm +137 mA against a true DC of about −11 mA; the CH3 FFT (344 mA at 50 kHz, 52 mA at 100 kHz, 75 mA at 150 kHz) replayed at the switching frequency gives −544 to +534 mA of error with one sample and −8 to +11 mA with two samples T/2 apart, at any phase: ADR 0008. To rerun with the two-sample firmware",
+   "status_note": "Defined 2026-11-13 with Luiz Villa. First session (one sample per period, adt 0.00): iacm +137 mA against a true DC of about −11 mA; the CH3 FFT (344 mA at 50 kHz, 52 mA at 100 kHz, 75 mA at 150 kHz) replayed at the switching frequency gives −544 to +534 mA of error with one sample and −8 to +11 mA with two samples T/2 apart, at any phase: ADR 0008. Second session 22:35 (`019d33c`, two samples): iacm 7–8 mA while connected, then the board stopped answering when the dump started (22:36:32.7) and a bridge transistor exploded (worklog 2026-11-13, incident); not judged",
    "hardware": "bench"
   },
   {
