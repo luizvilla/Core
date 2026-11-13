@@ -1237,8 +1237,8 @@
    "criterion": ".a telemetry ffn 0 then 1, same Kp, Ti, dt; .c connection with the filter on without trip or fault; INFO .b 100 Hz line current and node voltage and DC with the filter off and on (prediction about 10× less 100 Hz)",
    "conditions": "Step 2b connected, measured feedforward (ff 0), filter switched with D in OFF; firmware scope at 2 kHz, steady-state dumps with q then r",
    "source": "docs/testing/bench/inverter-session.md; key D; library 0cce694",
-   "status": "planned",
-   "status_note": "Defined 2026-11-13 after the steady-state dump showed the bridge copying the node's 100 Hz (gain 0.965)",
+   "status": "implemented",
+   "status_note": "Run 2026-11-13 21:28–21:30 (Kp 3.5, Ti 20 ms, 100 ns, ff 0). Scope, steady state: line current at 100 Hz 0.253 → 0.012 A (21×), node 100 Hz 8.53 → 0.19 V (the mains level), DC about 0.128 → 0.010 A; DC ammeter in series 126 → 10 mA (12.6×); 250/350 Hz unchanged (still copied); fundamental unchanged (bridge/VAC at 50 Hz 1.015 at +1.8° with and without). Firmware dumps: bridge/VAC at 100 Hz 0.958 → 0.32; the filter-on dump was taken 0.7 s after the contact (transient)",
    "hardware": "bench"
   },
   {
