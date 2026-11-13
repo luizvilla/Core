@@ -330,6 +330,18 @@
    "status_note": "Run 2026-11-10: the PI delivers 400 W in every condition (I_d exact, I_q within ±0.09 A, ramp within 0.05 A, modulation 0.816, no clipping, PI output ≤ 13.5 V of ±30 V); Kp 2 / Ti 20 ms settles power steps in 6–8 ms (5–6 % overshoot) against 57–60 ms for Kp 1 / Ti 5 ms; the delay sensitivity is confined to the connection"
   },
   {
+   "id": "D-GFL-09",
+   "tab": "model",
+   "level": "D",
+   "title": "Step 2b with each feedforward source (APF, SOGI, PLL-based, gain 0.7): averaged model on the measured grid with the 80 W bulb",
+   "criterion": ".0 fit of the resistance behind the relay and the bridge loss to the 18:33 ff 0 firmware dump (IAC, PLL ω_avg); .a check against the bench (L2-INV-07/08, 2026-11-13): outcome per source, closing current, late |Idq|; .b options after the blanking: APF (default), SOGI (key F), option 1 {Vd_avg, 0} along the PLL angle, APF with gain 0.7: closing peak, current 12–52 ms after the contact (RMS, 50 Hz, 5th/7th), late RMS and |Idq|, VAC RMS minimum, PLL deviation, trip (grid observer with its 100 ms delay, 3 A current); .c weak grid (bulb hot 661 Ω) and sensitivity (filament heat capacity, ideal bridge, synthetic grid). interactive overlays of the model on the scope, the firmware dump and the telemetry; INFO only",
+   "conditions": "Averaged model of library b9e8829 at 50 µs, step 2b timings of the application, plant 500 µH / C113 / C7+R3, VAC between the relay and the bulb, 0.8 mH grid; grid fitted to CH2 with the relay open (2026-11-13 18:32:41, 50.006 Hz, up to the 40th harmonic); fitted 25 Ω behind the relay and 6 V of bridge dead time, contact 8.35 ms (scope); bulb 80 W as a fixed 25 Ω or a thermal tungsten filament to 661 Ω; bridge error from the step 1 measurement",
+   "source": "ADR 0004; tests/l1/design/connection_apf.py --report docs/testing/design/D-GFL-09_bench",
+   "status": "implemented",
+   "report": "docs/testing/design/D-GFL-09_bench/report.md",
+   "status_note": "Run 2026-11-13 at Luiz Villa's request. Fit: a grid impedance alone cannot match both the current and the PLL swing; 25 Ω behind the relay with 6 V of bridge dead time does (ff 0: 50 Hz 0.64 A at −131° against the bench 0.71 A at −124°, ω_avg 309.9–318.7 against 309.3–318.7 rad/s, correlation 0.9 with the scope). Check on ff 1 (not fitted): same waveform shape (correlation 0.95), 3× the late current of ff 0, but no trip within 2 s where the bench tripped after about 1 s. Options: APF late |Idq| 0.26 A, SOGI 0.73 A, option 1 0.75 A (like SOGI), gain 0.7 trips at once"
+  },
+  {
    "id": "L0-BST-01",
    "tab": "boost",
    "level": "L0",

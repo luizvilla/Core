@@ -7,13 +7,16 @@
 ##   python3 tests/common/design_report.py docs/testing/design/D-GFL-01_IEC/report.md [...]
 ## @par Supported Markdown (what the design scripts write)
 ##   headings #/##/###, paragraphs, pipe tables, images, ```mermaid blocks, numbered and bullet lists,
-##   links (links to another report.md point to its report.html), **bold**, `code`.
+##   links (links to another report.md point to its report.html), **bold**, `code`, and interactive figures:
+##   a line `<!-- iplot NAME -->` inserts iplot_NAME.html from the report's folder (a fragment written by
+##   interactive_plot.Figure.html(); invisible in a Markdown viewer).
 """Presentation only: the Markdown file stays the record."""
 import html, re, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from review_report import page_head  # noqa: E402
+from interactive_plot import assets  # noqa: E402
 
 MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js'
 
@@ -33,10 +36,16 @@ def cells(line):
     return [c.strip().replace('\\|', '|') for c in re.split(r'(?<!\\)\|', line.strip().strip('|'))]
 
 
-def render(md_text, title):
+def render(md_text, title, base=None):
     out, lines, i = [], md_text.splitlines(), 0
+    figures = False
     while i < len(lines):
         ln = lines[i]
+        m = re.match(r'^<!-- iplot ([\w.-]+) -->\s*$', ln)
+        if m:
+            frag = Path(base or '.') / f'iplot_{m.group(1)}.html'
+            out.append(frag.read_text(encoding='utf-8') if frag.exists() else f'<p class="sub">Figure {html.escape(m.group(1))} missing ({html.escape(frag.name)}).</p>')
+            figures = figures or frag.exists(); i += 1; continue
         if ln.startswith('```mermaid'):
             j = i + 1; block = []
             while j < len(lines) and not lines[j].startswith('```'): block.append(lines[j]); j += 1
@@ -65,14 +74,14 @@ def render(md_text, title):
         para = [ln]; i += 1
         while i < len(lines) and lines[i].strip() and not re.match(r'^(#|\||```|!\[|\d+\. |- )', lines[i]): para.append(lines[i]); i += 1
         out.append('<p>' + inline(' '.join(para)) + '</p>')
-    return (page_head(html.escape(title)) + '\n'.join(out)
+    return (page_head(html.escape(title)) + '\n'.join(out) + ('\n' + assets() if figures else '')
             + f'\n<script src="{MERMAID}"></script><script>mermaid.initialize({{startOnLoad:true,theme:"neutral"}});</script></main></body></html>\n')
 
 
 def write(md_path):
     md_path = Path(md_path); text = md_path.read_text(encoding='utf-8')
     title = next((l[2:] for l in text.splitlines() if l.startswith('# ')), md_path.parent.name)
-    target = md_path.with_suffix('.html'); target.write_text(render(text, title), encoding='utf-8'); return target
+    target = md_path.with_suffix('.html'); target.write_text(render(text, title, md_path.parent), encoding='utf-8'); return target
 
 
 if __name__ == '__main__':

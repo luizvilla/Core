@@ -724,3 +724,26 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Campaign `tests/out/2026-11-13_ef4be85-dirty_171310_z8S8pr` (L0 + L0-TIM on a bare Spin): L0-GFL-21.a–c PASS (with the bench harmonics the SOGI feedforward keeps 0.51/0.31/0.23 of the 3rd/5th/7th as the theory says, feedforward Vd ripple 56.9 → 19.7 V; noise RMS ratio 0.17, theory 0.16 at 100 µs, 0.11 at 50 µs); L0-APP-15.a–b PASS; L0 host 151 pass, 5 known fail, 0 new. L0-TIM-01/02/03 budgets pass (worst critical tick 38.6 µs in OPEN_LOOP_o, 38.5 before). L0-TIM-03.c: 1 lost period in OPEN_LOOP_o, also seen once at `22cc663` (15:33): intermittent, not from this change |
 | Not done | Bench (L2-INV-08). L1 with the SOGI source (L1-GFL-16 not implemented yet) |
 | Hardware check | Pending: flash env USB on the inverter's Spin, then L2-INV-08 |
+
+## 2026-11-13 — Bench: step 2b with each feedforward source (L2-INV-07, L2-INV-08)
+
+| Field | Value |
+|---|---|
+| Commit | Board: USB build on `apf_quadrature` after `ef4be85` with single_phase_inverter `b9e8829` (key F); 16:39 run on the build before it |
+| Sessions | `tests/out/2026-11-13_ef4be85-dirty_163746_bench` (16:39, ff 0), `…_171916_bench` (17:24, ff 1), `…_174133_bench` (18:33, ff 0, new build) |
+| Results | **ff 0 (measured VAC and its APF)**, 16:39 and 18:33 identical: contact 8.3–9 ms after the relay command, state 3 at +20.5 ms, no fault, 30 s connected; line current 12–52 ms after the contact 0.72 A RMS, 50 Hz 0.71 A pk leading the grid by 56°, 3rd/5th/7th 0.18/0.10/0.12 A, 50 kHz 0.42 A; then Id, Iq wandering ±0.3–0.5 A pk. Grid-side voltage change 24 V for 0.57 A: 42 Ω, the cold bulb. **ff 1 (SOGI alpha and APF(SOGI alpha))**: before the contact the inverter side has THD 0.9 % against the grid's 3.2 % and the same fundamental match (−2.44 % against −2.41 % with ff 0); about 1 s after the contact the bulb lit, telemetry Iq 1.74 A pk and VAC 202 V, grid observer trip (fault 1, BAD_GRID_QUALITY), no current trip. The scope's 5.4 A RMS on CH3 is not reliable: the channel was overranged (±10.24 A at 2 A/div) and the grid-side voltage change (30 V) allows about 0.7 A through the cold bulb |
+| Checks | IAC = −1.03 × CH3 on the 18:33 connection (correlation 0.98): the firmware current reading is right; the probe arrow is opposite to the firmware sign. VAC = 0.98 × CH2. The new build with ff 0 reproduces the old one in step 1 (−2.39 % against −2.36 %) and connected. The library's SOGI feedforward is the PLL's own dq of the sample; the instantaneous Vq is used, not zeroed (L0-GFL-21.g) |
+| Reading | The connection itself is the same with both sources; the SOGI feedforward fails over about a second once connected, consistent with the loop that closes through VAC (measured between the relay and the bulb, so on the inverter side once connected) and the bulb heating (about 40 Ω cold to 530 Ω hot), which weakens the grid. Not proven. The open problem with ff 0 is the residual current (0.6 A leading 56°, wandering), not noise |
+| Next | Averaged model (ADR 0004, at Luiz Villa's request): ladder.py brought to the ADR 0007 library with bench harmonics and a thermal bulb, checked against these runs, then D-GFL-09 comparing APF, SOGI, a PLL-based feedforward after the contact (Vd along the PLL angle, Vq 0) and a lower feedforward gain after the contact. Bench: CH3 at 5 A/div, 100 ms/div, telemetry l, point close selected before arming |
+
+## 2026-11-13 — D-GFL-09: averaged model of step 2b fitted to the bench
+
+| Field | Value |
+|---|---|
+| Commit | Uncommitted on `apf_quadrature`: `tests/l1/design/connection_apf.py` (new), `tests/common/design_report.py` (interactive figures, `<!-- iplot NAME -->`), report `docs/testing/design/D-GFL-09_bench/` |
+| Reason | Luiz Villa: simulate the PLL-based feedforward quickly on an averaged model (ADR 0004), on the measured grid, superposed on the bench data, with the grid impedance fitted to the data |
+| Model | Library `b9e8829` arithmetic at 50 µs, step 2b timings, averaged plant; grid fitted to CH2 with the relay open (50.006 Hz, harmonics to the 40th with phases); contact 8.35 ms after the command (scope, both runs) |
+| Fit | On the 18:33 ff 0 firmware dump (IAC and ω_avg, 8.4–115 ms): no grid impedance alone matches both (low R gives the PLL swing, the current stays 1.7× high; the inductance hardly matters). With a bridge loss it fits: 25 Ω behind the relay and 6 V of dead time (≈150 ns at 400 V, 50 kHz) give 50 Hz 0.64 A at −131° (bench 0.71 A at −124°) and ω_avg 309.9–318.7 (bench 309.3–318.7) rad/s; a fixed 5 Ω series resistance fits as well but leaves the late wander at 0.68 A (bench 0.3–0.5) |
+| Check | 17:24 ff 1, not fitted: waveform shape correlated 0.95 with the scope, 3× the late current of ff 0, but no trip within 2 s where the bench tripped after about 1 s with the bulb lit. The 17:24 CH3 is 6–8× the model with the same shape: that channel is unreliable in that run |
+| Options | Late |Idq| (0.5–2 s): APF 0.26 A, SOGI 0.73 A, option 1 ({Vd_avg, 0} after the blanking) 0.75 A, no trip; APF with gain 0.7 trips at once (±30 V PI) |
+| Open | What makes ff 1 trip on the bench after about 1 s (bulb heating, ADC aliasing of the 50 kHz ripple, or a slower PLL effect) is not reproduced; bench data with the full telemetry (key l) and CH3 at 5 A/div would pin it down |
