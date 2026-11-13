@@ -137,6 +137,8 @@ function draw(el){
  });
  window.addEventListener('resize',()=>plots.forEach(p=>p.setSize({width:width(),height:p.height})));
 }
+// A figure drawn inside a closed <details> got the minimum width: refit when one opens (toggle does not bubble).
+document.addEventListener('toggle',()=>window.dispatchEvent(new Event('resize')),true);
 // One figure at a time, yielding to the browser in between: the page stays responsive while
 // a long report decodes its data, and every figure is drawn whether or not it was scrolled to.
 const els=[...document.querySelectorAll('.iplot')];

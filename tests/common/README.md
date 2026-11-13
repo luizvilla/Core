@@ -12,6 +12,8 @@ Shared code for every host test. Nothing here is compiled into the firmware.
 | [`vendor/`](vendor/) | uPlot 1.6.32 (MIT, `uPlot-LICENSE`), inlined into the review pages so they work offline |
 | [`catalogue.py`](catalogue.py) | Loads and checks [`../catalogue.json`](../catalogue.json); `--procedure` writes procedure §6 |
 | [`control_center.py`](control_center.py) | Writes `tests/out/control-center.html`: where the validation stands, one tab per stage |
+| [`scope.py`](scope.py) | Tektronix MSO54 over USB: screenshot, measurements, setup, waveforms (`capture()`, used by `tests/l2/bench.py`; standalone captures go to `tests/out/scope/`) |
+| [`udev/`](udev/) | udev rule giving USB access to the MSO54 without root |
 | [`shim/`](shim/) | Host stand-ins for hardware-specific headers |
 
 ## check.h

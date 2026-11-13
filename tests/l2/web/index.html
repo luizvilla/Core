@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bench session</title>
+<!-- SPDX-License-Identifier: LGPL-2.1 · L2 bench app page, served by tests/l2/app.py -->
+<style>
+:root{--bg:#fcfcfb;--panel:#ffffff;--ink:#0b0b0b;--ink2:#52514e;--muted:#8a8984;--line:#e4e2dc;--soft:#f3f2ee;
+ --accent:#2a78d6;--good:#008300;--bad:#e34948;--warn:#b07800;--console:#141413;--console-ink:#e8e6df}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--panel:#1e1e1d;--ink:#f1efe9;--ink2:#b9b7b0;
+ --muted:#8a8984;--line:#34332f;--soft:#262624;--accent:#5b9be6;--good:#3fb950;--bad:#f07070;--warn:#e0a63a;--console:#0e0e0d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--line);padding:8px 14px;
+ display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+header h1{font-size:16px;margin:0}
+.chip{display:inline-flex;gap:4px;align-items:center;padding:2px 8px;border:1px solid var(--line);border-radius:12px;font-size:12px;white-space:nowrap}
+.chip b{font-weight:600}.chip.ok{border-color:var(--good)}.chip.bad{border-color:var(--bad);color:var(--bad)}.chip.stale{opacity:.5}
+.tel{display:flex;flex-wrap:wrap;gap:4px}
+.dry{background:var(--warn);color:#fff;border:0;font-weight:700}
+.spacer{flex:1}
+button{font:inherit;padding:6px 12px;border:1px solid var(--line);border-radius:6px;background:var(--soft);color:var(--ink);cursor:pointer}
+button:hover{border-color:var(--accent)}button:disabled{opacity:.45;cursor:default}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.big{font-size:16px;padding:10px 18px}
+button.stop{background:var(--bad);color:#fff;border-color:var(--bad);font-weight:700}
+button.on{outline:2px solid var(--accent)}
+button.pass.on{background:var(--good);color:#fff;border-color:var(--good);outline:0}
+button.fail.on{background:var(--bad);color:#fff;border-color:var(--bad);outline:0}
+a{color:var(--accent)}
+#grid{display:grid;grid-template-columns:230px minmax(0,1fr) 360px;gap:0;min-height:calc(100vh - 54px)}
+nav{border-right:1px solid var(--line);padding:10px;background:var(--panel)}
+nav .step{display:block;width:100%;text-align:left;margin:0 0 6px;padding:7px 9px;background:transparent}
+nav .step.sel{background:var(--soft);border-color:var(--accent)}
+nav .step .t{font-size:12px;color:var(--ink2);display:block}
+.counts{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.n{font-size:11px;padding:0 6px;border-radius:8px;border:1px solid var(--line)}
+.n.PASS{color:var(--good)}.n.FAIL{color:#fff;background:var(--bad);border-color:var(--bad)}.n.BLOCKED,.n.INFO{color:var(--ink2)}
+main{padding:14px 20px;min-width:0}
+main h2{margin:0 0 2px;font-size:20px}
+.sub{color:var(--ink2);font-size:13px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0}
+section h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.keys button{min-width:44px}.keys button .k{font-family:ui-monospace,monospace;font-weight:700;margin-right:6px}
+label{font-size:13px;color:var(--ink2)}
+input[type=text],input[type=number],textarea,select{font:inherit;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+input[type=number]{width:70px}textarea{width:100%;min-height:54px}
+.viewer{display:grid;grid-template-columns:minmax(0,3fr) minmax(220px,2fr);gap:12px}
+.viewer img{width:100%;border:1px solid var(--line);border-radius:6px;background:#000}
+.strip{display:flex;gap:8px;overflow-x:auto;padding:6px 0}
+.strip .th{flex:0 0 auto;width:132px;padding:3px;text-align:center;font-size:11px}
+.strip .th img{width:100%;display:block;border-radius:4px}
+.strip .th.sel{border-color:var(--accent);outline:2px solid var(--accent)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:top}
+th{color:var(--ink2);font-weight:600}
+.badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid var(--line);white-space:nowrap}
+.badge.PASS{color:var(--good)}.badge.FAIL{background:var(--bad);color:#fff;border-color:var(--bad)}.badge.INFO,.badge.BLOCKED{color:var(--ink2)}
+.op{display:flex;gap:4px;align-items:center;flex-wrap:wrap}.op input{flex:1;min-width:120px}
+.sheet{font-size:13px}.sheet table{margin:6px 0}.sheet h4{margin:12px 0 4px}
+.job{padding:6px 10px;border-radius:6px;background:var(--soft);font-size:13px}.job.err{color:var(--bad)}
+aside{border-left:1px solid var(--line);background:var(--console);color:var(--console-ink);display:flex;flex-direction:column;min-width:0}
+aside .head{padding:8px 10px;display:flex;gap:6px;align-items:center;border-bottom:1px solid #333}
+aside .head input{flex:1;background:#222;color:var(--console-ink);border-color:#444}
+#log{flex:1;overflow-y:auto;font:12px/1.35 ui-monospace,monospace;padding:6px 10px;white-space:pre-wrap;word-break:break-all;height:calc(100vh - 110px)}
+#log .tx{color:#7fb8ff;font-weight:700}#log .t{color:#777}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);max-width:880px;width:94vw}
+dialog::backdrop{background:#0006}
+.empty{color:var(--muted);font-style:italic}
+.fwch{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.fwch label{display:inline-flex;gap:5px;align-items:center;padding:2px 8px;border:1px solid var(--line);border-radius:12px;cursor:pointer;font-size:12px;color:var(--ink);user-select:none}
+.fwch label.off{opacity:.45}.fwch input{display:none}.fwch .sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+.fwplot{position:relative}.fwplot canvas{width:100%;display:block;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:crosshair;touch-action:none}
+.fwtip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:12px/1.35 ui-monospace,monospace;box-shadow:0 2px 8px #0003;white-space:nowrap;z-index:2}
+.fwtip .sw{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:5px}
+@media (max-width:1100px){#grid{grid-template-columns:1fr}nav{border-right:0;border-bottom:1px solid var(--line)}aside{border-left:0}#log{height:320px}.viewer{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Bench session</h1><span id="sess" class="sub"></span><span id="dry"></span>
+  <span id="links"></span>
+  <span class="spacer"></span>
+  <span id="chips"></span>
+  <button onclick="openSetup()">Setup</button>
+  <button class="stop big" title="Inverter OFF: current to zero, then the relay opens" onclick="sendKey('x')">x · Inverter OFF</button>
+</header>
+<div id="grid">
+  <nav id="steps"></nav>
+  <main><div id="step"><p class="empty">Choose a step on the left.</p></div>
+    <section id="wv" hidden>
+      <h3>Oscilloscope waveforms (MSO54)</h3>
+      <div class="row"><label>Capture <select id="wv_sel" onchange="wvPick(this.value)"></select></label><span class="spacer"></span><a id="wv_png" target="_blank">screen</a></div>
+      <div class="sub" id="wv_info"></div>
+      <div id="wv_plot"></div>
+    </section>
+    <section id="fw" hidden>
+      <h3>Firmware scope (key r)</h3>
+      <div class="row">
+        <label>Dump <select id="fw_sel" onchange="fwLoad(this.value)"></select></label>
+        <label>Rate <select id="fw_rate" onchange="fwRate(+this.value)"><option value="2000">2 kHz</option><option value="10000">10 kHz</option></select></label>
+        <span class="spacer"></span><a id="fw_csv" target="_blank">CSV</a>
+      </div>
+      <div class="sub" id="fw_info"></div>
+      <div id="fw_plot"></div>
+    </section>
+  </main>
+  <aside>
+    <div class="head"><b>Console</b><span class="tel" id="tel"></span></div>
+    <div id="log"></div>
+    <div class="head"><input id="keyin" maxlength="1" placeholder="type a menu key and press Enter" onkeydown="if(event.key==='Enter'){sendKey(this.value);this.value=''}"></div>
+  </aside>
+</div>
+
+<dialog id="setup">
+  <h2 style="margin-top:0">Session setup</h2>
+  <div class="row"><label>Operator <input type="text" id="s_operator"></label>
+    <label>Firmware on the board <input type="text" id="s_firmware" size="40"></label></div>
+  <p><label>Session note (bench, sources, probes)<br><textarea id="s_note"></textarea></label></p>
+  <h3>Scope channels</h3>
+  <p class="sub">What each channel carries. Criteria name signals (V_inv, V_grid…), so the mapping decides which channel they read. Kind <i>ac</i> gets RMS, frequency and peak.</p>
+  <table id="s_channels"></table>
+  <div class="row" style="margin:10px 0"><button class="primary" onclick="saveSetup()">Save</button>
+    <button onclick="post('/api/configure',{})">Configure scope measurements</button>
+    <button onclick="if(confirm('Delete the measurements this app created on the scope?'))post('/api/unconfigure',{})">Remove app measurements</button>
+    <span class="spacer"></span><button onclick="setupDlg.close()">Close</button></div>
+  <div id="plan"></div>
+  <h3>New session</h3>
+  <div class="row"><label><input type="checkbox" id="n_dry"> dry run (never counts as a result)</label>
+    <button onclick="newSession()">Start a new session</button></div>
+</dialog>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S=null, V=null, active=null, sheetCache={}, selPoint=null, selCap={}, setupDlg=$('#setup'), lastKey='';
+const opts={secs:2,wf:false,sheetOpen:true};
+try{active=new URLSearchParams(location.search).get('test')||localStorage.getItem('bench.active')}catch(e){}
+
+async function post(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){alert(j.error||r.statusText);throw new Error(j.error)}
+  refresh();return j;
+}
+function sendKey(k){
+  if(!k)return;const def=S&&S.keys[k];
+  if(def&&def.confirm&&!confirm(`Send "${k}" (${def.label})?\n\n${def.confirm}`))return;
+  post('/api/key',{key:k,test:active});
+}
+function selectTest(id){active=id;selPoint=null;try{localStorage.setItem('bench.active',id)}catch(e){};post('/api/active',{test:id});loadTest(true)}
+
+async function refresh(){
+  try{S=await (await fetch('/api/state')).json()}catch(e){$('#sess').textContent='app not reachable';return}
+  renderTop();renderSteps();renderConsole();fwList();
+  if(active)loadTest(false);
+}
+async function loadTest(force){
+  if(!active)return;
+  const needSheet=!sheetCache[active];
+  const v=await (await fetch(`/api/test/${active}${needSheet?'?sheet=1':''}`)).json();
+  if(v.sheet)sheetCache[active]=v.sheet;
+  V=v;wvList();
+  const key=JSON.stringify(v)+(S&&S.job.busy);
+  if(!force&&key===lastKey)return;            // nothing changed: keep the page as it is
+  const el=document.activeElement;
+  if(!force&&el&&$('#step').contains(el)&&/INPUT|TEXTAREA|SELECT/.test(el.tagName))return; // do not clobber typing
+  lastKey=key;renderStep();
+}
+
+function renderTop(){
+  const s=S.session;
+  $('#sess').textContent=s.name;
+  $('#dry').innerHTML=s.dry_run?'<span class="chip dry">DRY RUN · never counts</span>':'';
+  $('#links').innerHTML='<a href="/out/report.html" target="_blank">Review page</a> · <a href="/control-center" target="_blank">Control center</a>';
+  const sc=S.scope, se=S.serial, j=S.job;
+  $('#chips').innerHTML=
+    `<span class="chip ${se.connected?'ok':'bad'}" title="${esc(se.error)}">serial <b>${se.connected?'on':'off'}</b></span> `+
+    `<span class="chip ${sc.connected?'ok':sc.error?'bad':''}" title="${esc(sc.error)}">scope <b>${sc.connected?'on':sc.error?'error':'idle'}</b></span> `+
+    (j.busy?`<span class="chip">⏳ ${esc(j.text)}</span>`:j.error?`<span class="chip bad">${esc(j.error)}</span>`:j.done?`<span class="chip ok">${esc(j.done)}</span>`:'');
+  const t=S.telemetry;
+  $('#tel').innerHTML=t?[['stage',`${t.st} ${t.stage_name}`],['inv',`${t.inv} ${t.inv_name}`],['rly',t.rly],['VAC',t.VAC],['Vbus',t.Vbus],['IAC',t.IAC],['flt',t.flt]]
+    .map(([k,v])=>`<span class="chip ${t.age>3?'stale':''} ${k==='flt'&&t.flt!=='0'?'bad':''}">${k} <b>${esc(v)}</b></span>`).join(''):'<span class="chip stale">no telemetry</span>';
+}
+function renderSteps(){
+  $('#steps').innerHTML=S.tests.map(t=>{
+    const c=Object.entries(t.counts).map(([k,n])=>`<span class="n ${k}">${n} ${k}</span>`).join('');
+    return `<button class="step ${t.id===active?'sel':''}" onclick="selectTest('${t.id}')"><b>${t.id}</b><span class="t">${esc(t.title)}</span>
+      <span class="counts">${c||(t.defined?'':'<span class="n">evidence only</span>')}</span></button>`}).join('');
+}
+function renderConsole(){
+  const log=$('#log'), atEnd=!log.dataset.seen||log.scrollTop+log.clientHeight>=log.scrollHeight-20;log.dataset.seen=1;
+  log.innerHTML=S.console.map(l=>l.dir==='>'?`<div><span class="t">${l.t}</span> <span class="tx">» key ${esc(l.text)}</span></div>`
+    :`<div><span class="t">${l.t}</span> ${esc(l.text)}</div>`).join('');
+  if(atEnd)log.scrollTop=log.scrollHeight;
+}
+
+function capturePoints(){
+  const sp=V.spec.points.length?V.spec.points:['main'];
+  const extra=Object.keys(V.points).filter(p=>!sp.includes(p));
+  return sp.concat(extra);
+}
+function renderStep(){
+  const v=V, m=v.manifest, busy=S&&S.job.busy, pts=capturePoints();
+  if(!selPoint||!pts.includes(selPoint)){
+    const withCaps=pts.filter(p=>v.points[p]&&v.points[p].captures.length);
+    selPoint=withCaps.length?withCaps[withCaps.length-1]:pts[0];
+  }
+  const keys=(v.spec.keys||[]).map(k=>{const d=S.keys[k]||{};return `<button onclick="sendKey('${esc(k)}')"><span class="k">${esc(k)}</span>${esc(d.label||'')}</button>`}).join('');
+  const win=m.started?`window from <b>${m.started.slice(11)}</b>${m.ended?` to <b>${m.ended.slice(11)}</b> (finished)`:' · open'}`:'not started';
+  const P=v.points[selPoint]||{captures:[],pinned:null};
+  const caps=P.captures, idx=selCap[`${v.id}/${selPoint}`]??(P.pinned??caps.length-1), cap=caps[idx];
+  const pointRows=v.rows.filter(r=>{const c=v.spec.criteria.find(c=>v.id+c.id===r.id);return c&&c.value&&((c.point||pts[0])===selPoint)});
+  const chans=v.channels||S.session.channels, mapped=Object.keys(chans);
+  const own=Object.entries(v.spec.channels||{}).filter(([k])=>!k.startsWith('_'));
+  const meas=cap?cap.measurements.filter(x=>mapped.includes((x.source1||'').toUpperCase())):[];
+  const fmt=x=>x==null?'—':(Math.abs(x)>=1e4||Math.abs(x)<1e-3&&x!==0)?x.toExponential(3):(+x.toPrecision(4)).toString();
+  $('#step').innerHTML=`
+  <h2>${v.id} · ${esc(v.title)}</h2>
+  <div class="sub">${esc(v.criterion_text)}</div>
+  <div class="sub" style="margin-top:4px">${esc(v.conditions)}</div>
+  ${v.spec.criteria.length?'':'<p class="sub"><b>No machine criteria yet</b> (tests/l2/criteria.json): captures, notes and the console are still recorded as evidence.</p>'}
+  <section><h3>Step</h3><div class="row">
+    <span class="sub">Telemetry ${win}</span><span class="spacer"></span>
+    <button onclick="post('/api/step',{test:'${v.id}',action:'start'})">${m.started?'Restart window':'Start step'}</button>
+    ${m.ended?`<button onclick="post('/api/step',{test:'${v.id}',action:'reopen'})">Reopen</button>`:`<button class="primary" onclick="post('/api/step',{test:'${v.id}',action:'finish'})">Finish step</button>`}
+  </div>
+  ${keys?`<div class="row keys" style="margin-top:10px"><span class="sub">Menu keys:</span>${keys}</div>`:''}</section>
+
+  <section><h3>Oscilloscope</h3>
+   <div class="row">
+    ${pts.length>1?`<label>Point <select onchange="selPoint=this.value;renderStep()">${pts.map(p=>`<option ${p===selPoint?'selected':''}>${esc(p)}</option>`).join('')}</select></label>`:''}
+    <label>Window <input type="number" id="secs" value="${opts.secs}" min="0.5" step="0.5" onchange="opts.secs=+this.value"> s</label>
+    <label><input type="checkbox" id="wf" ${opts.wf?'checked':''} onchange="opts.wf=this.checked"> waveforms (≈20 s)</label>
+    <button class="primary big" ${busy?'disabled':''} onclick="acquire(false)" title="Space bar">Acquire${pts.length>1?' '+esc(selPoint):''}</button>
+    <button ${busy?'disabled':''} onclick="acquire(true)" title="Arm a single sequence, capture when it triggers">Arm single shot</button>
+    ${busy?`<button onclick="post('/api/cancel',{})">Cancel</button>`:''}
+    <button ${busy?'disabled':''} onclick="post('/api/run',{})">Scope: run</button>
+   </div>
+   ${v.spec.point_help?`<div class="sub">${esc(v.spec.point_help)}</div>`:''}
+   ${own.length?`<div class="sub"><b>This step rewires:</b> ${own.map(([ch,c])=>`${esc(ch)} = ${esc(c.signal)} (${esc(c.label||c.kind)})`).join(' · ')}. Other channels as in Setup.</div>`:''}
+   ${cap?`<div class="viewer" style="margin-top:10px">
+     <div><a href="${cap.screen}" target="_blank"><img src="${cap.screen}" alt="Scope screen ${esc(selPoint)} ${esc(cap.timestamp)}"></a>
+       <div class="sub">${esc(selPoint)} · ${esc(cap.timestamp.slice(11))} · ${esc(cap.stats_note)} ${idx===P.pinned?'· <b>pinned as evidence</b>':idx===caps.length-1&&P.pinned==null?'· evidence (newest)':''}</div>
+       <div class="row" style="margin-top:4px">
+        ${idx===P.pinned?`<button onclick="pin(null)">Unpin</button>`:`<button onclick="pin(${idx})">Pin as evidence</button>`}</div></div>
+     <div>${pointRows.length?`<table><tr><th>Criterion</th><th>Verdict</th><th>Value</th></tr>${pointRows.map(r=>`<tr><td>${esc(r.id.slice(9))} ${esc(r.desc)}</td><td><span class="badge ${r.verdict}">${r.verdict}</span></td><td>${esc(r.measured.split(';')[0])}</td></tr>`).join('')}</table>`:''}
+       <table style="margin-top:8px"><tr><th>Scope</th><th>Mean</th><th>Min</th><th>Max</th></tr>
+       ${meas.map(x=>`<tr><td>${esc(x.type)}${x.edges?' '+esc(x.edges.join('→').toLowerCase()):''} ${esc(x.source1)}${x.source2?'→'+esc(x.source2):''}</td><td>${fmt(x.mean)} ${esc(x.unit||'')}</td><td>${fmt(x.minimu)}</td><td>${fmt(x.maximu)}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">no measurement on the mapped channels (Setup → Configure scope measurements)</td></tr>'}</table></div>
+   </div>
+   <div class="strip">${caps.map((c,i)=>`<button class="th ${i===idx?'sel':''}" onclick="selCap['${v.id}/${esc(selPoint)}']=${i};renderStep()"><img src="${c.screen}" alt="">${esc(c.timestamp.slice(11))}${i===P.pinned?' 📌':''}</button>`).join('')}</div>`
+   :`<p class="empty">No capture of ${esc(selPoint)} yet. Set the bench, then Acquire (space bar).</p>`}
+  </section>
+
+  ${v.rows.length?`<section><h3>Criteria</h3><table><tr><th>ID</th><th>What is checked</th><th>Limit</th><th>Verdict</th><th>Measured · operator</th></tr>
+   ${v.spec.criteria.map(c=>{const r=v.rows.find(r=>r.id===v.id+c.id)||{};const a=m.checks[c.id]||{};
+     const op=c.operator?(c.operator===true?`<div class="op">
+        <button class="pass ${a.verdict==='PASS'?'on':''}" onclick="check('${c.id}','PASS')">Pass</button>
+        <button class="fail ${a.verdict==='FAIL'?'on':''}" onclick="check('${c.id}','FAIL')">Fail</button>
+        <input type="text" id="op${esc(c.id)}" value="${esc(a.text||'')}" placeholder="what you saw" onkeydown="if(event.key==='Enter')check('${c.id}','${a.verdict||''}')">
+        ${a.verdict?`<button title="clear" onclick="check('${c.id}','')">✕</button>`:''}</div>`
+       :`<div class="op"><input type="text" id="op${esc(c.id)}" value="${esc(a.text||'')}" placeholder="record" onkeydown="if(event.key==='Enter')check('${c.id}','INFO')"><button onclick="check('${c.id}','INFO')">Save</button></div>`):'';
+     return `<tr><td>${esc(c.id)}</td><td>${esc(c.desc)}</td><td>${esc(r.limit)}</td><td><span class="badge ${r.verdict}">${r.verdict||''}</span></td><td>${esc(r.measured)}${op}</td></tr>`}).join('')}
+  </table></section>`:''}
+
+  <section><h3>Notes</h3>
+   ${m.notes.map(n=>`<div class="sub"><b>${esc(n.time.slice(11))}</b>${n.point?' ('+esc(n.point)+')':''} ${esc(n.text)}</div>`).join('')}
+   <div class="row" style="margin-top:6px"><textarea id="note" placeholder="What you observe, changed, measured with another instrument…"></textarea>
+   <button onclick="addNote()">Add note</button></div>
+   ${m.firmware_captures.length?`<p class="sub">Firmware scope (key r): ${m.firmware_captures.map(f=>`<a href="/out/${esc(f.csv||f.txt)}" target="_blank">${esc(f.time.slice(11))}</a>`).join(' · ')}</p>`:''}
+  </section>
+
+  <details ${opts.sheetOpen?'open':''} ontoggle="opts.sheetOpen=this.open"><summary><b>Bench sheet</b></summary><section class="sheet">${sheetCache[v.id]||''}</section></details>`;
+}
+function acquire(single){
+  post('/api/acquire',{test:active,point:selPoint,single,seconds:opts.secs||2,waveforms:opts.wf});
+  selCap={};
+}
+function pin(i){post('/api/pin',{test:active,point:selPoint,index:i})}
+function check(id,verdict){const el=document.getElementById('op'+id);post('/api/check',{test:active,id,verdict,text:el?el.value:''})}
+function addNote(){const t=$('#note').value.trim();if(t)post('/api/note',{test:active,text:t,point:selPoint}).then(()=>loadTest(true))}
+
+function openSetup(){
+  const s=S.session;
+  $('#s_operator').value=s.operator||'';$('#s_firmware').value=s.firmware||'';$('#s_note').value=s.note||'';
+  $('#s_channels').innerHTML='<tr><th>Channel</th><th>Signal</th><th>Kind</th><th>Label</th></tr>'+['CH1','CH2','CH3','CH4'].map(ch=>{
+    const c=s.channels[ch]||{};return `<tr><td>${ch}</td><td><input type="text" data-ch="${ch}" data-f="signal" value="${esc(c.signal||'')}"></td>
+    <td><select data-ch="${ch}" data-f="kind">${['ac','logic','none'].map(k=>`<option ${c.kind===k?'selected':''}>${k}</option>`).join('')}</select></td>
+    <td><input type="text" size="34" data-ch="${ch}" data-f="label" value="${esc(c.label||'')}"></td></tr>`}).join('');
+  renderPlan();setupDlg.showModal();
+}
+function renderPlan(){
+  $('#plan').innerHTML=S.plan.length?'<table><tr><th>Measurement</th><th>Sources</th><th>On the scope</th><th>For</th></tr>'+
+    S.plan.map(p=>`<tr><td>${esc(p.type)}</td><td>${esc(p.src)}</td><td>${esc(p.id)} · ${esc(p.state)}</td><td>${esc(p.why)}</td></tr>`).join('')+'</table>':'';
+}
+function saveSetup(){
+  const ch={};document.querySelectorAll('#s_channels [data-ch]').forEach(e=>{(ch[e.dataset.ch]??={})[e.dataset.f]=e.value.trim()});
+  for(const k in ch)if(ch[k].kind==='none'&&!ch[k].signal)delete ch[k];
+  post('/api/session',{operator:$('#s_operator').value,firmware:$('#s_firmware').value,note:$('#s_note').value,channels:ch});
+}
+function newSession(){
+  if(!confirm('Start a new session? The current one stays in tests/out/.'))return;
+  post('/api/new',{dry_run:$('#n_dry').checked,operator:$('#s_operator').value,firmware:$('#s_firmware').value,note:$('#s_note').value})
+   .then(()=>{setupDlg.close();active=null;sheetCache={};$('#step').innerHTML='<p class="empty">New session: choose a step.</p>'});
+}
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'&&!/INPUT|TEXTAREA|SELECT|BUTTON/.test(document.activeElement.tagName)&&active&&!setupDlg.open&&S&&!S.job.busy){e.preventDefault();acquire(false)}
+});
+
+// ---- plots: firmware scope (CSV from the micro-controller) and oscilloscope waveforms ---------------
+const PLOT_COLORS=['#2a78d6','#e34948','#008300','#b07800','#8e44ad','#00838f','#d35400','#5d6d7e','#c2185b','#2e7d32','#6d4c41','#1565c0','#9e9d24','#ad1457'];
+function plotFmt(v){if(v==null||!isFinite(v))return '—';const a=Math.abs(v);return a!==0&&(a>=1e5||a<1e-3)?v.toExponential(3):(+v.toPrecision(5)).toString()}
+function plotNice(lo,hi,n){const span=hi-lo||1,step0=span/n,mag=10**Math.floor(Math.log10(step0)),st=[1,2,5,10].map(k=>k*mag).find(k=>k>=step0);
+  const out=[];for(let v=Math.ceil(lo/st)*st;v<=hi+st*1e-9;v+=st)out.push(+v.toPrecision(12));return out}
+function plotTime(ms,span){const a=Math.abs(span);return a<0.05?(+(ms*1e3).toPrecision(6))+' µs':a<2000?(+ms.toPrecision(6))+' ms':(+(ms/1e3).toPrecision(6))+' s'}
+/* An interactive time plot. Data: {names, units?, t (ms, increasing), lo[ch][i], hi[ch][i] (hi omitted = lo: samples),
+   full:[t0,t1], marker:{t,label}}. onRange(t0,t1) is called (debounced) after a zoom or pan, to fetch finer data. */
+class Plot{
+  constructor(root,{store,groups={},defaults=[],onRange=null}){
+    this.root=root;this.store=store;this.groups=groups;this.defaults=defaults;this.onRange=onRange;
+    this.data=null;this.vis=null;this.mode='stacked';this.x0=0;this.x1=1;this.hover=null;this.drag=null;
+    try{const v=JSON.parse(localStorage.getItem(store)||'{}');if(v.vis)this.vis=new Set(v.vis);if(v.mode)this.mode=v.mode}catch(e){}
+    const gb=Object.keys(groups).map(g=>`<button data-g="${esc(g)}">${esc(g)}</button>`).join('');
+    root.innerHTML=`<div class="row" style="margin-top:6px"><span class="sub">Show:</span><button data-g="*all">All</button><button data-g="*none">None</button>${gb}
+      <span class="spacer"></span><label>View <select class="pmode"><option value="stacked">stacked, one axis each</option><option value="overlay">overlay, shared axis</option><option value="norm">overlay, normalized</option></select></label>
+      <button data-z="0.5" title="Zoom in">+</button><button data-z="2" title="Zoom out">−</button><button data-p="-0.25" title="Pan left">◀</button><button data-p="0.25" title="Pan right">▶</button><button class="preset">Reset view</button></div>
+      <div class="fwch"></div><div class="fwplot"><canvas></canvas><div class="fwtip" hidden></div></div>
+      <div class="sub">Drag to zoom on a time range · wheel to zoom at the cursor · shift+drag to pan · double-click to reset.</div>`;
+    this.cv=root.querySelector('canvas');this.tip=root.querySelector('.fwtip');this.chips=root.querySelector('.fwch');this.box=root.querySelector('.fwplot');
+    const sel=root.querySelector('.pmode');sel.value=this.mode;sel.onchange=()=>{this.mode=sel.value;this.save();this.draw()};
+    root.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>this.group(b.dataset.g));
+    root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>this.zoom(+b.dataset.z));
+    root.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>this.pan(+b.dataset.p));
+    root.querySelector('.preset').onclick=()=>this.reset();
+    this.chips.onchange=e=>{const n=e.target.dataset.n;if(n==null)return;this.vis.has(n)?this.vis.delete(n):this.vis.add(n);this.save();this.renderChips();this.draw()};
+    const cv=this.cv;
+    cv.addEventListener('mousedown',ev=>{if(!this.data)return;const {x,t}=this.at(ev);this.drag={mode:ev.shiftKey?'pan':'zoom',x,cx:x,t,x0:this.x0,x1:this.x1};this.tip.hidden=true});
+    window.addEventListener('mousemove',ev=>{
+      if(!this.data)return;
+      if(this.drag){const {x}=this.at(ev);this.drag.cx=x;if(this.drag.mode==='pan'){const g=this.geom(),dx=(x-this.drag.x)/g.pw*(this.drag.x1-this.drag.x0);this.x0=this.drag.x0-dx;this.x1=this.drag.x1-dx;this.clamp()}this.draw();return}
+      if(ev.target!==cv)return;const {x,t,g}=this.at(ev);this.hover=x<g.L||x>g.L+g.pw?null:this.nearest(t);this.draw();this.showTip(ev);
+    });
+    window.addEventListener('mouseup',()=>{
+      if(!this.drag)return;const dr=this.drag;this.drag=null;
+      if(dr.mode==='zoom'&&Math.abs(dr.cx-dr.x)>6){const g=this.geom(),toT=x=>dr.x0+(x-g.L)/g.pw*(dr.x1-dr.x0);this.x0=toT(Math.min(dr.x,dr.cx));this.x1=toT(Math.max(dr.x,dr.cx));this.clamp();this.changed()}
+      else if(dr.mode==='pan')this.changed();
+      this.draw();
+    });
+    cv.addEventListener('wheel',ev=>{if(!this.data)return;ev.preventDefault();this.zoom(ev.deltaY>0?1.25:0.8,this.at(ev).t)},{passive:false});
+    cv.addEventListener('dblclick',()=>this.reset());
+    cv.addEventListener('mouseleave',()=>{this.hover=null;this.tip.hidden=true;this.draw()});
+    new ResizeObserver(()=>this.draw()).observe(this.box);
+  }
+  save(){try{localStorage.setItem(this.store,JSON.stringify({vis:[...(this.vis||[])],mode:this.mode}))}catch(e){}}
+  setData(d,keepView){
+    const first=!this.data;this.data=d;
+    if(!this.vis||!d.names.some(n=>this.vis.has(n))){const dv=this.defaults.filter(n=>d.names.includes(n));this.vis=new Set(dv.length?dv:d.names)}
+    if(first||!keepView){this.x0=d.full[0];this.x1=d.full[1]}
+    this.hover=null;this.renderChips();this.draw();
+  }
+  renderChips(){const d=this.data;this.chips.innerHTML=d.names.map((n,i)=>`<label class="${this.vis.has(n)?'':'off'}"><input type="checkbox" data-n="${esc(n)}" ${this.vis.has(n)?'checked':''}><span class="sw" style="background:${PLOT_COLORS[i%PLOT_COLORS.length]}"></span>${esc(n)}</label>`).join('')}
+  group(g){const d=this.data;if(!d)return;this.vis=new Set(g==='*all'?d.names:g==='*none'?[]:(this.groups[g]||[]).filter(n=>d.names.includes(n)));this.save();this.renderChips();this.draw()}
+  clamp(){const [a,b]=this.data.full,N=b-a;let w=Math.min(Math.max(this.x1-this.x0,N*1e-6),N);if(this.x0<a)this.x0=a;if(this.x0+w>b)this.x0=b-w;this.x1=this.x0+w}
+  changed(){if(!this.onRange)return;clearTimeout(this._t);this._t=setTimeout(()=>this.onRange(this.x0,this.x1),150)}
+  zoom(f,at){if(!this.data)return;const c=at??(this.x0+this.x1)/2;this.x0=c-(c-this.x0)*f;this.x1=c+(this.x1-c)*f;this.clamp();this.draw();this.changed()}
+  pan(f){if(!this.data)return;const w=this.x1-this.x0;this.x0+=w*f;this.x1+=w*f;this.clamp();this.draw();this.changed()}
+  reset(){if(!this.data)return;this.x0=this.data.full[0];this.x1=this.data.full[1];this.draw();this.changed()}
+  nearest(t){const T=this.data.t;let lo=0,hi=T.length-1;while(hi-lo>1){const m=(lo+hi)>>1;T[m]<t?lo=m:hi=m}return Math.abs(T[lo]-t)<=Math.abs(T[hi]-t)?lo:hi}
+  geom(){const d=this.data,vis=d?d.names.filter(n=>this.vis.has(n)):[],W=this.cv.clientWidth||800,L=70,R=12,T=8,B=26;
+    const lane=this.mode==='stacked'?Math.max(64,Math.min(130,560/Math.max(1,vis.length))):0;
+    return {vis,W,H:this.mode==='stacked'?T+B+Math.max(1,vis.length)*lane:380,L,R,T,B,lane,pw:W-L-R}}
+  at(ev){const g=this.geom(),r=this.cv.getBoundingClientRect(),x=ev.clientX-r.left;return {x,t:this.x0+(x-g.L)/g.pw*(this.x1-this.x0),g}}
+  draw(){
+    const d=this.data;if(!d)return;
+    const g=this.geom(),{vis,W,H,L,T,B,lane,pw}=g,dpr=window.devicePixelRatio||1,cv=this.cv;
+    cv.style.height=H+'px';cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+    const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);
+    const css=getComputedStyle(document.documentElement),ink=css.getPropertyValue('--ink2').trim(),line=css.getPropertyValue('--line').trim(),muted=css.getPropertyValue('--muted').trim();
+    c.clearRect(0,0,W,H);c.font='11px system-ui,sans-serif';
+    const X=t=>L+(t-this.x0)/(this.x1-this.x0)*pw,Tt=d.t;
+    if(!vis.length){c.fillStyle=muted;c.fillText('No channel selected: pick some above.',L+10,T+30);return}
+    let i0=0,i1=Tt.length-1;while(i0<i1&&Tt[i0+1]<this.x0)i0++;while(i1>i0&&Tt[i1-1]>this.x1)i1--;
+    const span=this.x1-this.x0;c.strokeStyle=line;c.fillStyle=ink;c.lineWidth=1;c.textAlign='center';
+    for(const t of plotNice(this.x0,this.x1,Math.max(3,Math.floor(pw/100)))){const x=X(t);c.beginPath();c.moveTo(x,T);c.lineTo(x,H-B);c.stroke();c.fillText(plotTime(t,span),x,H-B+15)}
+    const lo=d.lo,hi=d.hi||d.lo;
+    const rng=k=>{let a=Infinity,b=-Infinity;for(let i=i0;i<=i1;i++){const u=lo[k][i],v=hi[k][i];if(u!=null&&isFinite(u)&&u<a)a=u;if(v!=null&&isFinite(v)&&v>b)b=v}
+      if(!isFinite(a)){a=0;b=1}if(b-a<1e-12){const m=Math.abs(a)*0.05||0.5;a-=m;b+=m}const p=(b-a)*0.08;return [a-p,b+p]};
+    const discrete=k=>{if(d.hi&&d.hi!==d.lo)return false;const s=new Set();for(const v of lo[k]){if(v==null)continue;if(!Number.isInteger(v))return false;s.add(v);if(s.size>16)return false}return true};
+    const lanes=this.mode==='stacked'?vis.map((n,j)=>[[n],T+j*lane,lane]):[[vis,T,H-T-B]];
+    this.lanes=[];
+    for(const [names,y0,h] of lanes){
+      const ks=names.map(n=>d.names.indexOf(n)),top=y0+4,bot=y0+h-4;let shared=null;
+      if(this.mode==='overlay')shared=ks.map(rng).reduce((a,b)=>[Math.min(a[0],b[0]),Math.max(a[1],b[1])]);
+      c.strokeStyle=line;c.strokeRect(L,y0+0.5,pw,h-1);c.fillStyle=ink;c.textAlign='right';
+      if(this.mode==='norm'){c.fillText('max',L-5,top+8);c.fillText('min',L-5,bot)}
+      else{const [a,b]=shared||rng(ks[0]),Y=v=>bot-(v-a)/(b-a)*(bot-top),u=d.units&&!shared?' '+(d.units[ks[0]]||''):'';
+        for(const v of plotNice(a,b,this.mode==='stacked'?2:6)){const y=Y(v);if(y<top||y>bot)continue;c.fillText(plotFmt(v)+u,L-5,y+3);c.strokeStyle=line;c.beginPath();c.moveTo(L,y);c.lineTo(L+pw,y);c.stroke()}}
+      for(const k of ks){
+        const [a,b]=shared||rng(k),Y=v=>bot-(v-a)/(b-a)*(bot-top),col=PLOT_COLORS[k%PLOT_COLORS.length],step=discrete(k),band=d.hi&&d.hi!==d.lo;
+        c.save();c.beginPath();c.rect(L,y0,pw,h);c.clip();c.strokeStyle=col;c.lineWidth=band?1:1.6;
+        const j0=Math.max(0,i0-1),j1=Math.min(Tt.length-1,i1+1);
+        if(band){c.beginPath();for(let i=j0;i<=j1;i++){const x=X(Tt[i]);c.moveTo(x,Y(hi[k][i]));c.lineTo(x,Y(lo[k][i])+0.5)}c.stroke()} // min/max envelope: every spike stays visible
+        c.beginPath();let pen=false,py=0;
+        for(let i=j0;i<=j1;i++){const v=band?(lo[k][i]+hi[k][i])/2:lo[k][i];if(v==null||!isFinite(v)){pen=false;continue}
+          const x=X(Tt[i]),y=Y(v);if(!pen){c.moveTo(x,y);pen=true}else if(step){c.lineTo(x,py);c.lineTo(x,y)}else c.lineTo(x,y);py=y}
+        if(!band)c.stroke();c.restore();
+        this.lanes.push({k,a,b,top,bot});
+      }
+      if(this.mode==='stacked'){c.fillStyle=PLOT_COLORS[ks[0]%PLOT_COLORS.length];c.textAlign='left';c.font='600 11px system-ui,sans-serif';c.fillText(names[0],L+6,y0+14);c.font='11px system-ui,sans-serif'}
+    }
+    if(d.marker){const xm=X(d.marker.t);if(xm>=L&&xm<=L+pw){c.strokeStyle=muted;c.setLineDash([4,4]);c.beginPath();c.moveTo(xm,T);c.lineTo(xm,H-B);c.stroke();c.setLineDash([]);c.fillStyle=muted;c.textAlign='left';c.fillText(d.marker.label,xm+3,H-B-4)}}
+    if(this.drag&&this.drag.mode==='zoom'){const a=Math.min(this.drag.x,this.drag.cx),b=Math.max(this.drag.x,this.drag.cx);c.fillStyle='rgba(42,120,214,.15)';c.fillRect(a,T,b-a,H-T-B)}
+    if(this.hover!=null&&!this.drag&&this.hover<Tt.length){const x=X(Tt[this.hover]);c.strokeStyle=ink;c.beginPath();c.moveTo(x,T);c.lineTo(x,H-B);c.stroke();
+      for(const ln of this.lanes){const v=hi[ln.k][this.hover];if(v==null||!isFinite(v))continue;const y=ln.bot-(v-ln.a)/(ln.b-ln.a)*(ln.bot-ln.top);c.fillStyle=PLOT_COLORS[ln.k%PLOT_COLORS.length];c.beginPath();c.arc(x,y,3,0,7);c.fill()}}
+  }
+  showTip(ev){
+    const d=this.data,i=this.hover;if(!d||i==null){this.tip.hidden=true;return}
+    const lo=d.lo,hi=d.hi||d.lo,band=d.hi&&d.hi!==d.lo;
+    this.tip.innerHTML=`<b>${plotTime(d.t[i],this.x1-this.x0)}</b>${d.sampleLabel?' · '+d.sampleLabel(i):''}<br>`+d.names.map((n,k)=>[n,k]).filter(([n])=>this.vis.has(n)).map(([n,k])=>
+      `<span class="sw" style="background:${PLOT_COLORS[k%PLOT_COLORS.length]}"></span>${esc(n)} ${band&&lo[k][i]!==hi[k][i]?plotFmt(lo[k][i])+' … '+plotFmt(hi[k][i]):plotFmt(lo[k][i])}${d.units?' '+esc(d.units[k]||''):''}`).join('<br>');
+    this.tip.hidden=false;const box=this.box.getBoundingClientRect();let x=ev.clientX-box.left+14;
+    if(x+this.tip.offsetWidth>box.width)x=ev.clientX-box.left-this.tip.offsetWidth-14;this.tip.style.left=x+'px';this.tip.style.top=(ev.clientY-box.top+12)+'px';
+  }
+}
+
+// firmware scope: 256 samples per channel; the trigger sample and rate come with the dump (app.py fw_data)
+const FW={list:[],listKey:'',name:null,raw:null,rate:2000,
+  plot:new Plot($('#fw_plot'),{store:'bench.fw',defaults:['VAC_V','IAC_A','relay_cmd','inverter_mode'],groups:{
+    Connection:['VAC_V','IAC_A','relay_cmd','inverter_mode'],PLL:['Vq_avg_V','omega_avg_rad_s','V_d_V','V_q_V','omega_rad_s','Sync','Vd_avg_V'],Bridge:['bridge_duty','VDCBus_V','IAC_A','VAC_V']}})};
+function fwList(){
+  const L=S.fwscope||[],key=L.map(f=>f.name+(f.test||'')).join('|');
+  $('#fw').hidden=!L.length;if(key===FW.listKey)return;
+  const follow=!FW.name||FW.name===(FW.list[0]&&FW.list[0].name); // follow the newest dump unless an older one was picked
+  FW.list=L;FW.listKey=key;
+  $('#fw_sel').innerHTML=L.map(f=>`<option value="${esc(f.name)}">${esc(f.time)}${f.test?' · '+esc(f.test):''}</option>`).join('');
+  if(L.length&&(follow||!L.some(f=>f.name===FW.name)))fwLoad(L[0].name);else $('#fw_sel').value=FW.name||'';
+}
+async function fwLoad(name){
+  const d=await (await fetch('/api/fwscope/'+encodeURIComponent(name))).json();if(d.error)return;
+  FW.name=name;FW.raw=d;$('#fw_sel').value=name;$('#fw_csv').href=d.url;fwRate(d.rate,false);
+}
+function fwRate(r,keep=true){
+  const d=FW.raw;if(!d)return;FW.rate=r;$('#fw_rate').value=String(r);
+  const n=d.columns[0].length,t=d.columns[0].map((_,i)=>(i-d.trigger)/r*1000);
+  FW.plot.setData({names:d.names,t,lo:d.columns,full:[t[0],t[n-1]],marker:{t:0,label:'trigger'},sampleLabel:i=>'sample '+i},false);
+  $('#fw_info').textContent=`${n} samples at ${r/1000} kHz = ${(n/r*1000).toFixed(1)} ms, ${(d.trigger/r*1000).toFixed(1)} ms before the trigger (time 0, sample ${d.trigger}). Rate: ${d.rate_why}.`;
+}
+
+// oscilloscope waveforms of the active step (captures stored with waveforms; single shots always are)
+const WV={key:'',cur:null,req:0,plot:null};
+WV.plot=new Plot($('#wv_plot'),{store:'bench.wv',onRange:(a,b)=>wvFetch(a,b,true)});
+function wvList(){
+  const caps=[];if(V)for(const [p,P] of Object.entries(V.points))for(const c of P.captures)if(c.has_waveforms)caps.push({p,c});
+  caps.sort((a,b)=>a.c.timestamp<b.c.timestamp?1:-1);
+  const key=V?V.id+caps.map(x=>x.c.dir).join('|'):'';
+  $('#wv').hidden=!caps.length;if(key===WV.key)return;WV.key=key;
+  $('#wv_sel').innerHTML=caps.map(x=>`<option value="${esc(x.c.dir)}">${esc(x.p)} · ${esc(x.c.timestamp.slice(11))}${x.c.stats_note&&x.c.stats_note.startsWith('single')?' · single shot':''}</option>`).join('');
+  if(caps.length&&(!WV.cur||WV.cur.test!==V.id||!caps.some(x=>x.c.dir===WV.cur.dir)))wvPick(caps[0].c.dir);
+  else if(WV.cur)$('#wv_sel').value=WV.cur.dir;
+}
+function wvPick(dir){WV.cur={test:V.id,dir};$('#wv_sel').value=dir;
+  const cap=Object.values(V.points).flatMap(P=>P.captures).find(c=>c.dir===dir);if(cap)$('#wv_png').href=cap.screen;wvFetch(null,null,false)}
+async function wvFetch(t0,t1,keep){
+  if(!WV.cur)return;const id=++WV.req,W=$('#wv_plot').clientWidth||1000,n=Math.min(4000,Math.max(800,Math.round(W*1.5)));
+  const q=new URLSearchParams({n});if(t0!=null){q.set('t0',t0);q.set('t1',t1)}
+  const d=await (await fetch(`/api/wave/${WV.cur.test}/${WV.cur.dir}?${q}`)).json();if(id!==WV.req||d.error)return;
+  WV.plot.setData({names:d.names,units:d.units,t:d.t,lo:d.lo,hi:d.hi,full:d.full,marker:{t:0,label:'trigger'}},keep);
+  $('#wv_info').textContent=`${d.points.toLocaleString()} points per channel over ${plotTime(d.full[1]-d.full[0],d.full[1]-d.full[0])}; `+
+    (d.bucket>1?`shown as min/max over ${d.bucket} points per column (zoom in for every sample).`:'every sample shown.');
+}
+
+refresh();if(active)selectTest(active);
+setInterval(refresh,1000);
+setInterval(()=>{if(setupDlg.open)renderPlan()},1000);
+</script>
+</body>
+</html>

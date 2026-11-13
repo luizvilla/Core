@@ -38,6 +38,7 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
 | `python3` ≥ 3.10 (standard library only) | Writing the record |
 | A PlatformIO build of the USB environment, once | Fetches `control_library` and `single_phase_inverter` into `owntech/lib/USB/` |
 | ST-Link, powered Spin with MCUboot, PlatformIO's OpenOCD: run `tests/l0/timing/preflight.sh` | L0-TIM only ([l0/timing/README.md](l0/timing/README.md)) |
+| `pyvisa`, `pyvisa-py`, `pyusb`, `pyserial` in `.venv`, the MSO54 on USB with its udev rule | L2 bench sessions ([l2/README.md](l2/README.md)) |
 | Pulsim (`pulsim==2.0.0`) and GUI (`pulsimgui==1.1.1`) in `.venv` | L1 integration; see `tests/l1/setup.sh` |
 
 ## Layout
@@ -50,6 +51,7 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
 | [`l0/grid_observer/`](l0/grid_observer/README.md) | L0-GOB: grid observer |
 | [`l0/inverter_following/`](l0/inverter_following/README.md) | L0-GFL: grid-following inverter library |
 | [`l0/timing/`](l0/timing/README.md) | L0-TIM: cycle cost on the Spin (on target, `--target` only; requirements and `preflight.sh` there) |
+| [`l2/`](l2/README.md) | L2 bench app (`app.py`, a local web page): menu keys, console log, scope captures and operator answers per step, judged against the bench sheet (run by hand, not by `run_all.sh`) |
 | [`l1/`](l1/README.md) | Native Core C-Block integration checks; formal L1 cases explicitly BLOCKED where prerequisites remain |
 | `catalogue.json` | Every test, defined once: procedure §6 and the control center are generated from it |
 | `out/` | Generated test records (git-ignored); `out/control-center.html` shows where the validation stands |
@@ -60,13 +62,14 @@ SINGLE_PHASE_INVERTER_DIR=~/code/single_phase_inverter tests/run_all.sh --l0
 2. Write it in the matching folder, one `tc::Criterion` per criterion ID (see [common/README.md](common/README.md)).
 3. Follow the documentation rules in procedure §7.3: README, license header, Doxygen comments, `@test` tag.
 4. A new test folder needs `run.sh` and `README.md`; `run_all.sh` picks it up automatically. Add its object code to `object_code()` in `run_all.sh`.
-5. **Results reach the control center only from a campaign under `tests/out/`**: `tests/run_all.sh`, or a `run.sh` that writes a campaign of its own (as `l0/timing/run.sh --run` does: log, `record.md`, `report.html`, control center). Never send a result you report to another folder (`CORE_TEST_OUT` pointing at a scratch directory): the control center only reads `tests/out/`.
+5. **Results reach the control center only from a campaign under `tests/out/`**: `tests/run_all.sh`, or a `run.sh` that writes a campaign of its own (as `l0/timing/run.sh --run` does: log, `record.md`, `report.html`, control center; `l2/app.py` does the same for a bench session). Never send a result you report to another folder (`CORE_TEST_OUT` pointing at a scratch directory): the control center only reads `tests/out/`.
 6. **Rendering in the review page** (`common/review_report.py`, procedure §8.5). Criteria alone land in *Criteria without a test-case folder*. A test whose result needs its conditions, a snapshot or a figure needs a **test-case folder** in the campaign that the review page recognises, rendered with the four parts (purpose and conditions, snapshot, results, figures):
 
    | Kind | Folder content | Snapshot | Figures |
    |---|---|---|---|
    | L1 scenario | `manifest.json` (+ scenario in `l1/scenarios/`) | model (`l1/plant/snapshot.py`) | `l1/review_plots.json` entry per criterion |
    | On target (L0-TIM) | `target_manifest.json` + its report JSON | target (board, MCU, flash, firmware, probe) | built from the report: overview fitted to the page (`timing_figure_overview`) and detailed view with every segment labelled (`timing_figure`) |
+   | Bench (L2) | `bench_manifest.json` + `captures/<time>_<point>/` scope captures, written by `l2/app.py` or `l2/bench.py` | bench (firmware, operator, scope setup per point) | scope screenshot, measurement table, waveforms (`bench_figures`) |
 
    A new kind of test case gets its own branch in `review_report.py` with the same four parts, and its figure follows the dataviz rules already used there (fixed palette order, legend, hover, a table view).
 

@@ -1,0 +1,7 @@
+# Allow plugdev members (and the active desktop user) to talk to the
+# Tektronix MSO54 (USB 0699:0522), both through libusb/PyUSB (pyvisa-py)
+# and through the Linux usbtmc character device.
+# Install: sudo cp tests/common/udev/99-tektronix-mso54.rules /etc/udev/rules.d/
+#          sudo udevadm control --reload-rules && sudo udevadm trigger
+SUBSYSTEM=="usb", ATTR{idVendor}=="0699", ATTR{idProduct}=="0522", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usbmisc", KERNEL=="usbtmc*", ATTRS{idVendor}=="0699", ATTRS{idProduct}=="0522", MODE="0660", GROUP="plugdev", TAG+="uaccess"

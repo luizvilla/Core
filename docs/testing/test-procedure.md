@@ -34,7 +34,7 @@ This procedure verifies features that **already exist** in the firmware. It does
 | **L0** | One object at a time, or `controlStep` | Fixed values or synthetic signals chosen by the test | None, open loop | `g++` on the host, hardware stand-in headers; **L0-TIM** (timing) on the Spin through an ST-Link, PlatformIO env `TIMING`, run only with `--target` ([ADR 0005](../adr/0005-on-target-timing-tests.md)) |
 | **D** | The controller's arithmetic, re-implemented (library SOGI, PI, PLL), for fast evaluation of ideas at the user's request ([ADR 0004](../adr/0004-averaged-model-for-fast-evaluation.md)) | A scenario chosen by the design test | **Averaged** plant model in Python, closed loop; INFO only, never a verdict | `tests/l1/design/`, filed under the Model tab |
 | **L1** | The **firmware block** (`controlStep` + all controllers) | Operator commands from a scenario timeline | **Plant model** in Pulsim, closed loop | Pulsim C-Block, Python |
-| **L2** | The flashed firmware on the board | Serial menu commands, bench sources | The real converter on the bench | Bench sessions with a written sheet and record ([inverter session](bench/inverter-session.md)) |
+| **L2** | The flashed firmware on the board | Serial menu commands, bench sources | The real converter on the bench | Bench sessions with a written sheet and record ([inverter session](bench/inverter-session.md)); recorded as a campaign by the bench app `tests/l2/app.py` (menu keys, console, scope captures, operator answers) ([tests/l2/README.md](../../tests/l2/README.md)) |
 
 ```mermaid
 flowchart LR

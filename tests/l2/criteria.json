@@ -1,0 +1,287 @@
+{
+ "_doc": "How the L2 bench app (tests/l2/app.py, bench.py) judges each bench test. Titles, purpose and conditions come from tests/catalogue.json; the step text comes from the bench sheet (the catalogue 'source'); limits are copied unchanged from the sheet. A criterion has one or more parts, all of which must pass: 'value' (expression over the scope's own measurements, judged against lo/hi, INFO without them; with 'points' and 'agg' (max, min, maxabs) the worst over several capture points), 'telemetry' (list of conditions on the firmware console over the step window: from Start step, or the first key sent in the step, to Finish step), 'operator' (true: the operator's PASS/FAIL; 'info': text, optional when another part exists). In 'value', NAME(sig) or NAME(sig1,sig2) is the scope measurement of type NAME (as MEASUrement:MEASx:TYPe? returns it) on the channels the session maps those signals to; DELAY_RISE_FALL(a,b) is the scope DELAY from a rising edge of a to the next falling edge of b (any RISE/FALL pair); abs, max, min are plain functions. 'Configure scope' in the app creates the missing ones. A test's 'channels' rewires channels for that step only. A telemetry condition may carry 'after_key' (from the last time that key was sent in the step) and 'before_key' (until the first time after that).",
+ "version": 2,
+ "default_channels": {
+  "_source": "docs/testing/bench/inverter-session.md, Bench setup: CH1 differential probe inverter side, CH2 differential probe grid side, CH3 current probe on the AC line, CH4 relay command (GPIO 22)",
+  "CH1": {"signal": "V_inv", "kind": "ac", "label": "inverter side of the relay"},
+  "CH2": {"signal": "V_grid", "kind": "ac", "label": "grid side of the relay"},
+  "CH3": {"signal": "I_line", "kind": "ac", "label": "AC line current"},
+  "CH4": {"signal": "relay_cmd", "kind": "logic", "label": "relay command GPIO 22"}
+ },
+ "standard_measurements": {
+  "_doc": "Created by 'Configure scope' on every channel of that kind (scope measurement types).",
+  "ac": ["RMS", "FREQUENCY", "MAXIMUM"],
+  "logic": []
+ },
+ "keys": {
+  "_doc": "Firmware menu keys the app can send (src/main.cpp, menu h). confirm: text shown before sending.",
+  "x": {"label": "inverter OFF (relay open)"},
+  "h": {"label": "menu"},
+  "l": {"label": "full telemetry on/off"},
+  "i": {"label": "boost idle"},
+  "o": {"label": "step 0 open loop 230 V"},
+  "c": {"label": "step 1 PWM_SETTLE hold"},
+  "g": {"label": "step 2 connect (relay)", "confirm": "Closes the relay: on step 1b only with the relay power contacts unwired; on step 2 the grid must be wired through the cold bulb."},
+  "G": {"label": "step 2b connect, PLL hold", "confirm": "Closes the relay onto the grid through the bulb."},
+  "n": {"label": "step 3 inject current", "confirm": "Injects current into the grid."},
+  "j": {"label": "inject current +0.01 A"},
+  "k": {"label": "inject current −0.01 A"},
+  "R": {"label": "relay test (dead bench)", "confirm": "Dead bench only: never with mains connected (a closed relay rectifies the mains onto the bus)."},
+  "z": {"label": "protection test (3 A)", "confirm": "Injects an artificial over-current for one period in GRID_CONNECTED."},
+  "r": {"label": "retrieve firmware scope"},
+  "q": {"label": "restart firmware scope"},
+  "f": {"label": "force firmware scope trigger"},
+  "v": {"label": "firmware scope 10 kHz / 2 kHz in CONNECT"},
+  "F": {"label": "feedforward SOGI / measured (OFF or step 1)"}
+ },
+ "tests": {
+  "L2-INV-10": {
+   "points": [],
+   "keys": ["h", "R"],
+   "criteria": [
+    {"id": ".a", "desc": "Relay on a dead bench: open at start-up, closed with R, open again with R", "operator": true, "limit": "open → closed → open"},
+    {"id": ".b", "desc": "Menu h prints the inverter keys; telemetry stage 0, inverter_state 0, relay 00", "limit": "as written",
+     "telemetry": [{"console_has": "MENU microinverter"}, {"field": "st", "final": "0"}, {"field": "inv", "final": "0"}, {"field": "rly", "final": "00"}]},
+    {"id": ".c", "desc": "DC source 400 V, current limit 0.5 A, output off", "operator": true, "limit": "set"},
+    {"id": ".d", "desc": "Bulb in series with the mains feed, breaker reachable", "operator": true, "limit": "yes"}
+   ]
+  },
+  "L2-INV-00": {
+   "points": ["100V", "200V", "300V", "340V", "400V"],
+   "point_help": "DC bus voltage of the capture (sheet sequence: 100 V first, then 200, 300, 340, 400 V)",
+   "keys": ["o", "x"],
+   "criteria": [
+    {"id": ".a", "desc": "Output RMS at 400 V (inverter side)", "point": "400V", "value": "RMS(V_inv)", "unit": "V", "lo": 218, "hi": 242},
+    {"id": ".b", "desc": "Output frequency at 400 V (inverter side)", "point": "400V", "value": "FREQUENCY(V_inv)", "unit": "Hz", "lo": 49.9, "hi": 50.1},
+    {"id": ".c", "desc": "No trip, relay command 0 throughout", "limit": "yes",
+     "telemetry": [{"field": "rly", "all": "00"}, {"field": "flt", "all": "0"}, {"console_lacks": "trip"}]},
+    {"id": ".d", "desc": "THD, DC source current (no-load losses), waveform shape near zero crossings", "operator": "info"},
+    {"id": ".e-100V", "desc": "RMS at 100 V (expected 0.95·VDCBus/√2 = 67.2 V)", "point": "100V", "value": "RMS(V_inv)", "unit": "V"},
+    {"id": ".e-200V", "desc": "RMS at 200 V (expected 134.4 V)", "point": "200V", "value": "RMS(V_inv)", "unit": "V"},
+    {"id": ".e-300V", "desc": "RMS at 300 V (expected 201.5 V)", "point": "300V", "value": "RMS(V_inv)", "unit": "V"},
+    {"id": ".e-340V", "desc": "RMS at 340 V (expected 228.4 V)", "point": "340V", "value": "RMS(V_inv)", "unit": "V"},
+    {"id": ".f", "desc": "At 100 V (first run): 50 Hz, clean sine shape, no trip, relay open, DC source current recorded", "operator": true, "limit": "yes"}
+   ]
+  },
+  "L2-INV-01": {
+   "points": ["main"],
+   "keys": ["c", "x", "r"],
+   "criteria": [
+    {"id": ".a", "desc": "RMS difference, inverter side − grid side, % of the grid side", "value": "100*(RMS(V_inv)-RMS(V_grid))/RMS(V_grid)", "unit": "%", "lo": -3, "hi": 3},
+    {"id": ".b", "desc": "Phase difference, inverter side against grid side (scope PHASE)", "value": "PHASE(V_inv,V_grid)", "unit": "°", "lo": -3, "hi": 3},
+    {"id": ".c", "desc": "Frequency difference inverter − grid side (sheet: equal; no tolerance stated)", "value": "FREQUENCY(V_inv)-FREQUENCY(V_grid)", "unit": "Hz"},
+    {"id": ".d", "desc": "Bulb dark, relay command 0, state 8 held", "limit": "yes", "operator": true,
+     "telemetry": [{"field": "rly", "all": "00"}, {"field": "inv", "holds": "8"}]},
+    {"id": ".e", "desc": "V_q, omega, time from c to state 8", "operator": "info",
+     "telemetry": [{"time_from_key": "c", "field": "inv", "value": "8"}]}
+   ]
+  },
+  "L2-INV-04": {
+   "_doc": "Step 1b, relay power contacts unwired. CH3 reads the contact through 5 V / 1 kΩ: 5 V open, 0 V closed. Closing time is the scope DELAY from the GPIO 22 rise to the first fall of CH3; the bounce (last transition) is read by the operator.",
+   "channels": {"CH3": {"signal": "relay_contact", "kind": "logic", "label": "relay contact, 5 V / 1 kΩ (5 V open, 0 V closed)"}},
+   "points": ["close1", "close2", "close3", "release1", "release2", "release3", "1s", "10s"],
+   "point_help": "close1–3: Arm single shot on CH4 rising, then g; release1–3: Arm single shot on CH4 falling, then x; 1s and 10s: Acquire in state 3, about 1 s and 10 s after the relay closed",
+   "keys": ["c", "g", "x", "z", "r", "q", "v"],
+   "criteria": [
+    {"id": ".a", "desc": "Sequence 8 → 2 → 3 held, relay 10 → 11, no fault (no PWM_UPDATE_FAILED, no connection timeout); the 20 ms states are in the firmware capture (r)", "limit": "yes", "operator": true,
+     "telemetry": [{"field": "inv", "reaches": "3", "before_key": "z"}, {"field": "rly", "reaches": "11", "before_key": "z"}, {"field": "flt", "all": "0", "before_key": "z"}]},
+    {"id": ".b", "desc": "Closing time + bounce, worst of 3: scope DELAY GPIO 22 rise → first contact closing, and (operator) the last bounce within the limit", "value": "1000*DELAY_RISE_FALL(relay_cmd,relay_contact)", "unit": "ms", "lo": 0, "hi": 15, "points": ["close1", "close2", "close3"], "agg": "max", "operator": true},
+    {"id": ".c", "desc": "x: state 5 → 6 → 0, relay 00, no fault; release time GPIO 22 fall → contact open, worst of 3", "value": "1000*DELAY_FALL_RISE(relay_cmd,relay_contact)", "unit": "ms", "lo": 0, "hi": 15, "points": ["release1", "release2", "release3"], "agg": "max", "operator": true},
+    {"id": ".d-rms", "desc": "Inverter side against grid side after 10 s in state 3: RMS difference, % of the grid side", "point": "10s", "value": "100*(RMS(V_inv)-RMS(V_grid))/RMS(V_grid)", "unit": "%", "lo": -3, "hi": 3},
+    {"id": ".d-phase", "desc": "Inverter side against grid side after 10 s in state 3: phase (scope PHASE)", "point": "10s", "value": "PHASE(V_inv,V_grid)", "unit": "°", "lo": -3, "hi": 3},
+    {"id": ".d-1s", "desc": "The RMS difference at about 1 s in state 3 (against 10 s: the drift)", "point": "1s", "value": "100*(RMS(V_inv)-RMS(V_grid))/RMS(V_grid)", "unit": "%"},
+    {"id": ".e", "desc": "The three closing times, bounces and release times; IAC and Id, Iq in state 3", "operator": "info"},
+    {"id": ".f", "desc": "Protection test (z, 4 A for one period in state 3): fault in the same period, bridge stopped, relay command dropped, latched until x (firmware capture)", "limit": "yes", "operator": true,
+     "telemetry": [{"console_has": "inverter bench current trip", "after_key": "z"}, {"field": "inv", "reaches": "7", "after_key": "z"}]}
+   ]
+  },
+  "L2-INV-02": {
+   "points": ["close", "connected", "open"],
+   "point_help": "close: Arm single shot on CH4 rising, then g; connected: Acquire in GRID_CONNECTED; open: Arm single shot on CH4 falling, then x",
+   "keys": ["c", "g", "x", "r", "v"],
+   "criteria": [
+    {"id": ".a", "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip", "point": "close", "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))", "unit": "A", "lo": 0, "hi": 3,
+     "telemetry": [{"console_lacks": "bench current trip"}]},
+    {"id": ".b", "desc": "Closing transient settled within 100 ms (5 periods), on the close capture", "limit": "yes", "operator": true},
+    {"id": ".c", "desc": "Residual line current in GRID_CONNECTED (RMS); bulb dark", "point": "connected", "value": "RMS(I_line)", "unit": "A", "lo": 0, "hi": 0.05, "operator": true},
+    {"id": ".d", "desc": "Opening with x: relay opens only after the current is at zero; no trip", "limit": "yes", "operator": true,
+     "telemetry": [{"field": "rly", "final": "00"}, {"field": "inv", "final": "0"}, {"console_lacks": "bench current trip"}]},
+    {"id": ".e", "desc": "Voltage disturbance at closing (peak, duration), relay bounce visible on CH3", "operator": "info"},
+    {"id": ".f", "desc": "Direction of the current at the contact", "operator": "info"}
+   ]
+  },
+  "L2-INV-07": {
+   "points": ["close", "connected", "open"],
+   "point_help": "As step 2, with G: close = Arm single shot on CH4 rising, then G; connected = Acquire in GRID_CONNECTED; open = Arm single shot on CH4 falling, then x. Optional: v before G for the 10 kHz firmware capture (23 ms from the relay command at 0.1 ms per sample: the contact and state 3 in detail); the default 2 kHz keeps 115 ms at 0.5 ms, state 3 included",
+   "keys": ["c", "v", "G", "x", "r"],
+   "criteria": [
+    {"id": ".a", "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip", "point": "close", "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))", "unit": "A", "lo": 0, "hi": 3,
+     "telemetry": [{"console_lacks": "bench current trip"}]},
+    {"id": ".b", "desc": "Closing transient settled within 100 ms (5 periods), on the close capture", "limit": "yes", "operator": true},
+    {"id": ".c", "desc": "Residual line current in GRID_CONNECTED (RMS); bulb dark", "point": "connected", "value": "RMS(I_line)", "unit": "A", "lo": 0, "hi": 0.05, "operator": true},
+    {"id": ".d", "desc": "Opening with x: relay opens only after the current is at zero; no trip", "limit": "yes", "operator": true,
+     "telemetry": [{"field": "rly", "final": "00"}, {"field": "inv", "final": "0"}, {"console_lacks": "bench current trip"}]},
+    {"id": ".e", "desc": "Voltage disturbance at closing (peak, duration), relay bounce visible on CH3", "operator": "info"},
+    {"id": ".f", "desc": "Direction of the current at the contact", "operator": "info"},
+    {"id": ".g", "desc": "State 3 (GRID_CONNECTED) 20 ms after the relay command, ±2 ms (firmware capture, key r: relay_cmd and inverter state; 0.1 ms per sample at 10 kHz)", "limit": "18 to 22 ms", "operator": true},
+    {"id": ".h", "desc": "Closing peak and settling against step 2 (L2-INV-02)", "operator": "info"}
+   ]
+  },
+  "L2-INV-08": {
+   "_doc": "Step 2b with the feedforward from the PLL pair (F). Same criteria as L2-INV-07, each telemetry part also requiring ff 1; .i compares step 1 with each source.",
+   "points": [
+    "step1-measured",
+    "step1-sogi",
+    "close",
+    "connected",
+    "open"
+   ],
+   "point_help": "step1-measured: Acquire in step 1 (c, state 8) with ff 0; step1-sogi: press F in step 1, wait for ff 1, Acquire; close: Arm single shot on CH4 rising, then G; connected: Acquire in GRID_CONNECTED; open: Arm single shot on CH4 falling, then x. Optional: v before G for the 10 kHz firmware capture",
+   "keys": [
+    "c",
+    "F",
+    "v",
+    "G",
+    "x",
+    "r"
+   ],
+   "criteria": [
+    {
+     "id": ".ff",
+     "desc": "Feedforward source SOGI throughout the connection (telemetry ff 1 from G)",
+     "limit": "ff 1",
+     "telemetry": [
+      {
+       "field": "ff",
+       "all": "1",
+       "after_key": "G"
+      }
+     ]
+    },
+    {
+     "id": ".a",
+     "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip",
+     "point": "close",
+     "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))",
+     "unit": "A",
+     "lo": 0,
+     "hi": 3,
+     "telemetry": [
+      {
+       "console_lacks": "bench current trip"
+      },
+      {
+       "field": "ff",
+       "all": "1",
+       "after_key": "G"
+      }
+     ]
+    },
+    {
+     "id": ".b",
+     "desc": "Closing transient settled within 100 ms (5 periods), on the close capture",
+     "limit": "yes",
+     "operator": true
+    },
+    {
+     "id": ".c",
+     "desc": "Residual line current in GRID_CONNECTED (RMS); bulb dark",
+     "point": "connected",
+     "value": "RMS(I_line)",
+     "unit": "A",
+     "lo": 0,
+     "hi": 0.05,
+     "operator": true
+    },
+    {
+     "id": ".d",
+     "desc": "Opening with x: relay opens only after the current is at zero; no trip",
+     "limit": "yes",
+     "operator": true,
+     "telemetry": [
+      {
+       "field": "rly",
+       "final": "00"
+      },
+      {
+       "field": "inv",
+       "final": "0"
+      },
+      {
+       "console_lacks": "bench current trip"
+      },
+      {
+       "field": "ff",
+       "all": "1",
+       "after_key": "G"
+      }
+     ]
+    },
+    {
+     "id": ".e",
+     "desc": "Voltage disturbance at closing (peak, duration), relay bounce visible on CH3",
+     "operator": "info"
+    },
+    {
+     "id": ".f",
+     "desc": "Direction of the current at the contact",
+     "operator": "info"
+    },
+    {
+     "id": ".g",
+     "desc": "State 3 (GRID_CONNECTED) 20 ms after the relay command, ±2 ms (firmware capture, key r: relay_cmd and inverter state; 0.1 ms per sample at 10 kHz)",
+     "limit": "18 to 22 ms",
+     "operator": true
+    },
+    {
+     "id": ".h",
+     "desc": "Closing peak, residual current and its harmonics against L2-INV-07 (measured feedforward)",
+     "operator": "info"
+    },
+    {
+     "id": ".i-measured-rms",
+     "desc": "Step 1, measured feedforward: RMS difference inverter − grid side, %",
+     "point": "step1-measured",
+     "value": "100*(RMS(V_inv)-RMS(V_grid))/RMS(V_grid)",
+     "unit": "%"
+    },
+    {
+     "id": ".i-measured-phase",
+     "desc": "Step 1, measured feedforward: phase inverter against grid side",
+     "point": "step1-measured",
+     "value": "PHASE(V_inv,V_grid)",
+     "unit": "°"
+    },
+    {
+     "id": ".i-sogi-rms",
+     "desc": "Step 1, SOGI feedforward: RMS difference inverter − grid side, %",
+     "point": "step1-sogi",
+     "value": "100*(RMS(V_inv)-RMS(V_grid))/RMS(V_grid)",
+     "unit": "%"
+    },
+    {
+     "id": ".i-sogi-phase",
+     "desc": "Step 1, SOGI feedforward: phase inverter against grid side",
+     "point": "step1-sogi",
+     "value": "PHASE(V_inv,V_grid)",
+     "unit": "°"
+    }
+   ]
+  },
+  "L2-INV-03": {
+   "points": ["0.02A", "0.05A", "0.1A"],
+   "point_help": "Id_ref of the capture (j/k; the console prints it): 0.02 A first, then 0.05 A and 0.1 A. Acquire in RUN with CH3 and CH2 on screen",
+   "keys": ["j", "k", "n", "g", "x", "r"],
+   "criteria": [
+    {"id": ".a-0.02A", "desc": "Line current amplitude at Id_ref 0.02 A (CH3 RMS·√2; ±5 mA at this step)", "point": "0.02A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.015, "hi": 0.025},
+    {"id": ".a-0.05A", "desc": "Line current amplitude at Id_ref 0.05 A (CH3 RMS·√2; ±10 %)", "point": "0.05A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.045, "hi": 0.055},
+    {"id": ".a-0.1A", "desc": "Line current amplitude at Id_ref 0.1 A (CH3 RMS·√2; ±10 %)", "point": "0.1A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.09, "hi": 0.11},
+    {"id": ".b", "desc": "Current in phase with the grid voltage, worst of the three points (scope PHASE CH3 against CH2; current probe arrow from the inverter to the grid)", "value": "PHASE(I_line,V_grid)", "unit": "°", "lo": -10, "hi": 10, "points": ["0.02A", "0.05A", "0.1A"], "agg": "maxabs"},
+    {"id": ".c", "desc": "Grid-side voltage stays within 207–253 V; no observer trip", "limit": "207 to 253 V",
+     "telemetry": [{"field": "VAC", "range": [207, 253], "after_key": "n"}, {"field": "ok", "all": "1", "after_key": "n"}]},
+    {"id": ".d", "desc": "DC source current rises with Id_ref (power from the bus to the grid)", "limit": "yes", "operator": true},
+    {"id": ".e", "desc": "Current THD, telemetry Id and Iq, P against VAC_rms·I_rms, bulb glow", "operator": "info"}
+   ]
+  }
+ }
+}

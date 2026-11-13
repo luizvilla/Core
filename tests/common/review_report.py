@@ -13,6 +13,10 @@
 ##      On-target test cases (a folder with target_manifest.json, L0-TIM, ADR 0005) have the same
 ##      four parts: purpose; conditions and objectives; target snapshot (board, MCU, flash, firmware,
 ##      probe) in place of the model snapshot; results; figures.
+##      Bench test cases (a folder with bench_manifest.json, L2, tests/l2/bench.py) have the same four
+##      parts: catalogue criteria and conditions; bench snapshot (firmware, operator, scope setup per
+##      capture point) in place of the model snapshot; results; scope screenshots and waveforms, and one
+##      interactive figure per firmware scope dump (key r), decoded from the raw dump, time 0 at the trigger.
 ##   3. Criteria without a test-case folder (L0, block checks, BLOCKED cases).
 ##   4. Criteria whose verdict or measured value changed since the previous campaign.
 ## @return 0; a missing scenario folder or plot library is reported on the page, not fatal.
@@ -292,8 +296,241 @@ def test_cases(out, rows):
                       'target': meta.get('target', []), 'report': folder / meta.get('report', 'timing_report.json'),
                       'figures': meta.get('figures', 'tim01'),
                       'order': 'zz_' + folder.name})
+    for man in sorted(out.glob('*/bench_manifest.json')):
+        folder = man.parent
+        meta = json.loads(man.read_text())
+        cat_t = catalogue_entry(meta['id'])
+        session = json.loads((out / 'bench_session.json').read_text()) if (out / 'bench_session.json').exists() else {}
+        mine = [r for r in rows if r['id'].startswith(meta['id'] + '.')]
+        e = html.escape
+        cond = [('Criteria (catalogue)', e(cat_t.get('criterion', ''))),
+                ('Conditions (catalogue)', e(cat_t.get('conditions', ''))),
+                ('Procedure', e(cat_t.get('source', '')))]
+        if meta.get('started'):
+            cond.append(('Step window', e(f'{meta["started"]} to {meta.get("ended") or "(not finished)"}: telemetry criteria '
+                                         'are judged on the console lines in this window')))
+        for name, d, cap, pt, n_caps in bench_points(folder, meta):
+            cond.append((f'Capture point {name}', e(f'{pt["timestamp"]}: {pt["stats_note"]}'
+                                                   + (f' ({n_caps} captures, this one {"pinned" if pt.get("_pinned") else "the newest"})' if n_caps > 1 else ''))))
+        chans = session.get('channels') or {}
+        if chans:
+            cond.append(('Scope channels', '<br>'.join(e(f'{ch}: {c.get("signal", "")} ({c.get("kind", "")}) {c.get("label", "")}')
+                                                       for ch, c in sorted(chans.items()))))
+        for n in meta.get('notes', []):
+            cond.append((f'Operator note {n["time"]}' + (f' ({n["point"]})' if n.get('point') else ''), e(n['text'])))
+        cases.append({'folder': folder, 'kind': 'bench', 'title': f'{meta["id"]} · {cat_t.get("title", "")}',
+                      'purpose': None, 'rows': mine, 'conditions': cond, 'bench': meta, 'session': session,
+                      'order': 'y_' + folder.name})
     # A criterion judged on several runs (the PV 25/50 ns pair) is listed under each of them.
     return cases
+
+
+def catalogue_entry(test_id):
+    """@brief The catalogue entry of a test, or {} (the page never fails on a catalogue problem)."""
+    try:
+        from catalogue import load
+        return load()['by_id'].get(test_id, {})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def eng(x, unit=''):
+    """@brief Engineering notation (k, m, µ…) with 4 significant digits; '—' for None."""
+    if x is None:
+        return '—'
+    for f, pre in ((1e9, 'G'), (1e6, 'M'), (1e3, 'k'), (1, ''), (1e-3, 'm'), (1e-6, 'µ'), (1e-9, 'n')):
+        if abs(x) >= f:
+            return f'{x / f:.4g} {pre}{unit}'.strip()
+    return f'{x:.4g} {unit}'.strip()
+
+
+def bench_points(f, meta):
+    """@brief (name, folder, capture dict, capture entry, number of captures) per point: the evidence capture
+    (pinned, else the newest), as tests/l2/session.py judges it."""
+    out = []
+    for name, pt in meta['points'].items():
+        caps = [pt] if 'dir' in pt else pt.get('captures', [])
+        if not caps:
+            continue
+        i = pt.get('pinned')
+        ev = dict(caps[i] if i is not None and i < len(caps) else caps[-1], _pinned=i is not None)
+        d = f / ev['dir']
+        cap = json.loads((d / 'capture.json').read_text()) if (d / 'capture.json').exists() else None
+        out.append((name, d, cap, ev, len(caps)))
+    return out
+
+
+def bench_console(out, meta):
+    """@brief Console lines of the step window (console.txt), keys marked; at most 400 lines."""
+    log = out / 'console.txt'
+    if not (log.exists() and meta.get('started')):
+        return ''
+    import datetime as dt
+    t0 = dt.datetime.fromisoformat(meta['started'])
+    t1 = dt.datetime.fromisoformat(meta['ended']) if meta.get('ended') else None
+    lines = []
+    for ln in log.read_text(encoding='utf-8', errors='replace').splitlines():
+        parts = ln.split(' ', 2)
+        try:
+            t = dt.datetime.fromisoformat(parts[0])
+        except (ValueError, IndexError):
+            continue
+        if t >= t0 and (t1 is None or t <= t1) and len(parts) == 3:
+            lines.append(f'{t:%H:%M:%S} ' + (f'» key {parts[2]}' if parts[1] == '>' else parts[2]))
+    if not lines:
+        return ''
+    cut = len(lines) > 400
+    body = html.escape('\n'.join(lines[:200] + ['…'] + lines[-200:] if cut else lines))
+    return (f'<details><summary>Console in the step window ({len(lines)} lines{", middle elided: console.txt has all" if cut else ""})'
+            f'</summary><pre style="max-height:420px;overflow:auto;font-size:12px">{body}</pre></details>')
+
+
+def bench_snapshot(f, meta, session):
+    """@brief Bench snapshot part: firmware and operator, then the scope setup of each capture point."""
+    e = html.escape
+    p = ['<div class="wrap"><table class="kv">']
+    for k, label in (('firmware', 'Firmware on the board'), ('repo_commit', 'Repository at the session start'),
+                     ('operator', 'Operator'), ('started', 'Session started'), ('note', 'Session note')):
+        if session.get(k):
+            p.append(f'<tr><td>{label}</td><td>{e(str(session[k]))}</td></tr>')
+    pts = bench_points(f, meta)
+    idn = next((c['setup']['idn'] for _, _, c, _, _ in pts if c), None)
+    if idn:
+        p.append(f'<tr><td>Oscilloscope</td><td>{e(idn)}</td></tr>')
+    p.append('</table></div>')
+    if pts:
+        p.append('<div class="wrap"><table><tr><th>Point</th><th>Captured</th><th>Acquisition</th><th>Timebase</th>'
+                 '<th>Trigger</th><th>Channels</th></tr>')
+        for name, _, cap, pt, _ in pts:
+            if not cap:
+                p.append(f'<tr><td>{e(name)}</td><td colspan="5">capture.json missing</td></tr>')
+                continue
+            s = cap['setup']
+            h, t, a = s['horizontal'], s['trigger'], s['acquire']
+            chans = '<br>'.join(e(f'{ch}{" " + c["label"] if c.get("label") else ""}: {eng(c["scale_div"], c.get("probe_units") or "V")}/div, '
+                                  f'{c.get("coupling")}, {eng(c.get("bandwidth"), "Hz")}') for ch, c in s['channels'].items())
+            p.append(f'<tr><td>{e(name)}</td><td>{e(pt["timestamp"])}</td><td>{e(str(a.get("mode")))}, {e(pt["stats_note"])}</td>'
+                     f'<td>{eng(h.get("scale_s_div"), "s")}/div, {eng(h.get("sample_rate"), "S/s")}, {h.get("record_length") or 0:.0f} pts</td>'
+                     f'<td>{e(str(t.get("type")))} {e(str(t.get("source")))} {e(str(t.get("slope")))} @ {eng(t.get("level"), "V")}, {e(str(t.get("mode")))}</td>'
+                     f'<td>{chans}</td></tr>')
+        p.append('</table></div>')
+    return '\n'.join(p)
+
+
+def bench_figures(f, meta):
+    """@brief Figures part of a bench case: per point the scope screenshot, its measurement table (the table
+    view) and, when stored, the waveforms (one panel per unit, channels in the fixed palette order)."""
+    e = html.escape
+    p = []
+    pts = bench_points(f, meta)
+    if not pts:
+        p.append('<p class="sub">No oscilloscope capture.</p>')
+    for name, d, cap, pt, n_caps in pts:
+        rel = f'{f.name}/{pt["dir"]}'
+        if (d / 'screen.png').exists():
+            p.append(f'<figure><div><b>Point {e(name)}</b> <span class="sub">{e(pt["timestamp"])}</span></div>'
+                     f'<a href="{e(rel)}/screen.png"><img alt="Oscilloscope screen, {e(meta["id"])} point {e(name)}" src="{e(rel)}/screen.png"></a>'
+                     f'<figcaption>Oscilloscope screen of the evidence capture{" (pinned by the operator)" if pt.get("_pinned") else ""}'
+                     f'{f", one of {n_caps} captures of this point (all in {e(f.name)}/captures/)" if n_caps > 1 else ""} '
+                     f'(click for full size). Statistics: {e(pt["stats_note"])}. '
+                     f'Raw data: <code>{e(rel)}/</code>.</figcaption></figure>')
+        if cap and cap.get('measurements'):
+            stat = pt.get('stats', 'all')
+            p.append(f'<details><summary>Scope measurements at point {e(name)} '
+                     f'({"over the statistics window" if stat == "all" else "last acquisition"})</summary><div class="wrap"><table>'
+                     '<tr><th>Meas</th><th>Type</th><th>Source</th><th>Mean</th><th>Min</th><th>Max</th><th>σ</th><th>N</th></tr>')
+            for m in cap['measurements']:
+                u, r = m.get('unit') or '', m[stat]
+                n = '' if r.get('popula') is None else f'{r["popula"]:.0f}'
+                p.append(f'<tr><td>{e(m["id"])}</td><td>{e(str(m["type"]))}</td><td>{e(str(m["source1"]))}</td>'
+                         f'<td>{eng(r.get("mean"), u)}</td><td>{eng(r.get("minimu"), u)}</td><td>{eng(r.get("maximu"), u)}</td>'
+                         f'<td>{eng(r.get("stddev"), u)}</td><td>{n}</td></tr>')
+            p.append('</table></div></details>')
+        if (d / 'waveforms.npz').exists() and cap:  # stored for checking; verdicts come from the scope's measurements
+            import numpy as np
+            w = np.load(d / 'waveforms.npz')
+            chans = cap['setup']['channels']
+            fig = Figure('ms')
+            by_unit = {}
+            for ch in chans:
+                if f'{ch}_v' in w.files:
+                    by_unit.setdefault(chans[ch].get('probe_units') or 'V', []).append(ch)
+            for unit, chs in by_unit.items():
+                c = fig.chart(unit, 220)
+                for ch in chs:
+                    fig.line(c, ch + (f' {chans[ch]["label"]}' if chans[ch].get('label') else ''),
+                             w[f'{ch}_t'] * 1e3, w[f'{ch}_v'], SERIES[(int(ch[2:]) - 1) % len(SERIES)])
+            fid = re.sub(r'[^A-Za-z0-9_-]', '_', f'{f.name}-{name}-wf')
+            p.append(f'<figure><div><b>Waveforms at point {e(name)}</b></div>' + fig.html(fid, f'{meta["id"]} waveforms, point {name}')
+                     + '<figcaption>Displayed channels as acquired, one panel per unit; CH1 blue, CH2 orange, CH3 green, '
+                     'CH4 yellow.' + (' Long records are reduced to each bucket\'s min and max, so peaks survive.' if fig.reduced else '')
+                     + '</figcaption></figure>')
+    p += bench_firmware_scope(f, meta)
+    p.append(bench_console(f.parent, meta))
+    return '\n'.join(p)
+
+
+# Firmware scope panels (src/main.cpp channel names): one panel per quantity, so each axis stays readable.
+FW_PANELS = [('V', ['VAC_V', 'V_d_V', 'Vd_avg_V']), ('V, quadrature', ['V_q_V', 'Vq_avg_V']), ('A', ['IAC_A', 'ILow1_A']),
+             ('rad/s', ['omega_rad_s', 'omega_avg_rad_s']), ('state', ['relay_cmd', 'Sync', 'inverter_mode']),
+             ('duty', ['bridge_duty']), ('V, DC bus', ['VDCBus_V'])]
+
+
+def bench_firmware_scope(f, meta):
+    """@brief One figure per firmware scope dump of the step (key r): the micro-controller's own record, decoded
+    from the raw dump (oldest sample first), time 0 at the trigger. Rate and trigger sample: as recorded with the
+    dump (the firmware prints them), else from the session console (console.fw_timebase)."""
+    import datetime as dt
+    import numpy as np
+    sys.path.insert(0, str(REPO / 'tests' / 'l2'))
+    from console import fw_timebase, parse_dump, read_log
+    e = html.escape
+    caps = meta.get('firmware_captures') or []
+    if not caps:
+        return []
+    camp = f.parent
+    rx = None
+    out = ['<h4>Firmware scope (key r)</h4>']
+    for n, fc in enumerate(caps):
+        txt, csvp = camp / fc['txt'], camp / fc['csv'] if fc.get('csv') else None
+        got = parse_dump(txt.read_text().splitlines()) if txt.exists() else None
+        if not got and csvp and csvp.exists():
+            rows = list(csv.reader(csvp.open()))
+            got = (rows[0], [[float(x) for x in r] for r in rows[1:] if len(r) == len(rows[0])])
+        link = f'<a href="{e(fc.get("csv") or fc["txt"])}">{e(Path(fc.get("csv") or fc["txt"]).name)}</a>'
+        if not got:
+            out.append(f'<p class="sub">Firmware scope {e(fc["time"][11:])}: dump not readable ({link}).</p>')
+            continue
+        names, rows = got
+        if fc.get('rate_hz') and fc.get('trigger_index'):
+            rate, trig, why = fc['rate_hz'], fc['trigger_index'], fc.get('rate_why', 'recorded with the dump')
+        else:
+            if rx is None:
+                rx = read_log(camp / 'console.txt')[0]
+            rate, trig, why = fw_timebase(rx, dt.datetime.fromisoformat(fc['time']).timestamp())
+        data = np.asarray(rows, float)
+        t = (np.arange(len(data)) - trig) / rate * 1e3
+        fig = Figure('ms')
+        used = set()
+        panels = [(u, [x for x in chs if x in names]) for u, chs in FW_PANELS]
+        panels += [(nm, [nm]) for nm in names if not any(nm in chs for _, chs in FW_PANELS)]
+        for unit, chs in panels:
+            if not chs:
+                continue
+            c = fig.chart(unit, 170 if unit != 'state' else 130)
+            for i, nm in enumerate(chs):
+                fig.line(c, nm, t, data[:, names.index(nm)], SERIES[i % len(SERIES)], 1.6)
+                used.add(nm)
+            c['events'] = [{'t': 0.0, 'label': 'trigger'}]
+        fid = re.sub(r'[^A-Za-z0-9_-]', '_', f'{f.name}-fw-{n}')
+        cap = (f'Firmware scope at {e(fc["time"][11:])}: {len(data)} samples at {rate / 1000:g} kHz '
+               f'({len(data) / rate * 1e3:.1f} ms), time 0 at the trigger (sample {trig}). Rate: {e(why)}. '
+               f'Click a legend entry to hide or show that signal. Raw data: {link}.')
+        body = (f'<figure>' + fig.html(fid, f'{meta["id"]} firmware scope {fc["time"][11:]}') + f'<figcaption>{cap}</figcaption></figure>')
+        last = n == len(caps) - 1
+        out.append(f'<details{" open" if last else ""}><summary><b>Firmware scope {e(fc["time"][11:])}</b>'
+                   f'{" (newest)" if last and len(caps) > 1 else ""}</summary>{body}</details>')
+    return out
 
 
 # L0-TIM-01 figure: each section stacked by its mean; one hue per group in fixed categorical order (dataviz palette,
@@ -973,6 +1210,10 @@ def main(out):
             for k, v in c['target']:
                 p.append(f'<tr><td>{e(k)}</td><td>{e(v)}</td></tr>')
             p.append('</table></div>')
+        elif c.get('kind') == 'bench':
+            p.append('<h3>2 · Bench snapshot</h3><p class="sub">Bench test (level L2): the firmware and the oscilloscope '
+                     'setup of each capture, in place of a model.</p>')
+            p.append(bench_snapshot(f, c['bench'], c['session']))
         else:
             p.append('<h3>2 · Model snapshot</h3>')
             p.append(snapshot_html(f, c['snapshot_error'], c['changes']))
@@ -980,6 +1221,10 @@ def main(out):
         for r in sorted(c['rows'], key=sort_key):
             p.append(f'<tr><td>{e(r["id"])}</td><td>{verdict_badge(r)}</td><td>{e(r["measured"])}</td></tr>')
         p.append('</table>')
+        if c.get('kind') == 'bench':
+            p.append('<h3>4 · Figures</h3>')
+            p.append(bench_figures(f, c['bench']))
+            continue
         if c.get('kind') == 'target':
             # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
