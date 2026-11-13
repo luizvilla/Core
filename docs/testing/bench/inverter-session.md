@@ -51,7 +51,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 - `relay`: two digits, command then feedback (feedback = command held 20 ms).
 - A `sync:` line: the synchronization criterion as the inverter judges it (one-period averages, finding #7): `Vd_avg` 293–358 V, `|Vq_avg|` < 3.25 V, `w_avg` 298.5–329.9 rad/s, `window` 1 once full, `grid_ok` (grid observer verdict) and `trip` (observer trip reason: 0 none, 1 invalid measurement, 2 UV, 3 OV, 4 UF, 5 OF), `fault` (inverter fault reason), `offset` (feedforward gain − 1, always 0 % since ADR 0007). **A tripped observer stays tripped until the board restarts** (finding #2): power-cycle after any trip before retrying a grid step.
 - A `load us:` line: the critical task's longest run (total and per part).
-- `load_us`: the critical task's longest run since the previous line, in µs. Its period is 100 µs: above about 80 µs the serial menu and the telemetry slow down or stop.
+- `load_us`: the critical task's longest run since the previous line, in µs. Its period is 50 µs since [ADR 0006](../../adr/0006-control-rate-20-khz.md) (budget 40 µs): close to the period, the serial menu and the telemetry slow down or stop.
 - `Id`, `Iq` in A peak (dq frame of the grid voltage: Id in phase), `P` in W and `Q` in var from the inverter's measurements.
 
 The DC bus voltage is the 8th telemetry field (`VDCBus`) and the DC source display; it needs no oscilloscope channel.
@@ -100,10 +100,10 @@ Note: the L1 model switches the bridge at 200 kHz, the board at 50 kHz (finding 
 
 ## L2-INV-01 · Step 1: synchronized PWM, relay open (PWM_SETTLE)
 
-**Conditions.** Mains connected through the bulb. DC bus at 400 V. Boost IDLE.
+**Conditions.** Mains connected through the bulb. DC bus at 400 V. Boost IDLE. **Restart the board after step 0** (or after any time the grid side was dead with the board powered): the grid observer trips on the missing grid and stays tripped until a restart (finding #2), and then `inverter_state` stays 1 with `ok 0` (bench 2026-11-13, firmware `9f9db15`).
 
 **Sequence.**
-1. Check `VAC_rms` ≈ 230 V and `inverter_state` 0. The bulb stays dark (relay open).
+1. Check `VAC_rms` ≈ 230 V, `inverter_state` 0 and `grid_ok` (`ok`) 1 after about 1 s. The bulb stays dark (relay open).
 2. Press `c`. After about 1 s (grid qualification) and 0.1 s (synchronization), `inverter_state` goes 1 → 9 (PWM_WAIT, bridge at neutral) → 8 (PWM_SETTLE, waveform linked near a zero crossing). It stays in 8.
 3. Record CH1 (inverter side) and CH2 (grid side) on the same screen, over at least 3 periods: RMS of each, phase difference (cursor at zero crossings, or the scope's phase measurement), difference waveform (CH1 − CH2) if available.
 4. Download the firmware capture (`r`): V_q near 0, Sync at 1, state 9 → 8.
@@ -123,7 +123,7 @@ Note: the L1 model switches the bridge at 200 kHz, the board at 50 kHz (finding 
 
 Step 2 run with nothing behind the relay: the firmware goes through the whole connection sequence and the relay clicks, but its contacts connect nothing. It checks the sequence and measures the relay's real timing before the relay is allowed to connect the inverter to the mains.
 
-**Why the timing matters.** The firmware has no contact feedback: it reports the relay closed 20 ms after the command (`app::relay_contact_ticks` = 200 ticks), and open 20 ms after the command is released. Until it reports the relay closed, the inverter is in GRID_CONNECT: it copies the grid voltage, with no current loop. If the contact really closes earlier, the closing current is set only by the voltage mismatch and the filter (and the bulb). If it closes later, the current loop is already running on an open circuit and can pull the output away from the grid before the contact closes.
+**Why the timing matters.** The firmware has no contact feedback: it reports the relay closed 20 ms after the command (`app::relay_contact_ticks` = 400 ticks at 50 µs), and open 20 ms after the command is released. Until it reports the relay closed, the inverter is in GRID_CONNECT: it copies the grid voltage, with no current loop. If the contact really closes earlier, the closing current is set only by the voltage mismatch and the filter (and the bulb). If it closes later, the current loop is already running on an open circuit and can pull the output away from the grid before the contact closes.
 
 **Conditions.** As step 1: bus at 400 V (never at the 100 V of step 0: with the bus below the grid peak, about 325 V, the grid charges the bus through the bridge diodes whenever the relay is closed and the bridge stopped), mains through the bulb, boost IDLE. Both power terminals of the relay disconnected from the circuit and insulated. The grid-side voltage sensor (VAC) stays on the mains, so the firmware still synchronizes. CH1 stays on the filter output (inverter side).
 

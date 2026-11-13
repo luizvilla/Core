@@ -1188,7 +1188,7 @@
    "tab": "inverter",
    "level": "L2",
    "title": "Step 2: relay closing disturbance, then zero current (GRID_CONNECT → GRID_CONNECTED)",
-   "criterion": ".a closing current peak < 1.5 A, no trip; .b settled within 100 ms; .c residual current < 0.05 A RMS in GRID_CONNECTED; .d opening only at zero current; INFO .e voltage disturbance",
+   "criterion": ".a closing current peak < 3 A (bench trip level since 2026-11-10), no trip; .b settled within 100 ms; .c residual current < 0.05 A RMS in GRID_CONNECTED; .d opening only at zero current; INFO .e voltage disturbance",
    "conditions": "Stage INV_CONNECT (menu g) from PWM_SETTLE: 10 periods, relay, 20 ms contact feedback. Board with a DC source on the bus, mains through a series light bulb, relay on GPIO 22, scope on both sides of the relay",
    "source": "docs/testing/bench/inverter-session.md",
    "status": "planned",
