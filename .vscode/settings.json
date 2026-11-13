@@ -8,5 +8,18 @@
     "docs": false,
     ".github": false
   },
-  "cmake.sourceDirectory": "D:/Git/Core-micro_verter_V2/zephyr"
+  "cmake.sourceDirectory": "D:/Git/Core-micro_verter_V2/zephyr",
+  "liveServer.settings.ignoreFiles": [
+    ".vscode/**",
+    "**/*.scss",
+    "**/*.sass",
+    "**/*.ts",
+    "**/console.txt",
+    "**/*.log",
+    "**/bench_manifest.json",
+    "**/bench_session.json",
+    "**/captures/**",
+    "**/firmware_scope/**",
+    "**/.pio/**"
+  ]
 }
