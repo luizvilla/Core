@@ -288,6 +288,8 @@ struct OperatorCommands {
     bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
     bool voltage_notch_enabled = false; ///< Reject 100 Hz in boost voltage feedback (menu 'N').
     bool current_resonant_enabled = false; ///< Add 100 Hz boost current correction (menu 'K').
+    bool ff_filter = false;          ///< Feedforward DC block and 2ω notch (library setFeedforwardFilter, menu 'D'); applied
+                                     ///< only while the relay is open.
     float32_t current_kp = app::inverter_current_kp;  ///< Current PI Kp (V/A), bench keys + / -; applied live.
     float32_t current_ti = app::inverter_current_ti;  ///< Current PI Ti (s), bench keys > / <; applied live.
     bool sogi_feedforward = false;   ///< Inverter feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha), instead of
@@ -326,6 +328,7 @@ struct ControlState {
     bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
     bool follow_connect_applied = false;        ///< Step 2b settings currently applied to the inverter.
     bool sogi_feedforward_applied = false;      ///< Feedforward source currently applied: SOGI (true) or measured.
+    bool ff_filter_applied = false;             ///< Feedforward filter currently applied.
     float32_t current_kp_applied = app::inverter_current_kp;  ///< Current PI gains currently applied to the inverter.
     float32_t current_ti_applied = app::inverter_current_ti;
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).

@@ -189,6 +189,12 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
         state.inverter.setFeedforwardSource(cmd.sogi_feedforward ? FeedforwardSource::SOGI : FeedforwardSource::MEASURED);
         state.sogi_feedforward_applied = cmd.sogi_feedforward;
     }
+    /* Feedforward filter (menu 'D'): same rule, only with the relay open and not commanded (it settles in about 1 s). */
+    if (cmd.ff_filter != state.ff_filter_applied && !meas.relay_closed && !state.relay_command_latched)
+    {
+        state.inverter.setFeedforwardFilter(cmd.ff_filter);
+        state.ff_filter_applied = cmd.ff_filter;
+    }
     TIMING_PROBE(3);
     out.bridge_duty = state.inverter.calculateDuty(meas.v_ac, meas.i_ac);
     TIMING_PROBE(4);

@@ -814,3 +814,13 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Results (six periods) | VAC 9.52 V at 100 Hz (+53°), DC −3.87 V; bridge output (flat bus) 9.18 V at 100 Hz (+53°), DC −4.00 V; IAC 0.144 A at 100 Hz (+29°), DC +0.038 A; DC bus 0.50 V at 100 Hz. Per period the IAC 100 Hz stays 0.140–0.151 A at 26–33°: a stationary state. Bridge/VAC at 100 Hz: 0.965 at +0.3° (the step 1 bridge gain is 0.976). VAC/IAC at 100 Hz: 66 Ω at +24° |
 | Reading | The measured feedforward copies the node's 100 Hz and DC into the bridge with a gain close to 1; behind about 5 Ω of inverter impedance and 66 Ω of bulb path, an internal 100 Hz (or DC) source is amplified by about 66 / (66·0.035 + 5) ≈ 9×, so about 1 V inside the inverter gives the 9.5 V and 0.14 A observed; the PI gains and the dead time change that source little and the amplification not at all |
 | Proposal | A 100 Hz notch and a DC block on VAC before the feedforward (copy gain about 0 there, amplification about 0.9): predicted about 10× less 100 Hz (≈ 1 V, ≈ 15 mA) and less DC, odd harmonics still copied. Behind a toggle key for a bench A/B |
+
+## 2026-11-13 — Feedforward filter (key D): DC block and 100 Hz notch, fundamental restored
+
+| Field | Value |
+|---|---|
+| Commit | On `apf_quadrature`; single_phase_inverter `0cce694` (branch `feat/feedforward-notch`, from `0caa792`), pinned in `src/app.ini` and `tests/l1/dependencies.lock.json` |
+| Reason | The steady-state dump (21:12) shows the bridge copying the node's 100 Hz and DC through the measured feedforward; Luiz Villa: implement the filter |
+| Behaviour change | Library `setFeedforwardFilter(bool)`, off by default: on the measured feedforward, a first-order DC block (τ 0.2 s) and a notch at twice the period-averaged PLL frequency (input minus a SOGI at 2ω, Kr 50 rad/s, taken one sample late to cancel the SOGI's one-sample lead), then z' = C·z with C = (1 + j·Kr/3ω)(1 − j/ωτ), which restores the fundamental exactly in steady state. App: key `D` toggles it in OFF, step 0 or step 1, applied only with the relay open; telemetry ends with `ffn 0/1`; the bench app records it. Cost when on: one first-order filter, one SOGI and a complex gain per period (only computed when on) |
+| Evidence | L0-GFL-22.b PASS: 5 V DC and 10 V at 100 Hz on VAC leave 0.053 V at 100 Hz and no DC in the feedforward; the fundamental within 0.019° and 0.5 %; 3rd/5th/7th kept. Without the one-sample alignment the residual was 6.3 % at 100 µs (3.2 % at 50 µs). L0-APP-18 PASS. USB builds |
+| Not done | L0-TIM on target (pending: the filter adds work to the control step when on). Bench L2-INV-11 (filter off/on, prediction about 10× less 100 Hz) |
