@@ -102,6 +102,10 @@ static BoostDutyCycles boost_duty;
 static uint16_t leg1_low_deadtime_ns = 100;
 /* Dead time of both inverter bridge legs (LEG1_HIGH, LEG2_HIGH), bench keys w / s (app::nextBridgeDeadtime). */
 static uint16_t bridge_deadtime_ns = app::bridge_deadtime_default_ns;
+/* ADC_2 trigger instant (IAC, ILow1) as a step index of the LEG2_HIGH (PWME) up-count, bench keys [ / ]
+ * (app::nextAdcTriggerIndex): 0 is the HRTIM default (CMP3 = 0, the carrier valley) and is not written at start-up. */
+static constexpr hrtim_tu_number_t adc2_trigger_unit = PWME;  /* LEG2_HIGH, overlay pwme, default-adc ADC_2 */
+static uint8_t adc_trigger_index = 0U;
 
 /* Shared boost output capacitor feeding the DC/AC stage (VDCBus). */
 static float32_t voltage_reference = app::initial_voltage_reference;
@@ -511,6 +515,7 @@ void loop_communication_task()
                "|     press u : voltage reference UP     |\n"
                "|     press d : voltage reference DOWN   |\n"
                "|     press w / s : bridge deadtime +/-20 ns|\n"
+               "|     press [ / ] : IAC ADC instant -/+0.05|\n"
                "|     press r : retrieve scope data      |\n"
                "|     press q : restart scope acquisition|\n"
                "|     press f : force scope trigger now  |\n"
@@ -680,6 +685,14 @@ void loop_communication_task()
         settle_count_test = !settle_count_test;
         printk("step 1 settle counter: %s\n", settle_count_test ? "RUNNING (diagnostic)" : "off (normal)");
         break;
+    case '[':
+    case ']':
+        /* CMP3 only places the ADC_2 trigger: safe to move while switching, with the relay closed too. Written
+         * directly (the PowerAPI clamps to 0.05–0.95, which would hide the default 0). */
+        adc_trigger_index = app::nextAdcTriggerIndex(adc_trigger_index, received_serial_char == ']' ? 1 : -1);
+        spin.pwm.setAdcTriggerInstant(adc2_trigger_unit, app::adc_trigger_step * adc_trigger_index);
+        printk("ADC_2 trigger (IAC, ILow1): %.2f of the LEG2_HIGH up-count\n", (double)(app::adc_trigger_step * adc_trigger_index));
+        break;
     case '+':
     case '-':
         current_kp = app::nextCurrentKp(current_kp, received_serial_char == '+' ? 1 : -1);
@@ -774,7 +787,7 @@ void loop_application_task()
         const dqo_t idq_s = control.inverter.getIdq();
         const uint32_t load_s = critical_max_cycles / cycles_per_us;
         critical_max_cycles = 0U;
-        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f dt %u ffn %u dcl %u vdc %.2f\n",
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f dt %u ffn %u dcl %u vdc %.2f adt %.2f iacm %.3f\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
                (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
@@ -785,7 +798,8 @@ void loop_application_task()
                static_cast<unsigned int>(control.sogi_feedforward_applied),
                (double)control.current_kp_applied, (double)(1000.0F * control.current_ti_applied),
                static_cast<unsigned int>(bridge_deadtime_ns), static_cast<unsigned int>(control.ff_filter_applied),
-               static_cast<unsigned int>(control.dc_loop_applied), (double)control.inverter.getDcCorrection());
+               static_cast<unsigned int>(control.dc_loop_applied), (double)control.inverter.getDcCorrection(),
+               (double)(app::adc_trigger_step * adc_trigger_index), (double)control.i_ac_mean);
         task.suspendBackgroundMs(100);
         return;
     }

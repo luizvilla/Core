@@ -852,3 +852,13 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Results | Loop on: correction −1.5 V at 0.5 s, −4.9 V at 4 s, −5.2 to −5.4 V from 8 s on (stable, τ ≈ 1 s). DC per source, loop off / on: ammeter −10 / −140 mA; scope CH3 in firmware sign minus its 0.03 A offset −12 / −143 mA; **firmware IAC mean +134 / +5 mA**; bridge DC −0.56 / −5.31 V |
 | Reading | The loop is correctly signed and stable and drives the measured DC to the learnt zero, but the firmware IAC carries a bias of about +145 mA while the relay is closed (+6 mA with it open), so it pushes the true DC to −140 mA. Likely cause: IAC is sampled by ADC_2 once per PWM period at a fixed edge (default-edge-trigger EdgeTrigger_up), so the 50 kHz ripple (≈ 0.33 A peak, flowing only with the relay closed) is read at a fixed phase and appears as DC; earlier sessions showed +0.055 A, consistent with an operating-point dependence. The same reading feeds the current PIs and the 3 A trip |
 | Next | Keep B off. Fix the IAC measurement: two samples per PWM period half a period apart (the ripple cancels in their mean), or first a check with the other trigger edge (clean build after the overlay change) against the ammeter |
+
+## 2026-11-13 — IAC sampling instant (keys [ / ]) and the firmware DC reading iacm
+
+| Field | Value |
+|---|---|
+| Commit | On `apf_quadrature`, library unchanged (`67097f2`) |
+| Reason | L2-INV-12: the firmware IAC reads about +145 mA too high while connected. Luiz Villa proposed moving the sampling instant instead of two samples per period. Both are in the API: `PwmHAL::setAdcTriggerInstant` writes CMP3 (the ADC trigger only) at any time; `EdgeTrigger_Both` (two triggers per period) is an overlay setting fixed at timer init. The instant is tried first because it can be swept live |
+| Behaviour change | Keys `[` / `]` step the ADC_2 trigger (IAC and ILow1) by 0.05 of the LEG2_HIGH (PWME, 50 kHz, up-down) up-count within 0–0.95, written with `spin.pwm.setAdcTriggerInstant(PWME, …)` (the PowerAPI clamps to 0.05–0.95 and would hide the default 0). Start-up unchanged: CMP3 = 0, the carrier valley, not written. Telemetry ends with `adt <instant> iacm <A>`, iacm the firmware IAC averaged over 0.5 s in the control step (`ControlState::i_ac_mean`). Bench app: keys, chips adt and iacm, both recorded with every capture; the key input moved to the top of the console. New bench test L2-INV-13 (sweep against the DC ammeter) |
+| Evidence | L0-APP-20.a–b PASS; campaign `tests/out/2026-11-13_b226b97-dirty_221428_ESubJo`: 166 pass, 5 known fail, 0 new. USB builds (flash 76.1 %) |
+| Not done | L0-TIM on target (one more multiply-add in the control step). Bench L2-INV-13 |

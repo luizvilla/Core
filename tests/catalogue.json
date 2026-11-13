@@ -1470,6 +1470,16 @@
    "status_note": "Implemented 2026-11-13"
   },
   {
+   "id": "L0-APP-20",
+   "tab": "app",
+   "level": "L0",
+   "title": "IAC sampling instant from the bench keys ([ / ]) and the slow IAC average (iacm)",
+   "criterion": ".a [ / ] step the ADC_2 trigger instant by 0.05 within [0, 0.95] of the up-count (0 the HRTIM default, clamped at both ends); .b iacm settles on the DC of IAC: 0.1 A under 1 A at 50 Hz reads 0.1 A ± 7 mA after 3 s, time constant 0.5 s (63 % ± 3 % at 0.5 s)",
+   "source": "`app::nextAdcTriggerIndex`, `ControlState::i_ac_mean`; main.cpp keys [ / ], `spin.pwm.setAdcTriggerInstant(PWME)`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 to find the IAC sampling instant that removes the +145 mA bias (L2-INV-12)"
+  },
+  {
    "id": "L0-FAV-01",
    "tab": "app",
    "level": "L0",

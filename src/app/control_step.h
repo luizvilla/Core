@@ -206,6 +206,18 @@ inline constexpr uint16_t nextBridgeDeadtime(uint16_t ns, int dir)
     return static_cast<uint16_t>(v < bridge_deadtime_default_ns ? bridge_deadtime_default_ns
                                  : (v > bridge_deadtime_max_ns ? bridge_deadtime_max_ns : v));
 }
+/** @brief Bench keys [ / ]: ADC_2 trigger instant (IAC, ILow1), as a step index of the LEG2_HIGH carrier's up-count:
+ * instant = index · 0.05 of the period (CMP3), from 0 (the valley, the HRTIM default, used at start-up) to 0.95. */
+inline constexpr float32_t adc_trigger_step = 0.05F;
+inline constexpr uint8_t adc_trigger_index_max = 19U;
+/** @brief Next ADC trigger index after a bench key: ±1 within [0, 19]. */
+inline constexpr uint8_t nextAdcTriggerIndex(uint8_t index, int dir)
+{
+    return dir > 0 ? (index < adc_trigger_index_max ? static_cast<uint8_t>(index + 1U) : adc_trigger_index_max)
+                   : (index > 0U ? static_cast<uint8_t>(index - 1U) : 0U);
+}
+/** @brief Time constant of the slow IAC average (telemetry iacm): the firmware's DC reading of the line current. */
+inline constexpr float32_t i_ac_mean_tau = 0.5F;
 /** @brief Next Ti after a bench key (> / <): ±1 ms within [1, 100] ms. */
 inline constexpr float32_t nextCurrentTi(float32_t ti, int dir)
 {
@@ -333,6 +345,7 @@ struct ControlState {
     bool dc_loop_applied = false;               ///< DC current loop currently applied.
     float32_t current_kp_applied = app::inverter_current_kp;  ///< Current PI gains currently applied to the inverter.
     float32_t current_ti_applied = app::inverter_current_ti;
+    float32_t i_ac_mean = 0.0F;                 ///< Slow average of IAC (time constant app::i_ac_mean_tau), A.
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
     Pid bus_pid;                                ///< DC bus voltage loop (stage INV_BUS_LOOP), d-axis current out.
     float32_t bus_current_ref = 0.0F;           ///< Bus loop output, A peak (held between its runs; 0 outside RUN).

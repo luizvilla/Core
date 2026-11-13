@@ -72,6 +72,8 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
 
     if (state.grid_voltage_age_ticks < app::grid_voltage_stale_ticks) ++state.grid_voltage_age_ticks;
     if (meas.v_ac_updated) state.grid_voltage_age_ticks = 0U;
+    state.i_ac_mean += (static_cast<float32_t>(app::control_task_period) * 1e-6F / app::i_ac_mean_tau) *
+                       (meas.i_ac - state.i_ac_mean);
 
     state.boost.enableVoltageNotch(cmd.voltage_notch_enabled);
     state.boost.enableCurrentResonant(cmd.current_resonant_enabled);

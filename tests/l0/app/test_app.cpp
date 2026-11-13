@@ -943,6 +943,40 @@ int main() {
         c.check("on once the relay is open", !relay.closed && state.inverter.getDcCurrentLoop());
     }
 
+    // ---------------------------------------------------------------- L0-APP-20 (IAC sampling instant, keys [ / ]; iacm)
+    {
+        /** @test L0-APP-20.a: The bench keys step the ADC_2 trigger index by 1 within [0, 19] (instant 0 to 0.95 of the up-count, 0.05 steps) */
+        tc::Criterion c("L0-APP-20.a", "Keys [ / ] step the ADC_2 trigger instant by 0.05 within [0, 0.95] of the up-count");
+        c.near("] from 0", app::nextAdcTriggerIndex(0, 1), 1.0, 0.0);
+        c.near("[ from 0 stays at 0", app::nextAdcTriggerIndex(0, -1), 0.0, 0.0);
+        uint8_t k_idx = 0;
+        for (int k = 0; k < 10; ++k) k_idx = app::nextAdcTriggerIndex(k_idx, 1);
+        c.near("10 presses: 0.50", app::adc_trigger_step * k_idx, 0.50, 1e-6);
+        for (int k = 0; k < 50; ++k) k_idx = app::nextAdcTriggerIndex(k_idx, 1);
+        c.near("clamped at 0.95", app::adc_trigger_step * k_idx, 0.95, 1e-6);
+        for (int k = 0; k < 50; ++k) k_idx = app::nextAdcTriggerIndex(k_idx, -1);
+        c.near("clamped at 0", k_idx, 0.0, 0.0);
+    }
+    {
+        /** @test L0-APP-20.b: The slow IAC average (iacm) settles on the DC of the line current: 0.1 A DC under 1 A at 50 Hz reads 0.1 A ± 7 mA after 3 s (the 50 Hz leaves 1 A/(2π·50·0.5 s) = 6.4 mA), and its step response has the 0.5 s time constant (63 % ± 3 % at 0.5 s) */
+        tc::Criterion c("L0-APP-20.b", "iacm reads the DC of IAC (0.1 A under 1 A at 50 Hz, ±7 mA after 3 s: 6.4 mA of 50 Hz left), time constant 0.5 s");
+        ControlState state; OperatorCommands cmd;
+        c.check("controlInit", controlInit(state) == 0);
+        Grid grid;
+        auto run = [&](int ticks, float dc, float ac) {
+            for (int k = 0; k < ticks; ++k) {
+                Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true;
+                m.i_ac = dc + ac * std::sin(2.0F * 3.14159265F * 50.0F * k * app::control_task_period * 1e-6F);
+                const ControlOutputs out = controlStep(state, m, cmd);
+                state.bridge_pwm_applied = out.bridge_enable; grid.advance();
+            }
+        };
+        run(ticks_per_s / 2, 0.1F, 0.0F);
+        c.near("63 % of 0.1 A at 0.5 s", state.i_ac_mean, 0.0632, 0.003);
+        run(5 * ticks_per_s / 2, 0.1F, 1.0F);
+        c.near("0.1 A under 1 A at 50 Hz after 3 s", state.i_ac_mean, 0.1, 0.007);
+    }
+
     // ---------------------------------------------------------------- L0-APP-12
     {
         /** @test L0-APP-12.a: Step 2b: measured feedforward in PWM_SETTLE (ADR 0007, no VAC copy), PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */
