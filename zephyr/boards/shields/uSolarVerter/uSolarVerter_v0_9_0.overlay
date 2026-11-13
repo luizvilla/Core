@@ -66,7 +66,7 @@
             pwm-pin-num = <10 11>;
             default-adc = "ADC_2";
             default-adc-decim = <1>;
-            default-edge-trigger = "EdgeTrigger_up";
+            default-edge-trigger = "EdgeTrigger_Both"; /* ADC_2 (IAC, ILow1) on CMP3 up and down: two samples per period (ADR 0008) */
             default-dead-time = <100 100>;
             default-modulation = "UpDwn";
             default-phase-shift = <0>;

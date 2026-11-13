@@ -945,8 +945,9 @@ int main() {
 
     // ---------------------------------------------------------------- L0-APP-20 (IAC sampling instant, keys [ / ]; iacm)
     {
-        /** @test L0-APP-20.a: The bench keys step the ADC_2 trigger index by 1 within [0, 19] (instant 0 to 0.95 of the up-count, 0.05 steps) */
-        tc::Criterion c("L0-APP-20.a", "Keys [ / ] step the ADC_2 trigger instant by 0.05 within [0, 0.95] of the up-count");
+        /** @test L0-APP-20.a: The ADC_2 trigger starts at 0.5 of the up-count (ADR 0008); the bench keys step its index by 1 within [0, 19] (instant 0 to 0.95, 0.05 steps) */
+        tc::Criterion c("L0-APP-20.a", "ADC_2 trigger at 0.5 at start-up; keys [ / ] step it by 0.05 within [0, 0.95] of the up-count");
+        c.near("start-up instant 0.50 (two samples T/2 apart)", app::adc_trigger_step * app::adc_trigger_index_default, 0.50, 1e-6);
         c.near("] from 0", app::nextAdcTriggerIndex(0, 1), 1.0, 0.0);
         c.near("[ from 0 stays at 0", app::nextAdcTriggerIndex(0, -1), 0.0, 0.0);
         uint8_t k_idx = 0;

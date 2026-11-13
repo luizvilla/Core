@@ -207,9 +207,12 @@ inline constexpr uint16_t nextBridgeDeadtime(uint16_t ns, int dir)
                                  : (v > bridge_deadtime_max_ns ? bridge_deadtime_max_ns : v));
 }
 /** @brief Bench keys [ / ]: ADC_2 trigger instant (IAC, ILow1), as a step index of the LEG2_HIGH carrier's up-count:
- * instant = index · 0.05 of the period (CMP3), from 0 (the valley, the HRTIM default, used at start-up) to 0.95. */
+ * CMP3 = index · 0.05 of the period, 0 to 0.95. ADC_2 triggers on CMP3 while counting up and down (ADR 0008), so the
+ * two samples fall at index·0.05·T/2 and T − index·0.05·T/2: at the start-up 0.5 they are T/2 apart, which cancels the
+ * switching ripple (50 kHz and its odd harmonics) whatever its phase; other instants are for checking only. */
 inline constexpr float32_t adc_trigger_step = 0.05F;
 inline constexpr uint8_t adc_trigger_index_max = 19U;
+inline constexpr uint8_t adc_trigger_index_default = 10U;  ///< 0.5: the two samples a half period apart
 /** @brief Next ADC trigger index after a bench key: ±1 within [0, 19]. */
 inline constexpr uint8_t nextAdcTriggerIndex(uint8_t index, int dir)
 {

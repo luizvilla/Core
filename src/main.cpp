@@ -103,9 +103,10 @@ static uint16_t leg1_low_deadtime_ns = 100;
 /* Dead time of both inverter bridge legs (LEG1_HIGH, LEG2_HIGH), bench keys w / s (app::nextBridgeDeadtime). */
 static uint16_t bridge_deadtime_ns = app::bridge_deadtime_default_ns;
 /* ADC_2 trigger instant (IAC, ILow1) as a step index of the LEG2_HIGH (PWME) up-count, bench keys [ / ]
- * (app::nextAdcTriggerIndex): 0 is the HRTIM default (CMP3 = 0, the carrier valley) and is not written at start-up. */
+ * (app::nextAdcTriggerIndex). The overlay triggers ADC_2 on CMP3 counting up and down; at 0.5, set at start-up, the
+ * two samples per switching period are half a period apart and the ripple cancels in their mean (ADR 0008). */
 static constexpr hrtim_tu_number_t adc2_trigger_unit = PWME;  /* LEG2_HIGH, overlay pwme, default-adc ADC_2 */
-static uint8_t adc_trigger_index = 0U;
+static uint8_t adc_trigger_index = app::adc_trigger_index_default;
 
 /* Shared boost output capacitor feeding the DC/AC stage (VDCBus). */
 static float32_t voltage_reference = app::initial_voltage_reference;
@@ -359,6 +360,8 @@ void setup_routine()
     /* Bridge dead time as reported in the telemetry (the overlay's 100 ns; keys w / s change it with the bridge off). */
     shield.power.setDeadTime(LEG1_HIGH, bridge_deadtime_ns, bridge_deadtime_ns);
     shield.power.setDeadTime(LEG2_HIGH, bridge_deadtime_ns, bridge_deadtime_ns);
+    /* ADC_2 at 0.5 of the up-count, up and down (overlay EdgeTrigger_Both): two IAC samples T/2 apart (ADR 0008). */
+    spin.pwm.setAdcTriggerInstant(adc2_trigger_unit, app::adc_trigger_step * adc_trigger_index);
     shield.power.setDutyCycleMin(LEG1_LOW, app::duty_cycle_min);
     shield.power.setDutyCycleMin(LEG1_HIGH, app::duty_cycle_min);
     shield.power.setDutyCycleMin(LEG2_HIGH, app::duty_cycle_min);
@@ -688,7 +691,7 @@ void loop_communication_task()
     case '[':
     case ']':
         /* CMP3 only places the ADC_2 trigger: safe to move while switching, with the relay closed too. Written
-         * directly (the PowerAPI clamps to 0.05–0.95, which would hide the default 0). */
+         * directly (the PowerAPI clamps to 0.05–0.95). Away from 0.5 the two samples are no longer T/2 apart. */
         adc_trigger_index = app::nextAdcTriggerIndex(adc_trigger_index, received_serial_char == ']' ? 1 : -1);
         spin.pwm.setAdcTriggerInstant(adc2_trigger_unit, app::adc_trigger_step * adc_trigger_index);
         printk("ADC_2 trigger (IAC, ILow1): %.2f of the LEG2_HIGH up-count\n", (double)(app::adc_trigger_step * adc_trigger_index));
@@ -955,7 +958,8 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
 #endif
     /*----- Read sensors, holding the last valid value -----
      * Newest sample of each channel read from the ADC's DMA buffer (timing-optimization.md, change 6); VAC and IAC
-     * are the average of the samples written since the previous period (2 or 3, ADR 0007). */
+     * are the average of the samples written since the previous period (ADR 0007): VAC 2 or 3, IAC 4 to 6, two per
+     * switching period half a period apart (ADR 0008). */
     meas_data = shield.sensors.getLatestValueFast(ILow1);
     if (meas_data != NO_VALUE) i_low_1_value = meas_data;
 

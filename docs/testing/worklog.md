@@ -862,3 +862,13 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Keys `[` / `]` step the ADC_2 trigger (IAC and ILow1) by 0.05 of the LEG2_HIGH (PWME, 50 kHz, up-down) up-count within 0–0.95, written with `spin.pwm.setAdcTriggerInstant(PWME, …)` (the PowerAPI clamps to 0.05–0.95 and would hide the default 0). Start-up unchanged: CMP3 = 0, the carrier valley, not written. Telemetry ends with `adt <instant> iacm <A>`, iacm the firmware IAC averaged over 0.5 s in the control step (`ControlState::i_ac_mean`). Bench app: keys, chips adt and iacm, both recorded with every capture; the key input moved to the top of the console. New bench test L2-INV-13 (sweep against the DC ammeter) |
 | Evidence | L0-APP-20.a–b PASS; campaign `tests/out/2026-11-13_b226b97-dirty_221428_ESubJo`: 166 pass, 5 known fail, 0 new. USB builds (flash 76.1 %) |
 | Not done | L0-TIM on target (one more multiply-add in the control step). Bench L2-INV-13 |
+
+## 2026-11-13 — IAC sampled twice per switching period (ADR 0008)
+
+| Field | Value |
+|---|---|
+| Commit | On `apf_quadrature`, library unchanged (`67097f2`) |
+| Reason | L2-INV-13 first run (`tests/out/2026-11-13_c862597_222057_bench`, one sample per period at `adt` 0.00): `iacm` +137 mA, true DC about −11 mA (CH3 mean 41.5 mA minus the probe's ~30 mA, firmware sign). CH3 spectrum: 344 mA at 50 kHz, 52 at 100 kHz, 75 at 150 kHz, even harmonics above 100 kHz under 3 mA. Replaying the record at the switching frequency (49 998.8 Hz on the scope clock) from every phase: one sample per period reads −544 to +534 mA of error, two samples T/2 apart −8 to +11 mA, four T/4 apart −5 to +7 mA. A single instant would need ±120 ns and would move with the grid impedance; Luiz Villa chose two samples |
+| Behaviour change | Overlay LEG2_HIGH `default-edge-trigger = "EdgeTrigger_Both"` (ADROM 00: CMP3 triggers ADC_2 counting up and down, RM0440 §27.5); CMP3 set to 0.5 at start-up (`app::adc_trigger_index_default`), so the samples fall at T/4 and 3T/4. Keys `[` / `]` kept for checking. IAC average per control period now 4–6 samples; ADC_2 DMA buffer 21 sequences (210 µs). L2-INV-13 redefined: 0.50 against the ammeter, 0.25 / 0.75 for contrast |
+| Evidence | Clean USB build (flash 76.1 %), `zephyr.dts` shows `EdgeTrigger_Both` on LEG2_HIGH; campaign `tests/out/2026-11-13_c862597-dirty_223245_7p08mZ`: L0-APP-20.a (start-up 0.5) and .b PASS, 166 pass, 5 known fail, 0 new |
+| Not done | L0-TIM on target. Bench L2-INV-13 with the new firmware, then L2-INV-12 with `B` on. Boost and bridge counter alignment (ILow1 at boost midpoints) not checked on the scope |
