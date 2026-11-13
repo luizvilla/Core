@@ -36,7 +36,9 @@
   "+": {"label": "current PI Kp +0.1 V/A"},
   "-": {"label": "current PI Kp −0.1 V/A"},
   ">": {"label": "current PI Ti +1 ms"},
-  "<": {"label": "current PI Ti −1 ms"}
+  "<": {"label": "current PI Ti −1 ms"},
+  "w": {"label": "bridge dead time +20 ns (inverter OFF)"},
+  "s": {"label": "bridge dead time −20 ns, not below 100 ns (inverter OFF)"}
  },
  "tests": {
   "L2-INV-10": {
@@ -270,6 +272,17 @@
      "value": "PHASE(V_inv,V_grid)",
      "unit": "°"
     }
+   ]
+  },
+  "L2-INV-09": {
+   "_doc": "Dead time and the 100 Hz line current (hypothesis 2026-11-13: dead time with a small DC line current makes the even harmonic). The 100 Hz amplitude per capture comes from the stored waveforms (CH3), analysed offline; the telemetry dt and the capture settings record the dead time.",
+   "points": ["dt100", "dt160", "dt220", "dt300"],
+   "point_help": "For each point: x, set the dead time with w / s (telemetry dt), c, G, wait 2 s in GRID_CONNECTED, tick waveforms, Acquire the point (CH3 at 1 A/div, 10 ms/div), then x. Same Kp, Ti and ff 0 for all points",
+   "keys": ["x", "w", "s", "c", "G", "r"],
+   "criteria": [
+    {"id": ".a", "desc": "Telemetry dt matches each point (100, 160, 220, 300 ns) when it was captured", "operator": true, "limit": "yes"},
+    {"id": ".b", "desc": "100 Hz line current at each dead time (CH3 waveform, offline), with the DC line current (telemetry IAC mean)", "operator": "info"},
+    {"id": ".c", "desc": "Does the 100 Hz scale with the dead time? (confirms or rejects the hypothesis)", "operator": "info"}
    ]
   },
   "L2-INV-03": {

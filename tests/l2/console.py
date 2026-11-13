@@ -21,7 +21,7 @@ from pathlib import Path
 TELEMETRY = re.compile(
     r'st (?P<st>\d+) inv (?P<inv>\d+) rly (?P<rly>\d\d) VAC\s*(?P<VAC>-?[\d.]+) IAC\s*(?P<IAC>-?[\d.]+) '
     r'Vbus\s*(?P<Vbus>-?[\d.]+) Id\s*(?P<Id>-?[\d.]+) Iq\s*(?P<Iq>-?[\d.]+) ok (?P<ok>\d+) flt (?P<flt>\d+) '
-    r'off\s*(?P<off>-?[\d.]+)% load (?P<load>\d+)(?: lost (?P<lost>\d+))?(?: ff (?P<ff>\d))?(?: kp (?P<kp>[\d.]+) ti (?P<ti>[\d.]+))?')
+    r'off\s*(?P<off>-?[\d.]+)% load (?P<load>\d+)(?: lost (?P<lost>\d+))?(?: ff (?P<ff>\d))?(?: kp (?P<kp>[\d.]+) ti (?P<ti>[\d.]+))?(?: dt (?P<dt>\d+))?')
 # Names from docs/testing/bench/inverter-session.md, Telemetry.
 # Stage 5 (VAC_FOLLOW, step 1d) was removed by ADR 0007; 6 and 7 kept their numbers.
 STAGES = {'0': 'OFF', '1': 'SETTLE', '2': 'OPEN_LOOP', '3': 'CONNECT', '4': 'INJECT',

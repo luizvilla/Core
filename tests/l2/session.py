@@ -535,6 +535,7 @@ def firmware_settings(tel: dict | None) -> dict:
     if tel.get('ff') is not None: out['ff'] = int(tel['ff'])
     if tel.get('kp') is not None: out['kp'] = float(tel['kp'])
     if tel.get('ti') is not None: out['ti_ms'] = float(tel['ti'])
+    if tel.get('dt') is not None: out['dt_ns'] = int(tel['dt'])
     return out
 
 
@@ -544,6 +545,7 @@ def settings_text(s: dict) -> str:
     if 'kp' in s: parts.append(f'Kp {s["kp"]:g} V/A')
     if 'ti_ms' in s: parts.append(f'Ti {s["ti_ms"]:g} ms')
     if 'ff' in s: parts.append('feedforward ' + ('SOGI' if s['ff'] else 'measured'))
+    if 'dt_ns' in s: parts.append(f'dead time {s["dt_ns"]} ns')
     return ', '.join(parts)
 
 

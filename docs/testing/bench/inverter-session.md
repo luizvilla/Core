@@ -234,6 +234,20 @@ Why 15 ms and not 60 ms of blanking: in D-GFL-04 a blank ending 5 ms after the c
 | .h INFO: closing peak, residual current and its harmonics against L2-INV-07 | record | the effect of the feedforward source | |
 | .i INFO: step 1 with each source, inverter side against grid side (RMS %, PHASE) | record | the SOGI feedforward drops the harmonics from the inverter voltage | |
 
+## L2-INV-09 · Dead time and the 100 Hz line current
+
+**Why.** Connected with the measured feedforward, the line current keeps about 0.26 A at 100 Hz while its 50 Hz part is regulated to about 0.01 A (2026-11-13, 20:15). The 100 Hz is absent from the grid (0.28 V with the relay open) and from the inverter side while no current flows (0.79 V); it appears only with current. Hypothesis: the bridge dead time, made asymmetric by a small DC line current (IAC mean +0.055 A connected; averaged model: dead time with a +3 V bridge offset gives +0.057 A of DC and a 100 Hz current, D-GFL-09 model). If so, the 100 Hz grows with the dead time.
+
+**Firmware.** Keys `w` / `s` set the dead time of both bridge legs, 100–400 ns in 20 ns steps, only with the inverter OFF; the telemetry reports `dt`, and the bench app stores it with each capture.
+
+**Sequence.** Same Kp, Ti and `ff 0` throughout. For each dead time, 100, 160, 220 and 300 ns:
+1. `x`; press `w` / `s` until the telemetry shows the dead time.
+2. `c`, wait for state 8; `G`; wait 2 s in GRID_CONNECTED.
+3. Tick *waveforms*, Acquire the point (CH3 at 1 A/div, 10 ms/div), note the telemetry IAC.
+4. `x`. Restart the board if the grid observer tripped.
+
+**Acceptance.** INFO: the 100 Hz amplitude of the line current per dead time (from the CH3 waveforms), and the DC line current. A 100 Hz that grows with the dead time confirms the hypothesis; a constant one rejects it.
+
 ## L2-INV-03 · Step 3: inject a fixed current (RUN)
 
 **Conditions.** As step 2, in GRID_CONNECTED (state 3). The bulb makes a weak grid: the injected current raises the grid-side voltage by I·R_bulb (cold about 40 Ω, hot about 500 Ω). The firmware caps the reference at 0.1 A peak (`app::inject_current_max`), which keeps the rise below the observer's 253 V limit. Higher currents need the bulb bypassed and a new cap: a separate decision.
@@ -266,6 +280,7 @@ Fill one row per step; keep the log and the scope files next to it under `docs/t
 | 2026-11-09/10 | L2-INV-04 | `b487ba5` (fix), `f352225`/`acf1ad6` (z) | 400–404 V | .a pass, .b 9.7 ms (1 of 3), .c .d to do, .e partial, .f pass | `2026-11-09_inverter/L2-INV-04_*.png`, `src/Data_records/2026-11-09_21-4*` | findings #9 (relay pin), #10 (fault 12), #11 (scope dump) |
 | | L2-INV-02 | | | | | |
 | | L2-INV-08 | | | | | |
+| | L2-INV-09 | | | | | |
 | | L2-INV-03 | | | | | |
 
 ## Simulation counterpart

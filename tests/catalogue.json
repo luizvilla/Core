@@ -1208,6 +1208,18 @@
    "hardware": "bench"
   },
   {
+   "id": "L2-INV-09",
+   "tab": "inverter",
+   "level": "L2",
+   "title": "Dead time and the 100 Hz line current",
+   "criterion": ".a telemetry dt matches each capture point (100, 160, 220, 300 ns); INFO .b 100 Hz line current and DC line current per dead time (CH3 waveforms); .c whether the 100 Hz scales with the dead time",
+   "conditions": "Step 2b connected with the measured feedforward (ff 0), same Kp and Ti for every point; dead time set with w / s with the inverter OFF; mains through the bulb, bus 400 V",
+   "source": "docs/testing/bench/inverter-session.md; keys w / s",
+   "status": "planned",
+   "status_note": "Defined 2026-11-13 with Luiz Villa: the 100 Hz current (0.26 A) appears only with current flowing; hypothesis dead time with a small DC line current",
+   "hardware": "bench"
+  },
+  {
    "id": "L2-INV-02",
    "tab": "inverter",
    "level": "L2",

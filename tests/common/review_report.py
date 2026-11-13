@@ -312,7 +312,8 @@ def test_cases(out, rows):
         for name, d, cap, pt, n_caps in bench_points(folder, meta):
             st = pt.get('settings') or {}
             st_txt = ', '.join(([f'Kp {st["kp"]:g} V/A'] if 'kp' in st else []) + ([f'Ti {st["ti_ms"]:g} ms'] if 'ti_ms' in st else [])
-                               + (['feedforward ' + ('SOGI' if st['ff'] else 'measured')] if 'ff' in st else []))
+                               + (['feedforward ' + ('SOGI' if st['ff'] else 'measured')] if 'ff' in st else [])
+                               + ([f'dead time {st["dt_ns"]} ns'] if 'dt_ns' in st else []))
             cond.append((f'Capture point {name}', e(f'{pt["timestamp"]}: {pt["stats_note"]}' + (f'; firmware {st_txt}' if st_txt else '')
                                                    + (f' ({n_caps} captures, this one {"pinned" if pt.get("_pinned") else "the newest"})' if n_caps > 1 else ''))))
         chans = session.get('channels') or {}
@@ -528,7 +529,8 @@ def bench_firmware_scope(f, meta):
         fid = re.sub(r'[^A-Za-z0-9_-]', '_', f'{f.name}-fw-{n}')
         st = fc.get('settings') or {}
         st_txt = ', '.join(([f'Kp {st["kp"]:g} V/A'] if 'kp' in st else []) + ([f'Ti {st["ti_ms"]:g} ms'] if 'ti_ms' in st else [])
-                           + (['feedforward ' + ('SOGI' if st['ff'] else 'measured')] if 'ff' in st else []))
+                           + (['feedforward ' + ('SOGI' if st['ff'] else 'measured')] if 'ff' in st else [])
+                               + ([f'dead time {st["dt_ns"]} ns'] if 'dt_ns' in st else []))
         cap = (f'Firmware scope at {e(fc["time"][11:])}' + (f' (firmware {e(st_txt)})' if st_txt else '') + f': {len(data)} samples at {rate / 1000:g} kHz '
                f'({len(data) / rate * 1e3:.1f} ms), time 0 at the trigger (sample {trig}). Rate: {e(why)}. '
                f'Click a legend entry to hide or show that signal. Raw data: {link}.')
