@@ -1259,8 +1259,8 @@
    "criterion": ".a DC ammeter lower with the loop on than off; .c connection without trip or fault; INFO .b ammeter readings and the correction vdc",
    "conditions": "Step 2b connected with the feedforward filter on (D), DC ammeter in series with the line; the sensor offset learnt in OFF for 3 s before B",
    "source": "docs/testing/bench/inverter-session.md; key B; library 67097f2",
-   "status": "planned",
-   "status_note": "Defined 2026-11-13: the step before reducing the series impedance",
+   "status": "implemented",
+   "status_note": "Run 2026-11-13 21:52–21:53 (filter on): DC ammeter −10 mA with the loop off, −140 mA with it on (note by Luiz Villa); scope agrees (−12 / −143 mA). The loop is stable (correction converges to −5.3 V in about 1 s) and drives the firmware IAC mean from +134 to +5 mA (the learnt zero +6 mA): the firmware IAC reads about +145 mA too high while connected, likely the 50 kHz ripple sampled at a fixed PWM phase (no ripple with the relay open). .a FAIL; keep B off until the IAC measurement is fixed",
    "hardware": "bench"
   },
   {

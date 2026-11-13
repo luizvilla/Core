@@ -843,3 +843,12 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Behaviour change | Library `setDcCurrentLoop(bool, ki = 100 V/(A·s), limit = 10 V)`, off by default: while connected (GRID_CONNECT with the current loop, GRID_CONNECTED, RUN, STOPPING) v_dc −= Ki·(i − i_zero)·Ts, clamped, added to the output voltage before the duty; i_zero, the current-sensor offset, is learnt (τ 0.5 s) while the relay is open (OFF, VOLTAGE_SYNC, PWM_WAIT, PWM_SETTLE). App: key `B` (relay open only); telemetry ends with `dcl 0/1 vdc <V>`; the bench app records both. Expected settling behind the bulb about R/Ki ≈ 0.3 s; on a stiff grid ωn ≈ 280 rad/s, ζ ≈ 0.7 |
 | Evidence | L0-GFL-23.a–d PASS (offset learnt within 0.06 mA; slope −10 V/s for 0.1 A true DC, clamp, reset; ±0.05 V with zero true current); L0-APP-19 PASS; USB builds. Not checked in the averaged model (only on request) |
 | Not done | L0-TIM on target (pending). Bench L2-INV-12 with the DC ammeter |
+
+## 2026-11-13 — L2-INV-12: the DC loop works, but the firmware IAC reads +145 mA too high while connected
+
+| Field | Value |
+|---|---|
+| Session | `tests/out/2026-11-13_e5884e2_215115_bench`, filter on (D), Kp 3.5 V/A, Ti 20 ms, 100 ns; DC ammeter in series (note by Luiz Villa: off −10 mA, on −140 mA); learnt sensor offset +0.0060 A (console) |
+| Results | Loop on: correction −1.5 V at 0.5 s, −4.9 V at 4 s, −5.2 to −5.4 V from 8 s on (stable, τ ≈ 1 s). DC per source, loop off / on: ammeter −10 / −140 mA; scope CH3 in firmware sign minus its 0.03 A offset −12 / −143 mA; **firmware IAC mean +134 / +5 mA**; bridge DC −0.56 / −5.31 V |
+| Reading | The loop is correctly signed and stable and drives the measured DC to the learnt zero, but the firmware IAC carries a bias of about +145 mA while the relay is closed (+6 mA with it open), so it pushes the true DC to −140 mA. Likely cause: IAC is sampled by ADC_2 once per PWM period at a fixed edge (default-edge-trigger EdgeTrigger_up), so the 50 kHz ripple (≈ 0.33 A peak, flowing only with the relay closed) is read at a fixed phase and appears as DC; earlier sessions showed +0.055 A, consistent with an operating-point dependence. The same reading feeds the current PIs and the 3 A trip |
+| Next | Keep B off. Fix the IAC measurement: two samples per PWM period half a period apart (the ripple cancels in their mean), or first a check with the other trigger edge (clean build after the overlay change) against the ammeter |
