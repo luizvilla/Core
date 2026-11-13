@@ -29,7 +29,7 @@
   "R": {"label": "relay test (dead bench)", "confirm": "Dead bench only: never with mains connected (a closed relay rectifies the mains onto the bus)."},
   "z": {"label": "protection test (3 A)", "confirm": "Injects an artificial over-current for one period in GRID_CONNECTED."},
   "r": {"label": "retrieve firmware scope"},
-  "q": {"label": "restart firmware scope"},
+  "q": {"label": "re-arm firmware scope (connected: captures the steady state now; then r)"},
   "f": {"label": "force firmware scope trigger"},
   "v": {"label": "firmware scope 10 kHz / 2 kHz in CONNECT"},
   "F": {"label": "feedforward SOGI / measured (OFF or step 1)"},
@@ -104,7 +104,7 @@
   "L2-INV-02": {
    "points": ["close", "connected", "open"],
    "point_help": "close: Arm single shot on CH4 rising, then g; connected: Acquire in GRID_CONNECTED; open: Arm single shot on CH4 falling, then x",
-   "keys": ["c", "g", "x", "r", "v", "+", "-", ">", "<"],
+   "keys": ["c", "g", "x", "r", "v", "+", "-", ">", "<", "q"],
    "criteria": [
     {"id": ".a", "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip", "point": "close", "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))", "unit": "A", "lo": 0, "hi": 3,
      "telemetry": [{"console_lacks": "bench current trip"}]},
@@ -119,7 +119,7 @@
   "L2-INV-07": {
    "points": ["close", "connected", "open"],
    "point_help": "As step 2, with G: close = Arm single shot on CH4 rising, then G; connected = Acquire in GRID_CONNECTED; open = Arm single shot on CH4 falling, then x. Optional: v before G for the 10 kHz firmware capture (23 ms from the relay command at 0.1 ms per sample: the contact and state 3 in detail); the default 2 kHz keeps 115 ms at 0.5 ms, state 3 included",
-   "keys": ["c", "v", "G", "x", "r", "+", "-", ">", "<"],
+   "keys": ["c", "v", "G", "x", "r", "+", "-", ">", "<", "q"],
    "criteria": [
     {"id": ".a", "desc": "Closing current peak (CH3, larger of MAXIMUM and −MINIMUM), no bench trip", "point": "close", "value": "max(MAXIMUM(I_line),-MINIMUM(I_line))", "unit": "A", "lo": 0, "hi": 3,
      "telemetry": [{"console_lacks": "bench current trip"}]},
@@ -150,7 +150,8 @@
     "G",
     "x",
     "r",
-    "+", "-", ">", "<"],
+    "+", "-", ">", "<",
+    "q"],
    "criteria": [
     {
      "id": ".ff",
@@ -278,7 +279,7 @@
    "_doc": "Dead time and the 100 Hz line current (hypothesis 2026-11-13: dead time with a small DC line current makes the even harmonic). The 100 Hz amplitude per capture comes from the stored waveforms (CH3), analysed offline; the telemetry dt and the capture settings record the dead time.",
    "points": ["dt100", "dt160", "dt220", "dt300"],
    "point_help": "For each point: x, set the dead time with w / s (telemetry dt), c, G, wait 2 s in GRID_CONNECTED, tick waveforms, Acquire the point (CH3 at 1 A/div, 10 ms/div), then x. Same Kp, Ti and ff 0 for all points",
-   "keys": ["x", "w", "s", "c", "G", "r"],
+   "keys": ["x", "w", "s", "c", "G", "r", "q"],
    "criteria": [
     {"id": ".a", "desc": "Telemetry dt matches each point (100, 160, 220, 300 ns) when it was captured", "operator": true, "limit": "yes"},
     {"id": ".b", "desc": "100 Hz line current at each dead time (CH3 waveform, offline), with the DC line current (telemetry IAC mean)", "operator": "info"},
@@ -288,7 +289,7 @@
   "L2-INV-03": {
    "points": ["0.02A", "0.05A", "0.1A"],
    "point_help": "Id_ref of the capture (j/k; the console prints it): 0.02 A first, then 0.05 A and 0.1 A. Acquire in RUN with CH3 and CH2 on screen",
-   "keys": ["j", "k", "n", "g", "x", "r", "+", "-", ">", "<"],
+   "keys": ["j", "k", "n", "g", "x", "r", "+", "-", ">", "<", "q"],
    "criteria": [
     {"id": ".a-0.02A", "desc": "Line current amplitude at Id_ref 0.02 A (CH3 RMS·√2; ±5 mA at this step)", "point": "0.02A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.015, "hi": 0.025},
     {"id": ".a-0.05A", "desc": "Line current amplitude at Id_ref 0.05 A (CH3 RMS·√2; ±10 %)", "point": "0.05A", "value": "RMS(I_line)*1.41421", "unit": "A", "lo": 0.045, "hi": 0.055},
