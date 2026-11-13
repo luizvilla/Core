@@ -42,6 +42,7 @@
  * | L0-GFL-20 | APF quadrature (ADR 0007) |
  * | L0-GFL-21 | Feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha) (setFeedforwardSource) |
  * | L0-GFL-22 | Feedforward filter: DC block and 2ω notch with the fundamental restored (setFeedforwardFilter) |
+ * | L0-GFL-23 | DC current loop with the current-sensor offset learnt with the relay open (setDcCurrentLoop) |
  *
  * The grid is a synthetic sine fed sample by sample; nothing the controller
  * outputs feeds back into it. Relay feedback is driven directly through
@@ -93,11 +94,12 @@ struct Grid {
     double hz = 50.0;       ///< Grid frequency (Hz).
     double amplitude = V_pk; ///< Voltage peak (V).
     double current = 0.0;   ///< Current peak (A), in phase with the voltage.
+    double i_dc = 0.0;      ///< DC current added to the measurement (A): a sensor offset or a true DC line current.
 
     /** @brief Instantaneous voltage sample (V). */
     float v() const { return static_cast<float>(amplitude * std::cos(phase)); }
     /** @brief Instantaneous current sample (A). */
-    float i() const { return static_cast<float>(current * std::cos(phase)); }
+    float i() const { return static_cast<float>(current * std::cos(phase) + i_dc); }
     /** @brief Advances the grid by one control period. */
     void advance() { phase = std::fmod(phase + two_pi * hz * Ts, two_pi); }
 };
@@ -1389,6 +1391,63 @@ int main() {
         /** @test L0-GFL-22.c: residual DC, 100 Hz and fundamental phase error with the filter (INFO) */
         tc::info("L0-GFL-22.c", "Filtered feedforward: residual 100 Hz", std::abs(hf[2]), "V");
         tc::info("L0-GFL-22.d", "Filtered feedforward: fundamental phase error", std::arg(hf[1] / hu[1]) * 180.0 / M_PI, "deg");
+    }
+
+    // ---------------------------------------------------------------- L0-GFL-23 (DC current loop)
+    {
+        /** @test L0-GFL-23.a: The DC current loop is off by default; invalid gain or limit rejected */
+        tc::Criterion c("L0-GFL-23.a", "DC current loop off by default; non-positive gain or limit rejected");
+        singlePhaseInverterFollowing inv;
+        c.check("init", initDefault(inv));
+        c.check("off by default", !inv.getDcCurrentLoop());
+        c.check("gain 0 rejected", !inv.setDcCurrentLoop(true, 0.0F, 10.0F));
+        c.check("limit -1 rejected", !inv.setDcCurrentLoop(true, 100.0F, -1.0F));
+        c.check("still off", !inv.getDcCurrentLoop());
+    }
+    {
+        /** @test L0-GFL-23.b/.c: With the relay open the 0.05 A sensor offset is learnt (±2 mA); connected, a true DC of 0.1 A on top makes the correction ramp at −Ki·0.1 A/s (±5 %), clamp at −limit, and reset on leaving the connected modes */
+        tc::Criterion b("L0-GFL-23.b", "Relay open (OFF for 3 s, then sync, PWM settle): 0.05 A sensor offset learnt within ±2 mA");
+        tc::Criterion c("L0-GFL-23.c", "Connected, true DC 0.1 A over the offset: correction slope −Ki·0.1 A/s ±5 %, clamped at −10 V, reset on leaving the connected modes");
+        singlePhaseInverterFollowing inv; Grid grid;
+        grid.i_dc = 0.05;
+        b.check("DC loop on (Ki 100, limit 10 V)", inv.setDcCurrentLoop(true, 100.0F, 10.0F));
+        b.check("init", initDefault(inv));
+        for (int n = 0; n < 3 * ticks_per_s; ++n) step(inv, grid);   // OFF, as on the bench before c: the offset is learnt
+        if (reachConnect(b, inv, grid)) {
+            b.near("learnt sensor offset (A)", inv.getCurrentZero(), 0.05, 0.002);
+            c.near("no correction before GRID_CONNECTED (V)", inv.getDcCorrection(), 0.0, 1e-6);
+            inv.setGridConnected(true); step(inv, grid);
+            c.check("GRID_CONNECTED", inv.getMode() == VSI_GRID_CONNECTED);
+            grid.i_dc = 0.15;
+            const double v0 = inv.getDcCorrection();
+            for (int n = 0; n < ticks_per_s / 20; ++n) step(inv, grid);   // 50 ms
+            const double slope = (inv.getDcCorrection() - v0) / 0.05;
+            c.near("correction slope (V/s)", slope, -100.0 * 0.1, 0.5);
+            for (int n = 0; n < 2 * ticks_per_s; ++n) step(inv, grid);
+            c.near("clamped at −10 V", inv.getDcCorrection(), -10.0, 1e-4);
+            inv.setGridConnected(false); step(inv, grid);   // feedback lost: FAULT, out of the connected modes
+            c.near("reset when not connected (V)", inv.getDcCorrection(), 0.0, 1e-6);
+        }
+    }
+    {
+        /** @test L0-GFL-23.d: Connected with zero true current but a 0.05 A sensor offset: the correction stays within ±0.05 V over 0.5 s */
+        tc::Criterion c("L0-GFL-23.d", "Connected, zero true current, 0.05 A sensor offset: correction within ±0.05 V over 0.5 s");
+        singlePhaseInverterFollowing inv; Grid grid;
+        grid.i_dc = 0.05;
+        inv.setDcCurrentLoop(true);
+        c.check("init", initDefault(inv));
+        for (int n = 0; n < 3 * ticks_per_s; ++n) step(inv, grid);
+        if (reachConnect(c, inv, grid)) {
+            inv.setGridConnected(true);
+            double worst = 0.0;
+            bool connected = true;
+            for (int n = 0; n < ticks_per_s / 2; ++n) {
+                step(inv, grid); worst = std::fmax(worst, std::fabs(inv.getDcCorrection()));
+                connected = connected && inv.getMode() == VSI_GRID_CONNECTED;
+            }
+            c.check("stayed GRID_CONNECTED (the loop ran)", connected);
+            c.range("largest |correction| (V)", worst, 0.0, 0.05);
+        }
     }
 
     return tc::finish();

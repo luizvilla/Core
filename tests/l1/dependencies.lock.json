@@ -1,4 +1,4 @@
 {
   "control_library": {"url":"https://github.com/luizvilla/control_library.git","commit":"d1449a4d9c0842dd3289b4e3e75f6196834bc9b7"},
-  "single_phase_inverter": {"url":"https://github.com/luizvilla/single_phase_inverter.git","commit":"0cce6948206aa5d5273b8e7adbcdab18535531e4"}
+  "single_phase_inverter": {"url":"https://github.com/luizvilla/single_phase_inverter.git","commit":"67097f230577084897bd4de3fc2d47f0b88f2442"}
 }

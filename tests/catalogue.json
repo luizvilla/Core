@@ -966,6 +966,16 @@
    "status_note": "Implemented 2026-11-13: residual 100 Hz 0.053 V of 10 V, fundamental within 0.019°; the notch subtracts the SOGI's previous sample (its one-sample lead would leave 3–6 %)"
   },
   {
+   "id": "L0-GFL-23",
+   "tab": "inverter",
+   "level": "L0",
+   "title": "DC current loop with the current-sensor offset learnt with the relay open (setDcCurrentLoop)",
+   "criterion": ".a off by default, non-positive gain or limit rejected; .b a 0.05 A sensor offset learnt within ±2 mA while the relay is open (OFF 3 s, sync, PWM settle); .c connected with a true DC of 0.1 A over the offset: correction slope −Ki·0.1 A/s (±5 %), clamped at −10 V, reset on leaving the connected modes; .d connected with zero true current and the 0.05 A offset: correction within ±0.05 V over 0.5 s, the loop running",
+   "source": "`setDcCurrentLoop`, `getDcCorrection`, `getCurrentZero` (library 67097f2)",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 at Luiz Villa's request, before removing the series bulb"
+  },
+  {
    "id": "L1-GFL-01",
    "tab": "inverter",
    "level": "L1",
