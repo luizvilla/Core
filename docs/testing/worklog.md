@@ -758,3 +758,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Evidence | Host L0: L0-APP-16.a–b, L0-GFL-17.f (jump 0.117 V, all of it ΔKp·error; a kept ∫e would give about 12 V) PASS. USB builds (flash 75.5 %). D-GFL-10 (averaged, INFO): with 25 Ω behind the relay the tracking speed goes as Kp/(Ti·R); 3.5 V/A, 20 ms rise in 0.42 s and do not settle in 0.6 s; Kp 7–10 V/A with Ti 5 ms rise in 57–79 ms and settle in 75–104 ms without overshoot; Kp 1 trips unless Ti is 5 ms. Its online-change table predates the bumpless fix |
 | Not done | **L0-TIM on target (pending, not run at Luiz Villa's request):** run `bash tests/l0/timing/preflight.sh`, then `bash tests/run_all.sh --l0 --target` on the bare Spin; check L0-TIM-01/02/03 budgets with the gain-change code in the control step (one comparison per tick, `setCurrentPiGains` only on a change) and the scope divider store. D-GFL-10 online-change rows to rerun with the bumpless model. Bench |
 | Hardware check | Pending: flash env USB on the inverter's Spin; in step 1 the telemetry shows `kp 3.5 ti 20`; press `+` and check `kp 3.6` |
+
+## 2026-11-13 — Bridge dead time from the bench keys (L2-INV-09, the 100 Hz current)
+
+| Field | Value |
+|---|---|
+| Commit | On `apf_quadrature` |
+| Reason | Luiz Villa: the gains had no effect on the connected residual; confirm the dead-time hypothesis for its 100 Hz part |
+| Findings that led to it | Connected (20:15, Kp 3.5 and 7, ff 0): the steady part of Id, Iq is about 0.04 A with both gain sets, the fluctuation 0.33 A RMS; the line current is 0.013 A at 50 Hz, **0.26 A at 100 Hz**, 0.08/0.13/0.11 A at 150/250/350 Hz, 0.32 A at 50 kHz. The 100 Hz is absent with the relay open (mains 0.28 V, inverter side 0.79 V) and appears with current (node 3.5–9 V). Firmware VAC and IAC offsets are small (≤ 0.5 V, 0.004 A open; IAC mean +0.055 A connected). Averaged model: dead time alone gives no 100 Hz; dead time with a +3 V bridge offset gives +0.057 A of DC (bench +0.055 A) and a 100 Hz current, ten times smaller than on the bench (the averaged dead time has no switching ripple); an IAC offset gives none |
+| Behaviour change | Keys `w` / `s` set the dead time of both bridge legs (LEG1_HIGH, LEG2_HIGH) ±20 ns within 100–400 ns, never below the board's 100 ns, only with the inverter OFF; set explicitly at start-up (100 ns, as the overlay). Telemetry ends with `dt <ns>`; the bench app records it with every capture |
+| Evidence | L0-APP-17 PASS; USB builds (flash 75.6 %) |
+| Not done | L0-TIM on target (pending, as for the gain keys). Bench: L2-INV-09 at 100, 160, 220, 300 ns |

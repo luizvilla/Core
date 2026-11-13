@@ -1384,6 +1384,16 @@
    "status_note": "Implemented 2026-11-13 at Luiz Villa's request (gain tuning on the bench)"
   },
   {
+   "id": "L0-APP-17",
+   "tab": "app",
+   "level": "L0",
+   "title": "Bridge dead time from the bench keys (w / s)",
+   "criterion": ".a w / s step the bridge dead time by 20 ns within [100, 400] ns, never below the board's 100 ns (100 → 120, 5 presses → 200, clamped at both ends)",
+   "source": "`app::nextBridgeDeadtime`; main.cpp keys w / s (inverter OFF only), `shield.power.setDeadTime(LEG1_HIGH/LEG2_HIGH)`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 to test the dead-time hypothesis of the 100 Hz current"
+  },
+  {
    "id": "L0-FAV-01",
    "tab": "app",
    "level": "L0",

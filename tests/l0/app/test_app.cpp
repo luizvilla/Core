@@ -871,6 +871,22 @@ int main() {
         c.check("still connected, no fault", state.inverter.getMode() == VSI_GRID_CONNECTED && state.inverter.getFaultReason() == VSI_FAULT_NONE);
     }
 
+    // ---------------------------------------------------------------- L0-APP-17 (bridge dead time, keys w / s)
+    {
+        /** @test L0-APP-17.a: The bench keys step the bridge dead time by 20 ns within [100, 400] ns, never below the board's 100 ns */
+        tc::Criterion c("L0-APP-17.a", "Keys w / s step the bridge dead time by 20 ns within [100, 400] ns, never below 100 ns");
+        c.near("default 100 ns", app::bridge_deadtime_default_ns, 100.0, 0.0);
+        c.near("w from 100 ns", app::nextBridgeDeadtime(100, 1), 120.0, 0.0);
+        c.near("s from 100 ns stays at 100 ns", app::nextBridgeDeadtime(100, -1), 100.0, 0.0);
+        uint16_t dt = 100;
+        for (int k = 0; k < 5; ++k) dt = app::nextBridgeDeadtime(dt, 1);
+        c.near("5 presses up: 200 ns", dt, 200.0, 0.0);
+        for (int k = 0; k < 50; ++k) dt = app::nextBridgeDeadtime(dt, 1);
+        c.near("clamped at 400 ns", dt, 400.0, 0.0);
+        for (int k = 0; k < 50; ++k) dt = app::nextBridgeDeadtime(dt, -1);
+        c.near("clamped at 100 ns", dt, 100.0, 0.0);
+    }
+
     // ---------------------------------------------------------------- L0-APP-12
     {
         /** @test L0-APP-12.a: Step 2b: measured feedforward in PWM_SETTLE (ADR 0007, no VAC copy), PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */

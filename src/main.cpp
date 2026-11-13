@@ -100,9 +100,8 @@ static float meas_data;
 
 static BoostDutyCycles boost_duty;
 static uint16_t leg1_low_deadtime_ns = 100;
-// static uint16_t leg2_low_deadtime_ns = 100;
-// static constexpr uint16_t deadtime_step_ns = 10;
-// static constexpr uint16_t deadtime_min_ns = 40;
+/* Dead time of both inverter bridge legs (LEG1_HIGH, LEG2_HIGH), bench keys w / s (app::nextBridgeDeadtime). */
+static uint16_t bridge_deadtime_ns = app::bridge_deadtime_default_ns;
 
 /* Shared boost output capacitor feeding the DC/AC stage (VDCBus). */
 static float32_t voltage_reference = app::initial_voltage_reference;
@@ -334,6 +333,9 @@ void setup_routine()
         printk("inverter initialization failed\n");
         return;
     }
+    /* Bridge dead time as reported in the telemetry (the overlay's 100 ns; keys w / s change it with the bridge off). */
+    shield.power.setDeadTime(LEG1_HIGH, bridge_deadtime_ns, bridge_deadtime_ns);
+    shield.power.setDeadTime(LEG2_HIGH, bridge_deadtime_ns, bridge_deadtime_ns);
     shield.power.setDutyCycleMin(LEG1_LOW, app::duty_cycle_min);
     shield.power.setDutyCycleMin(LEG1_HIGH, app::duty_cycle_min);
     shield.power.setDutyCycleMin(LEG2_HIGH, app::duty_cycle_min);
@@ -487,8 +489,7 @@ void loop_communication_task()
                "|     press R : relay test (dead bench)  |\n"
                "|     press u : voltage reference UP     |\n"
                "|     press d : voltage reference DOWN   |\n"
-               // "|     press w : deadtime UP              |\n"
-               // "|     press s : deadtime DOWN            |\n"
+               "|     press w / s : bridge deadtime +/-20 ns|\n"
                "|     press r : retrieve scope data      |\n"
                "|     press q : restart scope acquisition|\n"
                "|     press f : force scope trigger now  |\n"
@@ -626,23 +627,19 @@ void loop_communication_task()
         voltage_reference -= 1.0F;
         if (voltage_reference < 1.0F) voltage_reference = 1.0F;
         break;
-    // case 'w':
-    //     leg2_low_deadtime_ns += deadtime_step_ns;
-    //     shield.power.setDeadTime(LEG2_LOW, leg2_low_deadtime_ns, leg2_low_deadtime_ns);
-    //     printk("LEG2_LOW deadtime: %u ns\n", leg2_low_deadtime_ns);
-    //     break;
-    // case 's':
-    //     if (leg2_low_deadtime_ns >= deadtime_step_ns)
-    //     {
-    //         leg2_low_deadtime_ns -= deadtime_step_ns;
-    //     }
-    //     else
-    //     {
-    //         leg2_low_deadtime_ns = deadtime_min_ns;
-    //     }
-    //     shield.power.setDeadTime(LEG2_LOW, leg2_low_deadtime_ns, leg2_low_deadtime_ns);
-    //     printk("LEG2_LOW deadtime: %u ns\n", leg2_low_deadtime_ns);
-    //     break;
+    case 'w':
+    case 's':
+        /* Only with the bridge stopped: the HRTIM dead-time register is then rewritten without switching. */
+        if (inverter_stage != INV_OFF || control.bridge_pwm_applied)
+        {
+            printk("bridge deadtime refused: inverter OFF (x) first\n");
+            break;
+        }
+        bridge_deadtime_ns = app::nextBridgeDeadtime(bridge_deadtime_ns, received_serial_char == 'w' ? 1 : -1);
+        shield.power.setDeadTime(LEG1_HIGH, bridge_deadtime_ns, bridge_deadtime_ns);
+        shield.power.setDeadTime(LEG2_HIGH, bridge_deadtime_ns, bridge_deadtime_ns);
+        printk("bridge deadtime: %u ns (LEG1_HIGH, LEG2_HIGH)\n", static_cast<unsigned int>(bridge_deadtime_ns));
+        break;
     case 'r':
         is_scope_downloading = true;
         break;
@@ -737,7 +734,7 @@ void loop_application_task()
         const dqo_t idq_s = control.inverter.getIdq();
         const uint32_t load_s = critical_max_cycles / cycles_per_us;
         critical_max_cycles = 0U;
-        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f\n",
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f dt %u\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
                (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
@@ -746,7 +743,8 @@ void loop_application_task()
                (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)), static_cast<unsigned int>(load_s),
                static_cast<unsigned int>(critical_lost_ticks),
                static_cast<unsigned int>(control.sogi_feedforward_applied),
-               (double)control.current_kp_applied, (double)(1000.0F * control.current_ti_applied));
+               (double)control.current_kp_applied, (double)(1000.0F * control.current_ti_applied),
+               static_cast<unsigned int>(bridge_deadtime_ns));
         task.suspendBackgroundMs(100);
         return;
     }

@@ -196,6 +196,16 @@ inline constexpr float32_t nextCurrentKp(float32_t kp, int dir)
 {
     return stepGain(kp, dir, current_kp_step, current_kp_min, current_kp_max);
 }
+/** @brief Bench keys w / s: dead time of both bridge legs (LEG1_HIGH, LEG2_HIGH, rising and falling), in ns. Never below
+ * the board's 100 ns (overlay default-dead-time): less would risk shoot-through at 400 V; more only adds distortion. */
+inline constexpr uint16_t bridge_deadtime_default_ns = 100U, bridge_deadtime_step_ns = 20U, bridge_deadtime_max_ns = 400U;
+/** @brief Next bridge dead time after a bench key: ±20 ns within [100, 400] ns. */
+inline constexpr uint16_t nextBridgeDeadtime(uint16_t ns, int dir)
+{
+    const int32_t v = static_cast<int32_t>(ns) + (dir > 0 ? 1 : -1) * static_cast<int32_t>(bridge_deadtime_step_ns);
+    return static_cast<uint16_t>(v < bridge_deadtime_default_ns ? bridge_deadtime_default_ns
+                                 : (v > bridge_deadtime_max_ns ? bridge_deadtime_max_ns : v));
+}
 /** @brief Next Ti after a bench key (> / <): ±1 ms within [1, 100] ms. */
 inline constexpr float32_t nextCurrentTi(float32_t ti, int dir)
 {
