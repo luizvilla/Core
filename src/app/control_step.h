@@ -181,6 +181,26 @@ inline constexpr float32_t inverter_current_kp = 3.5F;
 inline constexpr float32_t inverter_current_ti = 0.020F;
 /** @brief Current PI output limit (correction added to the voltage feedforward), in V. */
 inline constexpr float32_t inverter_current_limit = 30.0F;
+/** @brief Bench keys + / - (Kp) and > / < (Ti): step and range of the current PI gains (applied live). */
+inline constexpr float32_t current_kp_step = 0.1F, current_kp_min = 0.5F, current_kp_max = 10.0F;
+inline constexpr float32_t current_ti_step = 0.001F, current_ti_min = 0.001F, current_ti_max = 0.100F;
+/** @brief One step of a bench gain key: value ± step, snapped to the step grid (no drift over many presses), clamped. */
+inline constexpr float32_t stepGain(float32_t v, int dir, float32_t step, float32_t lo, float32_t hi)
+{
+    const float32_t n = v / step + (dir > 0 ? 1.5F : -0.5F);   // floor(v/step ± 1 + 0.5): round to the grid
+    const float32_t x = static_cast<float32_t>(static_cast<int32_t>(n)) * step;
+    return x < lo ? lo : (x > hi ? hi : x);
+}
+/** @brief Next Kp after a bench key (+ / -): ±0.1 V/A within [0.5, 10]. */
+inline constexpr float32_t nextCurrentKp(float32_t kp, int dir)
+{
+    return stepGain(kp, dir, current_kp_step, current_kp_min, current_kp_max);
+}
+/** @brief Next Ti after a bench key (> / <): ±1 ms within [1, 100] ms. */
+inline constexpr float32_t nextCurrentTi(float32_t ti, int dir)
+{
+    return stepGain(ti, dir, current_ti_step, current_ti_min, current_ti_max);
+}
 /** @brief Output rotation advance compensating the actuation delay, in control periods. */
 inline constexpr float32_t inverter_output_phase_advance = 0.5F;
 /** @brief Step 2b: output advance, in control periods (D-GFL-04 optimum: 80 µs + half a period of hold, minus the
@@ -258,6 +278,8 @@ struct OperatorCommands {
     bool settle_count_test = false;  ///< Diagnostic: in SETTLE, run the settle counter (app::settle_count_test_cycles).
     bool voltage_notch_enabled = false; ///< Reject 100 Hz in boost voltage feedback (menu 'N').
     bool current_resonant_enabled = false; ///< Add 100 Hz boost current correction (menu 'K').
+    float32_t current_kp = app::inverter_current_kp;  ///< Current PI Kp (V/A), bench keys + / -; applied live.
+    float32_t current_ti = app::inverter_current_ti;  ///< Current PI Ti (s), bench keys > / <; applied live.
     bool sogi_feedforward = false;   ///< Inverter feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha), instead of
                                      ///< the measured VAC and its APF (menu 'F'); applied only while the relay is open.
 };
@@ -294,6 +316,8 @@ struct ControlState {
     bool open_loop_active = false;              ///< The open-loop stage drove the bridge last period.
     bool follow_connect_applied = false;        ///< Step 2b settings currently applied to the inverter.
     bool sogi_feedforward_applied = false;      ///< Feedforward source currently applied: SOGI (true) or measured.
+    float32_t current_kp_applied = app::inverter_current_kp;  ///< Current PI gains currently applied to the inverter.
+    float32_t current_ti_applied = app::inverter_current_ti;
     bool relay_command_latched = false;         ///< Relay commanded (issued at its zero-crossing instant, held while requested).
     Pid bus_pid;                                ///< DC bus voltage loop (stage INV_BUS_LOOP), d-axis current out.
     float32_t bus_current_ref = 0.0F;           ///< Bus loop output, A peak (held between its runs; 0 outside RUN).

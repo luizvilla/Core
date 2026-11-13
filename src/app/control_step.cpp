@@ -175,6 +175,13 @@ FAST_CODE ControlOutputs controlStep(ControlState &state, const Measurements &me
         state.inverter.setConnectWindow(follow_connect ? app::follow_connect_window : 0.0F);
         state.follow_connect_applied = follow_connect;
     }
+    /* Current PI gains (bench keys + - > <): applied live, also while connected (the library updates both PIs in place). */
+    if ((cmd.current_kp != state.current_kp_applied || cmd.current_ti != state.current_ti_applied) &&
+        state.inverter.setCurrentPiGains(cmd.current_kp, cmd.current_ti))
+    {
+        state.current_kp_applied = cmd.current_kp;
+        state.current_ti_applied = cmd.current_ti;
+    }
     /* Feedforward source (menu 'F'): changed only with the relay open and not commanded, so it never switches under a
      * closed contact; a request made while connected waits for the relay to open. */
     if (cmd.sogi_feedforward != state.sogi_feedforward_applied && !meas.relay_closed && !state.relay_command_latched)

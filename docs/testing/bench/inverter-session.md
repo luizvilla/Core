@@ -13,6 +13,7 @@ The first hardware tests of the inverter: generate 230 V RMS, synchronize with t
 | 2b | `G` | `INV_FOLLOW_CONNECT`, grid on the other side | PWM_SETTLE (10 periods) → GRID_CONNECT (PI on, blanking) → GRID_CONNECTED 20 ms after the relay command | The connection with the current PI from the relay request and the PLL frozen around the contact (L2-INV-07) |
 | 2b-SOGI | `F`, then `G` | `INV_FOLLOW_CONNECT`, feedforward from SOGI alpha and APF(SOGI alpha) | as 2b | Step 2b with a feedforward free of the measurement noise and the grid harmonics (L2-INV-08) |
 | 3 | `j`/`k`, `n` | `INV_INJECT` | RUN | A fixed d-axis current injected into the grid |
+| gains | `+` / `-`, `>` / `<` | any | any | Current PI Kp ±0.1 V/A (0.5–10) and Ti ±1 ms (1–100 ms), applied live and bumpless (library `0caa792`); the console prints the new pair, the telemetry ends with `kp <V/A> ti <ms>`, and the bench app records them with every capture and firmware dump. Ballpark from D-GFL-10: Kp 7–10 V/A with Ti 5 ms track a 0.1 A step in about 0.1 s against 0.4 s today |
 | stop | `x` (or `t`) | `INV_OFF` | STOPPING → DISCONNECT → OFF | The relay opens after the current is regulated to zero |
 | relay test | `R` | `INV_OFF` (dead bench only) | OFF | The relay closes and opens on its own (pre-check L2-INV-10.a) |
 
@@ -40,7 +41,7 @@ Firmware: branch `test/microinverter-validation-v2`, the commit that adds this f
 
 ## Telemetry
 
-**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs> lost <ticks> ff <source>` (`off` is always 0 since ADR 0007; it stays in the line for the L2 console parser; `ff` is the feedforward source applied: 0 the measured VAC and its APF, 1 SOGI alpha and APF(SOGI alpha), key `F`). Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending keys so the menu stays responsive.
+**Default (short):** every 500 ms one line, `st <stage> inv <inverter_state> rly <cmd><fb> VAC <V RMS> IAC <A> Vbus <V> Id <A> Iq <A> ok <grid_ok> flt <fault> off <offset %> load <µs> lost <ticks> ff <source> kp <V/A> ti <ms>` (`off` is always 0 since ADR 0007; it stays in the line for the L2 console parser; `ff` is the feedforward source applied: 0 the measured VAC and its APF, 1 SOGI alpha and APF(SOGI alpha), key `F`). Trip messages print once when they latch. Key `l` toggles the full telemetry below (every 100 ms), for when the extra fields are needed; keep it short while sending keys so the menu stays responsive.
 
 **Full (`l`):** every 100 ms one line, fields separated by `:`:
 

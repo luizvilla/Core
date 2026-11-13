@@ -822,6 +822,55 @@ int main() {
         c.check("SOGI once open", state.inverter.getFeedforwardSource() == FeedforwardSource::SOGI);
     }
 
+    // ---------------------------------------------------------------- L0-APP-16 (current PI gains, keys + - > <)
+    {
+        /** @test L0-APP-16.a: The bench keys step Kp by 0.1 V/A within [0.5, 10] and Ti by 1 ms within [1, 100] ms, on the step grid (no drift over many presses) */
+        tc::Criterion c("L0-APP-16.a", "Keys step Kp by 0.1 V/A within [0.5, 10] and Ti by 1 ms within [1, 100] ms, without drift");
+        c.near("Kp + from the default", app::nextCurrentKp(app::inverter_current_kp, 1), app::inverter_current_kp + 0.1, 1e-5);
+        c.near("Kp - from the default", app::nextCurrentKp(app::inverter_current_kp, -1), app::inverter_current_kp - 0.1, 1e-5);
+        float kp = app::inverter_current_kp, ti = app::inverter_current_ti;
+        for (int k = 0; k < 15; ++k) kp = app::nextCurrentKp(kp, 1);
+        c.near("15 presses up from 3.5: 5.0 exactly (no drift)", kp, 5.0, 1e-5);
+        for (int k = 0; k < 200; ++k) kp = app::nextCurrentKp(kp, 1);
+        c.near("Kp clamped at 10", kp, 10.0, 1e-5);
+        for (int k = 0; k < 200; ++k) kp = app::nextCurrentKp(kp, -1);
+        c.near("Kp clamped at 0.5", kp, 0.5, 1e-5);
+        c.near("Ti + from the default (s)", app::nextCurrentTi(ti, 1), app::inverter_current_ti + 0.001, 1e-6);
+        for (int k = 0; k < 15; ++k) ti = app::nextCurrentTi(ti, -1);
+        c.near("15 presses down from 20 ms: 5 ms exactly (s)", ti, 0.005, 1e-6);
+        for (int k = 0; k < 200; ++k) ti = app::nextCurrentTi(ti, 1);
+        c.near("Ti clamped at 100 ms (s)", ti, 0.100, 1e-6);
+        for (int k = 0; k < 200; ++k) ti = app::nextCurrentTi(ti, -1);
+        c.near("Ti clamped at 1 ms (s)", ti, 0.001, 1e-6);
+    }
+    {
+        /** @test L0-APP-16.b: New gains reach the inverter on the next period, in OFF and while connected (step 2, relay closed) */
+        tc::Criterion c("L0-APP-16.b", "New gains reach the inverter on the next period, in OFF and with the relay closed");
+        ControlState state; Grid grid; Relay relay;
+        OperatorCommands cmd;
+        c.check("controlInit", controlInit(state) == 0);
+        c.near("default Kp", state.inverter.getCurrentPiKp(), app::inverter_current_kp, 1e-6);
+        auto run = [&](int ticks) {
+            for (int k = 0; k < ticks; ++k) {
+                Measurements m; m.v_dc_bus = v_bus; m.v_ac = grid.v(); m.v_ac_updated = true; m.i_ac = 0.0F; m.relay_closed = relay.closed;
+                const ControlOutputs out = controlStep(state, m, cmd);
+                state.bridge_pwm_applied = out.bridge_enable; relay.apply(out); grid.advance();
+            }
+        };
+        cmd.current_kp = 5.0F; cmd.current_ti = 0.040F;
+        run(1);
+        c.near("Kp 5 in OFF", state.inverter.getCurrentPiKp(), 5.0, 1e-6);
+        c.near("Ti 40 ms in OFF (s)", state.inverter.getCurrentPiTi(), 0.040, 1e-7);
+        cmd.inverter_stage = INV_CONNECT;
+        run(4 * ticks_per_s);
+        c.check("relay closed, GRID_CONNECTED", relay.closed && state.inverter.getMode() == VSI_GRID_CONNECTED);
+        cmd.current_kp = 2.0F; cmd.current_ti = 0.010F;
+        run(1);
+        c.near("Kp 2 while connected", state.inverter.getCurrentPiKp(), 2.0, 1e-6);
+        c.near("Ti 10 ms while connected (s)", state.inverter.getCurrentPiTi(), 0.010, 1e-7);
+        c.check("still connected, no fault", state.inverter.getMode() == VSI_GRID_CONNECTED && state.inverter.getFaultReason() == VSI_FAULT_NONE);
+    }
+
     // ---------------------------------------------------------------- L0-APP-12
     {
         /** @test L0-APP-12.a: Step 2b: measured feedforward in PWM_SETTLE (ADR 0007, no VAC copy), PI from the relay request, blanking 15 ms from the relay command (PLL frozen, feedforward held after the predicted contact), GRID_CONNECTED 60 ms after the command without fault; advance 0.3 in this stage only */

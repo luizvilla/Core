@@ -202,6 +202,9 @@ static bool scope_fast_connect = false;
 static bool settle_count_test = false;
 /* Inverter feedforward from the PLL pair, SOGI alpha and APF(SOGI alpha), instead of the measured VAC (menu 'F'). */
 static bool sogi_feedforward = false;
+/* Current PI gains, stepped by the bench keys + - (Kp) and > < (Ti) (app::nextCurrentKp, app::nextCurrentTi). */
+static float32_t current_kp = app::inverter_current_kp;
+static float32_t current_ti = app::inverter_current_ti;
 /* Menu 'z': protection test, one control period sees an artificial AC current above the bench trip
  * (app::bench_inverter_current_trip); the scope's IAC channel shows it. */
 static volatile uint16_t trip_test_countdown = 0U;  /* periods left before the artificial sample (0: none) */
@@ -475,6 +478,8 @@ void loop_communication_task()
                "|     press g : step 2 connect (relay)   |\n"
                "|     press G : step 2b connect, PLL hold|\n"
                "|     press F : feedforward SOGI/measured|\n"
+               "|     press + / - : current PI Kp +/-0.1 |\n"
+               "|     press > / < : current PI Ti +/-1 ms|\n"
                "|     press n : step 3 inject current    |\n"
                "|     press j / k : inject current +/-   |\n"
                "|     press y : step 4 bus loop (with m) |\n"
@@ -657,6 +662,16 @@ void loop_communication_task()
         settle_count_test = !settle_count_test;
         printk("step 1 settle counter: %s\n", settle_count_test ? "RUNNING (diagnostic)" : "off (normal)");
         break;
+    case '+':
+    case '-':
+        current_kp = app::nextCurrentKp(current_kp, received_serial_char == '+' ? 1 : -1);
+        printk("current PI: Kp %.1f V/A, Ti %.0f ms\n", (double)current_kp, (double)(1000.0F * current_ti));
+        break;
+    case '>':
+    case '<':
+        current_ti = app::nextCurrentTi(current_ti, received_serial_char == '>' ? 1 : -1);
+        printk("current PI: Kp %.1f V/A, Ti %.0f ms\n", (double)current_kp, (double)(1000.0F * current_ti));
+        break;
     case 'F':
         /* Switched only with the relay open: the control step applies it in OFF or before the relay command. */
         if (inverter_stage != INV_OFF && inverter_stage != INV_SETTLE && inverter_stage != INV_OPEN_LOOP)
@@ -722,7 +737,7 @@ void loop_application_task()
         const dqo_t idq_s = control.inverter.getIdq();
         const uint32_t load_s = critical_max_cycles / cycles_per_us;
         critical_max_cycles = 0U;
-        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u\n",
+        printk("st %u inv %u rly %u%u VAC %.1f IAC %.2f Vbus %.1f Id %.2f Iq %.2f ok %u flt %u off %.0f%% load %u lost %u ff %u kp %.1f ti %.0f\n",
                static_cast<unsigned int>(inverter_stage), static_cast<unsigned int>(control.inverter.getMode()),
                static_cast<unsigned int>(relay_command), static_cast<unsigned int>(relay_closed),
                (double)v_ac_rms_value, (double)i_ac_value, (double)v_dc_bus_value, (double)idq_s.d, (double)idq_s.q,
@@ -730,7 +745,8 @@ void loop_application_task()
                static_cast<unsigned int>(control.inverter.getFaultReason()),
                (double)(100.0F * (control.inverter.getFeedforwardGain() - 1.0F)), static_cast<unsigned int>(load_s),
                static_cast<unsigned int>(critical_lost_ticks),
-               static_cast<unsigned int>(control.sogi_feedforward_applied));
+               static_cast<unsigned int>(control.sogi_feedforward_applied),
+               (double)control.current_kp_applied, (double)(1000.0F * control.current_ti_applied));
         task.suspendBackgroundMs(100);
         return;
     }
@@ -955,6 +971,8 @@ static FAST_CODE ControlOutputs criticalTickBody(uint32_t critical_start, const 
     cmd.voltage_notch_enabled = voltage_notch_enabled;
     cmd.current_resonant_enabled = current_resonant_enabled;
     cmd.sogi_feedforward = sogi_feedforward;
+    cmd.current_kp = current_kp;
+    cmd.current_ti = current_ti;
 
     const ControlOutputs out = controlStep(control, meas, cmd);
     TIMING_TICK_PROBE(2);

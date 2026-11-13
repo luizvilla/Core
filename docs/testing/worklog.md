@@ -747,3 +747,14 @@ The 100 Hz PR of Andres's code is not adopted (it is always on there, which look
 | Check | 17:24 ff 1, not fitted: waveform shape correlated 0.95 with the scope, 3× the late current of ff 0, but no trip within 2 s where the bench tripped after about 1 s with the bulb lit. The 17:24 CH3 is 6–8× the model with the same shape: that channel is unreliable in that run |
 | Options | Late |Idq| (0.5–2 s): APF 0.26 A, SOGI 0.73 A, option 1 ({Vd_avg, 0} after the blanking) 0.75 A, no trip; APF with gain 0.7 trips at once (±30 V PI) |
 | Open | What makes ff 1 trip on the bench after about 1 s (bulb heating, ADC aliasing of the 50 kHz ripple, or a slower PLL effect) is not reproduced; bench data with the full telemetry (key l) and CH3 at 5 A/div would pin it down |
+
+## 2026-11-13 — Current PI gains from the bench keys, bumpless; D-GFL-10 gain sweep
+
+| Field | Value |
+|---|---|
+| Commit | On `apf_quadrature`; single_phase_inverter `0caa792` (branch `feat/bumpless-current-gains` of luizvilla/single_phase_inverter, from `b9e8829`), pinned in `src/app.ini` and `tests/l1/dependencies.lock.json` |
+| Reason | Luiz Villa: tune the current PI on the bench with keys (no numeric input yet), and a ballpark from simulation |
+| Behaviour change | Keys `+` / `-` step Kp by 0.1 V/A (0.5–10), `>` / `<` step Ti by 1 ms (1–100 ms), snapped to the step grid; applied live, also while connected. Telemetry ends with `kp <V/A> ti <ms>`; the bench app stores the board's kp, ti and ff with every capture and firmware dump and shows them on the page and the review page. **Library:** `setCurrentPiGains()` while the loop runs is now bumpless (the integral term carries over through `Pid::reset(u)`); before, ∫e was kept and the integral term jumped by the ratio of the new to the old Kp/Ti (×8 from 3.5/20 ms to 7/5 ms) |
+| Evidence | Host L0: L0-APP-16.a–b, L0-GFL-17.f (jump 0.117 V, all of it ΔKp·error; a kept ∫e would give about 12 V) PASS. USB builds (flash 75.5 %). D-GFL-10 (averaged, INFO): with 25 Ω behind the relay the tracking speed goes as Kp/(Ti·R); 3.5 V/A, 20 ms rise in 0.42 s and do not settle in 0.6 s; Kp 7–10 V/A with Ti 5 ms rise in 57–79 ms and settle in 75–104 ms without overshoot; Kp 1 trips unless Ti is 5 ms. Its online-change table predates the bumpless fix |
+| Not done | **L0-TIM on target (pending, not run at Luiz Villa's request):** run `bash tests/l0/timing/preflight.sh`, then `bash tests/run_all.sh --l0 --target` on the bare Spin; check L0-TIM-01/02/03 budgets with the gain-change code in the control step (one comparison per tick, `setCurrentPiGains` only on a change) and the scope divider store. D-GFL-10 online-change rows to rerun with the bumpless model. Bench |
+| Hardware check | Pending: flash env USB on the inverter's Spin; in step 1 the telemetry shows `kp 3.5 ti 20`; press `+` and check `kp 3.6` |

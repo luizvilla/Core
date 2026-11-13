@@ -1362,6 +1362,16 @@
    "status_note": "Implemented 2026-11-13"
   },
   {
+   "id": "L0-APP-16",
+   "tab": "app",
+   "level": "L0",
+   "title": "Current PI gains from the bench keys (+ − > <), applied live",
+   "criterion": ".a + / − step Kp by 0.1 V/A within [0.5, 10] and > / < step Ti by 1 ms within [1, 100] ms, on the step grid (15 presses from 3.5 V/A give 5.0 exactly; clamped at both ends); .b new gains reach the inverter on the next period, in OFF and with the relay closed in step 2, without a fault",
+   "source": "`app::nextCurrentKp`, `app::nextCurrentTi`, `controlStep`, `OperatorCommands::current_kp/current_ti`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-13 at Luiz Villa's request (gain tuning on the bench)"
+  },
+  {
    "id": "L0-FAV-01",
    "tab": "app",
    "level": "L0",
