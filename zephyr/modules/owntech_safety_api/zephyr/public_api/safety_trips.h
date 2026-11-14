@@ -46,6 +46,15 @@ int safety_trips_count(void);
 int safety_trips_set_threshold(const char *sensor, bool high_bound, float value);
 /** @brief @return the current DAC code of comparator trip index, -1 if none. */
 int safety_trips_dac_code(int index);
+/** @brief @return number of ADC-watchdog trips the build allocated. */
+int safety_trips_watchdog_count(void);
+/** @brief ADC (1 or 2) and channel watched by ADC-watchdog trip index. */
+void safety_trips_watchdog_channel(int index, uint8_t *adc, uint8_t *channel);
+/** @brief @return 1 self-test passed, 2 failed, 0 not configured yet, for watchdog trip index. */
+int safety_trips_watchdog_state(int index);
+/** @brief Waits for fresh conversions and @return true while any armed trip sees its limit exceeded.
+ *         Clears the sticky ADC-watchdog flags first (used by clearFault). */
+bool safety_trips_settle_and_check(void);
 
 #ifdef __cplusplus
 }

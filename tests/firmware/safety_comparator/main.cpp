@@ -30,11 +30,11 @@
 #include "safety_trips.h"
 
 #define REPORT_MAGIC  0x31504D43U  /* "CMP1" */
-#define N_RESULTS     24U
+#define N_RESULTS     42U
 
 enum : uint32_t {
 	CASE_CLEAR = 0, CASE_CONFIG = 1, CASE_LOCKS = 2, CASE_TRIP_I1 = 3, CASE_TRIP_I2 = 4,
-	CASE_DAC_TAMPER = 5, CASE_TIGHTEN = 6, CASE_LATCH_RESET = 7,
+	CASE_DAC_TAMPER = 5, CASE_TIGHTEN = 6, CASE_LATCH_RESET = 7, CASE_AWD_CONFIG = 8, CASE_AWD_TRIP = 9,
 };
 
 enum {
@@ -62,6 +62,13 @@ enum {
 	R_MASK = 21,        /* PWM output mask of the units used */
 	R_DETAIL = 22,      /* last latched detail */
 	R_SPARE = 23,
+	/* ADC-watchdog path (#19) */
+	R_ADC1_CFGR = 24, R_ADC2_CFGR = 25, R_ADC1_TR1 = 26, R_ADC1_TR2 = 27, R_ADC1_TR3 = 28,
+	R_ADC2_TR3 = 29, R_ADC1_AWD2CR = 30, R_ADC1_AWD3CR = 31, R_ADC2_AWD3CR = 32,
+	R_EECR1 = 33, R_EECR2 = 34, R_AWD_DATA = 35,   /* b0 data started, b8-15 ADC1 seq length, b16-23 ADC2 seq length, b24 watchdog states all passed */
+	R_AWD_TRIP = 36,   /* b0-1 step mode, b8 flag, b9 latched, b10 refused, b11 clear refused, b12 cleared, b13 back */
+	R_AWD_CYC = 37, R_AWD_PINS = 38, R_AWD_FLT_MASK = 39,
+	R_PATH0 = 40, R_PATH1 = 41,   /* comparator output -> HRTIM fault flag, cycles (I1_LOW, I2_LOW) */
 };
 
 struct report_t {
@@ -156,17 +163,35 @@ static void pin_discharge(GPIO_TypeDef *g, uint32_t pin)
 
 static bool flag(uint32_t flt)
 {
-	return (HRTIM1->sCommonRegs.ISR & (HRTIM_ISR_FLT1 << (flt - 1U))) != 0U;
+	uint32_t bit = (flt == 6U) ? HRTIM_ISR_FLT6 : (HRTIM_ISR_FLT1 << (flt - 1U));   /* FLT6 is bit 6 */
+	return (HRTIM1->sCommonRegs.ISR & bit) != 0U;
 }
+
+static volatile uint32_t *comp_for_flt(uint32_t flt)
+{
+	return (flt == 4U) ? &COMP1->CSR : (flt == 5U) ? &COMP3->CSR : NULL;
+}
+
+/* Cycles from the comparator output rising to the HRTIM fault flag: the
+ * protection path itself (comparator -> 282 ns filter -> fault input), without
+ * the GPIO write, the pad and the loop's own latency to see the step. */
+static uint32_t path_cycles;
 
 /* Steps the pin to 3.3 V; @return mode (1: seen as output, 2: seen once back in analog, 0: no trip). */
 static uint32_t step_up(GPIO_TypeDef *g, uint32_t pin, uint32_t flt, uint32_t *cycles)
 {
-	uint32_t t0 = DWT->CYCCNT;
+	volatile uint32_t *csr = comp_for_flt(flt);
+	uint32_t t0 = DWT->CYCCNT, tc = 0U;
+	path_cycles = 0U;
 	pin_drive(g, pin, true);
-	for (uint32_t i = 0; i < 2000U; i++) {
+	for (uint32_t i = 0; i < 20000U; i++) {
+		if (tc == 0U && csr != NULL && (*csr & (1U << 30))) {
+			tc = DWT->CYCCNT;
+		}
 		if (flag(flt)) {
-			*cycles = DWT->CYCCNT - t0;
+			uint32_t t = DWT->CYCCNT;
+			*cycles = t - t0;
+			path_cycles = tc ? t - tc : 0U;
 			return 1U;
 		}
 	}
@@ -224,6 +249,7 @@ static uint32_t trip_case(GPIO_TypeDef *g, uint32_t pin, uint32_t flt, uint32_t 
 	result_set(r_flags, flags);
 	result_set(r_cyc, cycles);
 	result_set(r_pins, pins);
+	result_set(r_flags == R_TRIP0 ? R_PATH0 : R_PATH1, path_cycles);
 	return flags;
 }
 
@@ -324,6 +350,108 @@ static void case_tighten(void)
 	result_set(R_TIGHTEN, ((uint32_t)(uint8_t)rc1) | ((uint32_t)(uint8_t)rc2 << 8) | ((uint32_t)code << 16));
 }
 
+static void case_awd_config(void)
+{
+	pin_discharge(GPIOC, 3);
+	pwm_start_all();   /* arms: starts data acquisition, the ADC hook sets the watchdogs */
+	pwm_stop_all();
+	result_set(R_ADC1_CFGR, ADC1->CFGR);
+	result_set(R_ADC2_CFGR, ADC2->CFGR);
+	result_set(R_ADC1_TR1, ADC1->TR1);
+	result_set(R_ADC1_TR2, ADC1->TR2);
+	result_set(R_ADC1_TR3, ADC1->TR3);
+	result_set(R_ADC2_TR3, ADC2->TR3);
+	result_set(R_ADC1_AWD2CR, ADC1->AWD2CR);
+	result_set(R_ADC1_AWD3CR, ADC1->AWD3CR);
+	result_set(R_ADC2_AWD3CR, ADC2->AWD3CR);
+	result_set(R_EECR1, HRTIM1->sCommonRegs.EECR1);
+	result_set(R_EECR2, HRTIM1->sCommonRegs.EECR2);
+	result_set(R_FLTINR1, HRTIM1->sCommonRegs.FLTINR1);
+	result_set(R_FLTINR2, HRTIM1->sCommonRegs.FLTINR2);
+	bool states = true;
+	for (int i = 0; i < safety_trips_watchdog_count(); i++) {
+		states = states && (safety_trips_watchdog_state(i) == 1);
+	}
+	result_set(R_AWD_DATA, (spin.data.started() ? 1U : 0U) | (((ADC1->SQR1 & 0xFU) + 1U) << 8)
+		   | (((ADC2->SQR1 & 0xFU) + 1U) << 16) | (states ? (1U << 24) : 0U));
+	result_set(R_AWD_FLT_MASK, safety_trips_flt_mask());
+}
+
+static void adc_stop_wait(ADC_TypeDef *a)
+{
+	a->CR |= ADC_CR_ADSTP;
+	while (a->CR & ADC_CR_ADSTART) {
+	}
+}
+
+/* V_HIGH (ADC1 channel 9, AWD2 -> EEV2 -> FLT2). A pin cannot be held at a
+ * level here (the ADC sampling capacitor drains a charged floating pin), so the
+ * stimulus is the window: ADC1 is stopped, AWD2 gets a window every reading
+ * falls out of, and ADC1 restarts on its HRTIM trigger with the DMA running.
+ * Test code only: the Safety API never changes a window while converting. */
+static uint32_t awd_step(uint32_t *cycles)
+{
+	adc_stop_wait(ADC1);
+	ADC1->TR2 = (255U << 16) | 255U;   /* readings below 255 (8 bits) are out */
+	ADC1->ISR = ADC_ISR_AWD2;
+	uint32_t t0 = DWT->CYCCNT;
+	ADC1->CR |= ADC_CR_ADSTART;
+	for (uint32_t i = 0; i < 200000U; i++) {
+		if (flag(2)) {
+			*cycles = DWT->CYCCNT - t0;
+			return 1U;
+		}
+	}
+	return 0U;
+}
+
+static void awd_restore(uint32_t tr2)
+{
+	adc_stop_wait(ADC1);
+	ADC1->TR2 = tr2;
+	ADC1->ISR = ADC_ISR_AWD2;
+	ADC1->CR |= ADC_CR_ADSTART;
+}
+
+static void case_awd_trip(void)
+{
+	pwm_start_all();
+	k_msleep(5);
+	uint32_t tr2 = ADC1->TR2;
+	uint32_t cycles = 0U;
+	irq_disable(HRTIM1_FLT_IRQn);
+	uint32_t mode = awd_step(&cycles);
+	irq_enable(HRTIM1_FLT_IRQn);
+	uint32_t flags = mode;
+	k_busy_wait(5);
+	result_set(R_AWD_PINS, pwm_pin_levels());
+	if (flag(2) || (safety_trips_tripped() & 0x2U)) {
+		flags |= 1U << 8;
+	}
+	k_msleep(2);
+	if (safety_supervision_get_fault() == SAFETY_FAULT_TRIP) {
+		flags |= 1U << 9;
+	}
+	pwm_start_all();
+	if (!outputs_enabled()) {
+		flags |= 1U << 10;
+	}
+	if (safety.clearFault() != 0) {   /* the window still excludes the reading */
+		flags |= 1U << 11;
+	}
+	awd_restore(tr2);
+	if (safety.clearFault() == 0) {
+		flags |= 1U << 12;
+	}
+	pwm_start_all();
+	if (outputs_enabled()) {
+		flags |= 1U << 13;
+	}
+	pwm_stop_all();
+	result_set(R_AWD_TRIP, flags);
+	result_set(R_AWD_CYC, cycles);
+}
+
 static void evaluate_pending(uint32_t pending)
 {
 	uint32_t seq = pending >> 8;
@@ -406,6 +534,8 @@ int main(void)
 			case CASE_DAC_TAMPER: case_dac_tamper(); break;
 			case CASE_TIGHTEN: case_tighten(); break;
 			case CASE_LATCH_RESET: case_latch_reset(seq); break;
+			case CASE_AWD_CONFIG: case_awd_config(); break;
+			case CASE_AWD_TRIP: case_awd_trip(); break;
 			default: break;
 			}
 			ack(seq);

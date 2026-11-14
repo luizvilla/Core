@@ -53,6 +53,7 @@ if(CONFIG_OWNTECH_SAFETY_API OR CONFIG_OWNTECH_SAFETY_SUPERVISION)
       src/safety_setting.cpp
       src/safety_shield.cpp
       public_api/SafetyAPI.cpp
+      src/safety_data.cpp
       )
   endif()
 endif()

@@ -205,6 +205,30 @@ public:
 	bool started();
 
 	/**
+	 * @brief Enables an ADC channel for acquisition unless it is already
+	 *        enabled (a channel enabled twice would break the rank mapping).
+	 *        Used by the Safety API for the channels its ADC watchdogs watch.
+	 *
+	 * @param adc_number ADC_1 to ADC_5
+	 * @param channel_num ADC channel number
+	 * @return 0 if the channel is (now) enabled, -1 if acquisition has
+	 *         already started or the parameters are invalid.
+	 */
+	int8_t ensureChannel(adc_t adc_number, uint8_t channel_num);
+
+	/**
+	 * @brief Starts acquisition with the DMA only: externally-triggered
+	 *        dispatch and no DMA interrupt, so the ADCs and the DMA run with no
+	 *        CPU involvement. Values are dispatched only if someone calls the
+	 *        dispatch (the scheduler does when it starts acquisition itself).
+	 *        Used by the Safety API when the first PWM output comes before
+	 *        data acquisition (its ADC watchdogs need conversions).
+	 *
+	 * @return 0 if started, -1 if already started.
+	 */
+	int8_t startUnattended();
+
+	/**
 	 * @brief Stops the module if it is started.
 	 *
 	 * @return `0` if everything went well, `-1` if there was an error.

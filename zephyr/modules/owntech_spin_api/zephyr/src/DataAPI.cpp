@@ -87,10 +87,37 @@ int8_t DataAPI::enableAcquisition(uint8_t pin_num, adc_t adc_num)
 	return err;
 }
 
+/* Safety API hook (ADR 0009): enables the channels its ADC watchdogs watch,
+ * through this module, before the ADCs start. No-op without the Safety API. */
+extern "C" __attribute__((weak)) void spin_data_before_start(void)
+{
+}
+
+int8_t DataAPI::ensureChannel(adc_t adc_number, uint8_t channel_num)
+{
+	if ( (adc_number < ADC_1) || (adc_number > ADC_COUNT) ||
+		 (channel_num == 0) || (channel_num > CHANNELS_PER_ADC) )
+		return -1;
+	if (DataAPI::channels_ranks[adc_number-1][channel_num-1] != 0)
+		return 0;
+	return DataAPI::enableChannel(adc_number, channel_num);
+}
+
+int8_t DataAPI::startUnattended()
+{
+	if (DataAPI::is_started == true)
+		return -1;
+	setDispatchMethod(DispatchMethod_t::externally_triggered);
+	setRepetitionsBetweenDispatches(16);
+	return start();
+}
+
 int8_t DataAPI::start()
 {
 	if (DataAPI::is_started == true)
 		return -1;
+
+	spin_data_before_start();
 
 	/* Initialize conversion */
 	data_conversion_init();

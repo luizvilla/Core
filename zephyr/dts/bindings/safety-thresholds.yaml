@@ -62,3 +62,15 @@ properties:
       Order in which the build serves limits when hardware channels are scarce: lower first. Default 10 for
       currents (sensor names starting with I) and 20 otherwise. Give the hazard that matters most on this board
       the lowest number (e.g. the DC bus overvoltage).
+
+  hardware-bounds:
+    type: string
+    required: false
+    enum:
+      - "both"
+      - "high"
+      - "low"
+    description: |
+      Which bounds need a hardware path. Default: both for a current (sensor name starting with I), the high bound
+      only otherwise: a low voltage limit is a range check, not a hazard (a boost output starts at 0 V), so a
+      hardware trip on it would stop the converter from starting. The other bound stays on the software path.

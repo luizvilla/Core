@@ -326,7 +326,7 @@
    "tab": "safety",
    "level": "L0",
    "title": "I1_LOW beyond its limit turns every PWM output off in hardware within the declared time",
-   "criterion": ".a fault flag; .b step to flag <= 0.5 us; .c every switching PWM pin low; .d latched, PWM refused; .e clear refused while beyond the limit, accepted once back, PWM back",
+   "criterion": ".a fault flag; .b comparator output to HRTIM fault flag <= 0.5 us; .c every switching PWM pin low; .d latched, PWM refused; .e clear refused while beyond the limit, accepted once back, PWM back; .f INFO pin step to fault flag (includes the stimulus)",
    "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
    "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
    "status": "implemented",
@@ -338,7 +338,7 @@
    "tab": "safety",
    "level": "L0",
    "title": "I2_LOW beyond its limit turns every PWM output off in hardware within the declared time",
-   "criterion": ".a to .e as L0-CMP-03",
+   "criterion": ".a to .f as L0-CMP-03; .f INFO pin step to fault flag (includes the stimulus)",
    "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
    "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
    "status": "implemented",
@@ -379,6 +379,30 @@
    "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-AWD-01",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Each allocated ADC-watchdog trip is configured on data acquisition's own conversions, self-tested and locked",
+   "criterion": ".a overrun mode overwrite, hardware trigger; .b/.c watchdog channels and windows as allocated (voltage low side open); .d external events sourced by the watchdogs; .e fault inputs on the external events, locked; .f data acquisition started by the Safety API with the watched channels, self-tests passed; .g all fault inputs armed",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree and a test overlay (current low limits -11 A, so floating pins sit inside the windows); env SAFETY_COMP; data acquisition started by the Safety API",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#19)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-AWD-02",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A reading outside an ADC-watchdog window turns every PWM output off in hardware",
+   "criterion": ".a fault flag; .b ADC restart to fault flag <= 60 us; .c every switching PWM pin low; .d latched, refused, clear refused while outside, accepted once inside, PWM back",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree and a test overlay (current low limits -11 A, so floating pins sit inside the windows); env SAFETY_COMP; data acquisition started by the Safety API",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#19)",
    "harness": "tests/l0/safety_comparator/run.sh --run"
   }
  ],

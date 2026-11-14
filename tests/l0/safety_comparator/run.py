@@ -21,12 +21,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'common')
 import target_harness as th  # noqa: E402
 
 ENV = 'SAFETY_COMP'
-FIELDS = ['magic', 'layout', 'boot_count', 'ack', 'busy', 'latched_at_boot', 'pending'] + [f'r{i}' for i in range(24)]
+FIELDS = ['magic', 'layout', 'boot_count', 'ack', 'busy', 'latched_at_boot', 'pending'] + [f'r{i}' for i in range(42)]
 # LATCH_RESET reboots: it runs first so the results of the other cases (some beyond the 18 backup registers)
 # are all from the final boot. TIGHTEN changes the I1_LOW threshold: it runs last.
-CASES = [('CLEAR', 0), ('LATCH_RESET', 7), ('CONFIG', 1), ('LOCKS', 2), ('TRIP_I1', 3), ('TRIP_I2', 4),
-         ('DAC_TAMPER', 5), ('TIGHTEN', 6)]
+CASES = [('CLEAR', 0), ('LATCH_RESET', 7), ('CONFIG', 1), ('AWD_CONFIG', 8), ('LOCKS', 2), ('TRIP_I1', 3),
+         ('TRIP_I2', 4), ('AWD_TRIP', 9), ('DAC_TAMPER', 5), ('TIGHTEN', 6)]
 COMPARATOR_REACTION_US = 0.5   # declared, ADR 0009 (filter 282 ns + comparator 31 ns max)
+WATCHDOG_REACTION_US = 60.0    # declared, ADR 0009: 3 switching periods at 50 kHz
+ALL_FLT = 0b111111             # Twist 1.4.1: comparators FLT4/FLT5, watchdogs FLT1/FLT2/FLT3/FLT6
 EXPECT = {'I1_LOW': dict(comp_csr_inpsel=0, inmsel=4, dac=3400, flt=4),   # Twist 1.4.1: COMP1/DAC3_CH1, PA1
           'I2_LOW': dict(comp_csr_inpsel=1, inmsel=5, dac=3400, flt=5)}   # COMP3/DAC1_CH1, PC1
 
@@ -49,7 +51,7 @@ def main():
     for name, code in CASES:
         rep, entry = p.run(name, code)
         log['cases'].append(entry)
-    r = [rep[f'r{i}'] for i in range(24)]
+    r = [rep[f'r{i}'] for i in range(42)]
     log['results'] = r
     boots = {c['case']: c['boots'] for c in log['cases']}
     ok = {c['case']: c['status'] == 'acknowledged' for c in log['cases']}
@@ -59,8 +61,9 @@ def main():
 
     # L0-CMP-01 arming and configuration
     armed, fmask, ntrips = r[0] & 1, (r[0] >> 8) & 0x3F, (r[0] >> 16) & 0xFF
-    L('L0-CMP-01.a', J(armed and fmask == 0b11000 and ntrips == 2), 'Comparator trips armed on FLT4 (I1_LOW) and FLT5 (I2_LOW)',
-      'armed, FLT4+FLT5, 2 trips', f'armed {armed}, mask {fmask:06b}, {ntrips} trips')
+    L('L0-CMP-01.a', J(armed and (fmask & 0b11000) == 0b11000 and ntrips == 2),
+      'Comparator trips armed on FLT4 (I1_LOW) and FLT5 (I2_LOW)', 'armed, FLT4+FLT5, 2 trips',
+      f'armed {armed}, mask {fmask:06b}, {ntrips} trips')
     for cid, csr, dac, name in (('b', r[1], r[3], 'I1_LOW'), ('c', r[2], r[4], 'I2_LOW')):
         e = EXPECT[name]
         good = (csr & 1) and (csr >> 31) and ((csr >> 8) & 1) == e['comp_csr_inpsel'] and ((csr >> 4) & 7) == e['inmsel'] \
@@ -68,17 +71,19 @@ def main():
         L(f'L0-CMP-01.{cid}', J(good), f'{name}: comparator enabled and locked, inputs and polarity as allocated, DAC threshold',
           f"EN, LOCK, INPSEL {e['comp_csr_inpsel']}, INMSEL {e['inmsel']}, POL 0, DAC {e['dac']}",
           f'CSR {csr:#010x}, DAC {dac}')
-    i1, i2, fltr = r[5], r[6], r[7]
+    i1, i2, fltr = r[5], r[6], r[7]   # FLTINR as read after AWD_CONFIG (all trips armed)
     f4 = (i1 >> 24) & 0xFF   # FLT4 fields in FLTINR1 bits 24-31: E, P, SRC0, F[3:0], LCK
     f5 = i2 & 0xFF           # FLT5 fields in FLTINR2 bits 0-7
     def fld(b):
         return dict(E=b & 1, P=(b >> 1) & 1, SRC0=(b >> 2) & 1, F=(b >> 3) & 0xF, LCK=(b >> 7) & 1)
-    good = all(fld(b) == dict(E=1, P=1, SRC0=1, F=8, LCK=1) for b in (f4, f5)) and not ((i2 >> 16) & 0x18)
+    good = all(fld(b) == dict(E=1, P=1, SRC0=1, F=8, LCK=1) for b in (f4, f5)) and not ((r[6] >> 16) & 0x18)
     L('L0-CMP-01.d', J(good), 'FLT4/FLT5: enabled, active high, internal source, 282 ns filter, locked',
       'E=1 P=1 SRC=01 F=1000 LCK=1', f'FLT4 {fld(f4)}, FLT5 {fld(f5)}')
-    L('L0-CMP-01.e', J((fltr & 0x18) == 0x18 and (fltr >> 31) & 1), 'Every timer A-F listens to FLT4 and FLT5, FLTLCK set',
-      'FLT4EN FLT5EN FLTLCK on all six', f'AND of FLTxR {fltr:#010x}')
-    L('L0-CMP-01.f', J((r[8] & 0x18) == 0x18), 'Fault interrupt enabled for FLT4/FLT5', 'IER FLT4IE FLT5IE', f'IER {r[8]:#06x}')
+    L('L0-CMP-01.e', J((fltr & ALL_FLT) == ALL_FLT and (fltr >> 31) & 1),
+      'Every timer A-F listens to every armed fault input (FLT1-6), FLTLCK set', 'FLT1-6EN, FLTLCK on all six',
+      f'AND of FLTxR {fltr:#010x}')
+    L('L0-CMP-01.f', J((r[8] & 0x7F) == 0x5F), 'Fault interrupt enabled for every armed fault input, not the system fault',
+      'IER 0x5f (FLT1-5 bits 0-4, FLT6 bit 6)', f'IER {r[8]:#06x}')
 
     # L0-CMP-02 locks hold against wild writes
     lk = r[9]
@@ -86,16 +91,19 @@ def main():
       'all 5 kept', f'kept {lk:05b} (b0 COMP1, b1 COMP3, b2 FLTINR1, b3 FLTINR2, b4 FLTxR)')
 
     # L0-CMP-03/04 trips
-    for cid, name, fi, ci, pi, fl in (('L0-CMP-03', 'I1_LOW (PA1, COMP1, FLT4)', 10, 11, 12, 4),
-                                      ('L0-CMP-04', 'I2_LOW (PC1, COMP3, FLT5)', 13, 14, 15, 5)):
-        f, cyc, pins = r[fi], r[ci], r[pi]
+    for cid, name, fi, ci, pi, fl, pa in (('L0-CMP-03', 'I1_LOW (PA1, COMP1, FLT4)', 10, 11, 12, 4, 40),
+                                          ('L0-CMP-04', 'I2_LOW (PC1, COMP3, FLT5)', 13, 14, 15, 5, 41)):
+        f, cyc, pins, path = r[fi], r[ci], r[pi], r[pa]
         mode = f & 3
         L(f'{cid}.a', J(mode in (1, 2) and (f >> 8) & 1 and (f >> 16) & (1 << (fl - 1))),
           f'{name}: a step above the limit sets the HRTIM fault flag', 'flag set',
           f"mode {'output' if mode == 1 else 'charged analog' if mode == 2 else 'none'}, tripped {(f >> 16) & 0x3F:06b}")
-        us = cyc / hz * 1e6
-        L(f'{cid}.b', J(mode and 0 < us <= COMPARATOR_REACTION_US), f'{name}: step to fault flag',
-          f'<= {COMPARATOR_REACTION_US} us', f'{us:.3f} us ({cyc} cycles)')
+        us, pus = cyc / hz * 1e6, path / hz * 1e6
+        L(f'{cid}.b', J(mode and 0 < pus <= COMPARATOR_REACTION_US),
+          f'{name}: comparator output to HRTIM fault flag (comparator, 282 ns filter, fault input)',
+          f'<= {COMPARATOR_REACTION_US} us', f'{pus:.3f} us ({path} cycles)')
+        L(f'{cid}.f', 'INFO', f'{name}: pin step to fault flag, including the GPIO write, the pad and the polling loop',
+          'information', f'{us:.3f} us ({cyc} cycles)')
         L(f'{cid}.c', J(mode and pins & mask == 0), f'{name}: every switching PWM pin low after the trip',
           f'0x000 on mask {mask:#05x}', f'{pins & mask:#05x}')
         L(f'{cid}.d', J((f >> 9) & 1 and (f >> 10) & 1), f'{name}: trip latched, PWM refused while latched', 'latched, refused',
@@ -124,18 +132,60 @@ def main():
       'A trip stays latched across a software reset; PWM refused until clearFault(), then back',
       'latched, refused, cleared, back', f"{boots['LATCH_RESET']} reset(s), flags {lt:04b}")
 
+    # L0-AWD-01 watchdog path configuration (Twist 1.4.1, test overlay: current low limits -11 A)
+    c1, c2, tr1, tr2, tr3, tr3b = r[24], r[25], r[26], r[27], r[28], r[29]
+    a2, a3, b3, ee1, ee2, data = r[30], r[31], r[32], r[33], r[34], r[35]
+    L('L0-AWD-01.a', J((c1 >> 12) & 1 and (c2 >> 12) & 1 and (c1 >> 10) & 3 and (c2 >> 10) & 3),
+      'ADC1/ADC2: overrun mode overwrite, hardware trigger', 'OVRMOD 1, EXTEN != 0',
+      f'ADC1 CFGR {c1:#010x}, ADC2 CFGR {c2:#010x}')
+    L('L0-AWD-01.b', J((c1 >> 23) & 1 and (c1 >> 22) & 1 and ((c1 >> 26) & 0x1F) == 2 and tr1 == (3400 << 16) | (1 << 12)),
+      'I1_LOW on ADC1 AWD1: channel 2, single channel, window 0-3400, 2-conversion filter',
+      'AWD1EN AWD1SGL AWD1CH=2, TR1 0x0d481000', f'CFGR {c1:#010x}, TR1 {tr1:#010x}')
+    L('L0-AWD-01.c', J(a2 == 1 << 9 and tr2 == 208 << 16 and a3 == 1 << 1 and tr3 == 225 << 16 and b3 == 1 << 7 and tr3b == 212 << 16),
+      'V_HIGH ADC1 AWD2 (ch 9, high 208), V1_LOW ADC1 AWD3 (ch 1, high 225), I2_LOW ADC2 AWD3 (ch 7, 0-212); 8-bit windows, low side open for voltages',
+      'as allocated', f'AWD2CR {a2:#x} TR2 {tr2:#x}, AWD3CR {a3:#x} TR3 {tr3:#x}, ADC2 AWD3CR {b3:#x} TR3 {tr3b:#x}')
+    srcs = [(ee1 >> (6 * k)) & 3 for k in range(3)] + [ee2 & 3]
+    L('L0-AWD-01.d', J(srcs == [3, 3, 3, 3]), 'External events 1, 2, 3 and 6 sourced by the ADC watchdogs',
+      'EE1/2/3/6 SRC = 11', f'EECR1 {ee1:#010x}, EECR2 {ee2:#010x}')
+    i1, i2 = r[5], r[6]
+    bytes_ = [(i1 >> (8 * k)) & 0xFF for k in range(3)] + [(i2 >> 8) & 0xFF]
+    src1 = [(i2 >> (16 + k)) & 1 for k in (0, 1, 2, 5)]
+    L('L0-AWD-01.e', J(all(b == 0x83 for b in bytes_) and src1 == [1, 1, 1, 1]),
+      'FLT1, FLT2, FLT3, FLT6: enabled, active high, source external event, no filter, locked',
+      'E=1 P=1 SRC=10 F=0 LCK=1', f'FLT1-3,6 {[hex(b) for b in bytes_]}, SRC1 {src1}')
+    L('L0-AWD-01.f', J(data & 1 and ((data >> 8) & 0xFF) == 3 and ((data >> 16) & 0xFF) == 1 and (data >> 24) & 1),
+      'Data acquisition started by the Safety API with the watched channels; every watchdog self-test passed',
+      'started, ADC1 3 channels, ADC2 1, self-tests passed',
+      f'started {data & 1}, ADC1 {(data >> 8) & 0xFF}, ADC2 {(data >> 16) & 0xFF}, passed {(data >> 24) & 1}')
+    L('L0-AWD-01.g', J(r[39] == ALL_FLT), 'All six fault inputs armed (comparators and watchdogs)', f'{ALL_FLT:06b}',
+      f'{r[39]:06b}')
+    # L0-AWD-02 trip through a watchdog
+    f, cyc, pins = r[36], r[37], r[38]
+    mode = f & 3
+    us = cyc / hz * 1e6
+    L('L0-AWD-02.a', J(mode in (1, 2) and (f >> 8) & 1), 'V_HIGH above its window sets the HRTIM fault flag (FLT2)',
+      'flag set', f"mode {'output' if mode == 1 else 'charged analog' if mode == 2 else 'none'}")
+    L('L0-AWD-02.b', J(mode and 0 < us <= WATCHDOG_REACTION_US), 'V_HIGH: step to fault flag',
+      f'<= {WATCHDOG_REACTION_US:g} us', f'{us:.2f} us ({cyc} cycles)')
+    L('L0-AWD-02.c', J(mode and pins & mask == 0), 'V_HIGH: every switching PWM pin low after the trip',
+      f'0x000 on mask {mask:#05x}', f'{pins & mask:#05x}')
+    L('L0-AWD-02.d', J((f >> 9) & 1 and (f >> 10) & 1 and (f >> 11) & 1 and (f >> 12) & 1 and (f >> 13) & 1),
+      'V_HIGH: latched, PWM refused, clear refused while beyond, accepted once back, PWM back',
+      'latched, refused, refused, cleared, back', f'flags {(f >> 9) & 0x1F:05b}')
+
     with open(os.path.join(a.out, 'report.json'), 'w') as f:
         json.dump(log, f, indent=1)
     th.write_target_manifest(
-        a.out, 'L0-CMP · Comparator path on the Spin',
+        a.out, 'L0-CMP / L0-AWD · Hardware trips on the Spin',
         'Checks that each comparator trip the build allocated is armed, self-tested and locked before the first PWM '
         'output, that a sensor beyond its limit turns every PWM output off in hardware within the declared time, that '
         'the locks hold, that a threshold changed behind the API trips, and that a trip stays latched (ADR 0009).',
-        ['L0-CMP-'],
+        ['L0-CMP-', 'L0-AWD-'],
         [['Board', 'Bare Spin with the Twist 1.4.1 devicetree: I1_LOW on PA1 (COMP1/DAC3_CH1 -> FLT4), I2_LOW on PC1 '
                    '(COMP3/DAC1_CH1 -> FLT5), high limit 7 A = DAC 3400; PWM A, C, D, E, F at 200 kHz'],
-         ['Stimulus', 'the firmware steps the floating sensor pin to 3.3 V (GPIO output, or charged then analog); '
-                      'test code only'],
+         ['Stimulus', 'comparator: the firmware steps the floating sensor pin to 3.3 V; watchdog: ADC1 stopped, '
+                      'a window every reading falls out of, ADC1 restarted on its HRTIM trigger (a pin cannot hold a '
+                      'level against the ADC sampling capacitor); test code only'],
          ['Timing', 'DWT cycles from the step to the HRTIM fault flag; declared <= 0.5 us (282 ns filter + 31 ns '
                     'comparator). The pin itself rises in a few ns; a scope check comes with the SPOC bench'],
          ['Not covered here', 'the low-bound (inverted) comparator in service: the arming self-test drives every '

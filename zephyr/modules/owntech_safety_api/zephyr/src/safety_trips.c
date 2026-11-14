@@ -89,6 +89,10 @@ static uint16_t dac_now[SAFETY_COMPARATOR_TRIPS];   /* current threshold (tighte
 #define FLT_FILTER_282NS    LL_HRTIM_FLT_FILTER_8   /* fHRTIM/8, N = 6: 282 ns at 170 MHz (Table 236) */
 #define DAC_FULL_SCALE      4095U
 
+/* Data acquisition glue (safety_data.cpp, shield builds only). */
+__attribute__((weak)) bool safety_data_started(void) { return true; }
+__attribute__((weak)) int safety_data_start(void) { return 0; }
+
 static volatile bool armed;
 static volatile uint32_t armed_flt_mask;
 static volatile uint32_t trip_flt_mask;   /* fault inputs that tripped (from the fault interrupt) */
@@ -136,9 +140,22 @@ static GPIO_TypeDef *gpio_of(char port)
 	}
 }
 
+/* HRTIM ISR/ICR/IER bit of fault input flt: FLT1-5 are bits 0-4, FLT6 is bit 6
+ * (bit 5 is the system fault). */
 static uint32_t hrtim_flt_flag(uint8_t flt)
 {
-	return HRTIM_ISR_FLT1 << (flt - 1U);
+	return (flt == 6U) ? HRTIM_ISR_FLT6 : (HRTIM_ISR_FLT1 << (flt - 1U));
+}
+
+/* Internal mask (bit n = FLTn+1) to and from the HRTIM ISR/ICR/IER layout. */
+static uint32_t flt_to_hw(uint32_t mask)
+{
+	return (mask & 0x1FU) | ((mask & 0x20U) ? HRTIM_ISR_FLT6 : 0U);
+}
+
+static uint32_t flt_from_hw(uint32_t hw)
+{
+	return (hw & 0x1FU) | ((hw & HRTIM_ISR_FLT6) ? 0x20U : 0U);
 }
 
 static bool wait_flag(uint8_t flt, bool set, uint32_t us)
@@ -263,16 +280,233 @@ static int functional_test(const struct comparator_trip *t)
 }
 #endif
 
+/* ---- ADC-watchdog path (#19) -----------------------------------------------
+ *
+ * The watchdogs watch data acquisition's own regular conversions (hardware
+ * triggered, DMA): the Safety API adds no conversion and no interrupt. Their
+ * channels are enabled through DataAPI (safety_data.cpp) and everything else is
+ * set by adc_safety_before_start(), the only moment the registers are writable
+ * (RM0440 §21.7: TRx, AWDxCR and the CFGR watchdog bits need ADSTART = 0). The
+ * watchdog output reaches the HRTIM fault input through the external event of
+ * the same number (EExSRC = 11, FLTxSRC = 10). The AWD flag is sticky: the fault
+ * input stays active until clearFault() clears it with the value back inside.
+ */
+
+struct watchdog_trip {
+	const char *sensor;
+	uint8_t adc, awd, channel, flt;
+	uint16_t lo, hi;
+};
+
+#if SAFETY_WATCHDOG_TRIPS > 0
+static const struct watchdog_trip awds[] = { SAFETY_WATCHDOG_TABLE };
+static volatile uint8_t awd_state[SAFETY_WATCHDOG_TRIPS];   /* 0 none, 1 self-test passed, 2 failed */
+#endif
+
+#define AWDFILT_TWO   (1U << ADC_TR1_AWDFILT_Pos)   /* AWD1: two consecutive conversions out of the window */
+#define ADC_WAIT_US   100U
+
+static ADC_TypeDef *adc_of(uint8_t n)
+{
+	return (n == 1U) ? ADC1 : (n == 2U) ? ADC2 : NULL;
+}
+
+static uint32_t awd_flag(uint8_t k)
+{
+	return (k == 1U) ? ADC_ISR_AWD1 : (k == 2U) ? ADC_ISR_AWD2 : ADC_ISR_AWD3;
+}
+
+#if SAFETY_WATCHDOG_TRIPS > 0
+static void awd_window(ADC_TypeDef *a, uint8_t k, uint32_t lo, uint32_t hi, bool filter)
+{
+	if (k == 1U) {
+		a->TR1 = (hi << ADC_TR1_HT1_Pos) | (filter ? AWDFILT_TWO : 0U) | lo;
+	} else if (k == 2U) {
+		a->TR2 = (hi << ADC_TR2_HT2_Pos) | lo;
+	} else {
+		a->TR3 = (hi << ADC_TR3_HT3_Pos) | lo;
+	}
+}
+
+static void awd_enable(ADC_TypeDef *a, const struct watchdog_trip *w)
+{
+	if (w->awd == 1U) {
+		a->CFGR = (a->CFGR & ~ADC_CFGR_AWD1CH) | ((uint32_t)w->channel << ADC_CFGR_AWD1CH_Pos)
+			| ADC_CFGR_AWD1SGL | ADC_CFGR_AWD1EN;
+	} else if (w->awd == 2U) {
+		a->AWD2CR |= 1U << w->channel;
+	} else {
+		a->AWD3CR |= 1U << w->channel;
+	}
+}
+
+static void eev_fault_config(uint8_t flt)
+{
+	uint32_t ev = 1U << (flt - 1U);   /* LL_HRTIM_EVENT_n */
+	LL_HRTIM_EE_SetSrc(HRTIM1, ev, LL_HRTIM_EEV1SRC_ADC1_AWD1);   /* source 4 (11): the ADC watchdog */
+	LL_HRTIM_EE_SetPolarity(HRTIM1, ev, LL_HRTIM_EE_POLARITY_HIGH);
+	LL_HRTIM_EE_SetSensitivity(HRTIM1, ev, LL_HRTIM_EE_SENSITIVITY_LEVEL);
+	uint32_t f = ll_fault[flt];
+	LL_HRTIM_FLT_Disable(HRTIM1, f);
+	LL_HRTIM_FLT_SetSrc(HRTIM1, f, LL_HRTIM_FLT_SRC_EEVINPUT);
+	LL_HRTIM_FLT_SetPolarity(HRTIM1, f, LL_HRTIM_FLT_POLARITY_HIGH);
+	LL_HRTIM_FLT_SetFilter(HRTIM1, f, LL_HRTIM_FLT_FILTER_NONE);
+	LL_HRTIM_FLT_Enable(HRTIM1, f);
+}
+
+/* One software conversion of the watched channel, DMA and hardware trigger
+ * off, with the given window; @return the AWD flag after it. */
+static bool convert_once(ADC_TypeDef *a, const struct watchdog_trip *w, uint32_t lo, uint32_t hi)
+{
+	awd_window(a, w->awd, lo, hi, false);
+	a->ISR = awd_flag(w->awd) | ADC_ISR_EOC | ADC_ISR_EOS | ADC_ISR_OVR;
+	a->CR |= ADC_CR_ADSTART;
+	for (uint32_t i = 0; i < ADC_WAIT_US && !(a->ISR & ADC_ISR_EOC); i++) {
+		k_busy_wait(1);
+	}
+	(void)a->DR;
+	for (uint32_t i = 0; i < ADC_WAIT_US && (a->CR & ADC_CR_ADSTART); i++) {
+		k_busy_wait(1);
+	}
+	return (a->ISR & awd_flag(w->awd)) != 0U;
+}
+
+/* End-to-end self-test: a window every reading below full scale falls out of
+ * must raise the AWD flag and the HRTIM fault flag; the real window must not. */
+static int awd_self_test(ADC_TypeDef *a, const struct watchdog_trip *w)
+{
+	uint32_t cfgr = a->CFGR, sqr1 = a->SQR1;
+	uint32_t full = (w->awd == 1U) ? 4095U : 255U;
+
+	a->CFGR = cfgr & ~(ADC_CFGR_EXTEN | ADC_CFGR_DMAEN | ADC_CFGR_CONT | ADC_CFGR_DISCEN);
+	a->SQR1 = (uint32_t)w->channel << ADC_SQR1_SQ1_Pos;   /* one conversion: L = 0 */
+	HRTIM1->sCommonRegs.ICR = hrtim_flt_flag(w->flt);
+
+	bool out = convert_once(a, w, full, full);
+	k_busy_wait(2);
+	bool tripped = out && wait_flag(w->flt, true, 20);
+
+	bool still = convert_once(a, w, w->lo, w->hi);
+	a->ISR = awd_flag(w->awd);
+	HRTIM1->sCommonRegs.ICR = hrtim_flt_flag(w->flt);
+	k_busy_wait(2);
+	bool quiet = !still && wait_flag(w->flt, false, 20);
+
+	awd_window(a, w->awd, w->lo, w->hi, true);
+	a->SQR1 = sqr1;
+	a->CFGR = cfgr;
+	a->ISR = awd_flag(w->awd) | ADC_ISR_EOC | ADC_ISR_EOS | ADC_ISR_OVR;
+	HRTIM1->sCommonRegs.ICR = hrtim_flt_flag(w->flt);
+
+	if (!tripped) {
+		snprintk(arm_error, sizeof(arm_error), "ADC%u AWD%u (%s) did not trip in its self-test%s",
+			 w->adc, w->awd, w->sensor, out ? " (HRTIM fault input)" : " (ADC watchdog)");
+		return -1;
+	}
+	if (!quiet) {
+		snprintk(arm_error, sizeof(arm_error), "%s already outside its window at start", w->sensor);
+		return -1;
+	}
+	return 0;
+}
+#endif
+
+/* Called by the ADC driver between configuration and start (ADC enabled, not
+ * converting): watchdogs, overrun mode, hardware trigger, self-test. */
+void adc_safety_before_start(uint8_t adc_num)
+{
+#if SAFETY_WATCHDOG_TRIPS > 0
+	ADC_TypeDef *a = adc_of(adc_num);
+	bool mine = false;
+
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		mine |= (awds[i].adc == adc_num);
+	}
+	if (a == NULL || !mine) {
+		return;
+	}
+	/* The HRTIM fault inputs are set up before the HRTIM driver runs too. */
+	RCC->APB2ENR |= RCC_APB2ENR_HRTIM1EN;
+	(void)RCC->APB2ENR;
+
+	/* Keep converting even if nobody reads the data (RM0440 §21.4.21). */
+	a->CFGR |= ADC_CFGR_OVRMOD;
+	/* The data-acquisition hook gave a software-triggered ADC its HRTIM trigger
+	 * (safety_data.cpp); make sure that trigger has a source: the master period
+	 * if no leg triggers it (ADC1: trigger 1, ADC2: trigger 3). */
+	uint32_t trig = (adc_num == 1U) ? LL_HRTIM_ADCTRIG_1 : LL_HRTIM_ADCTRIG_3;
+	bool hw_trigger = (a->CFGR & ADC_CFGR_EXTEN) != 0U;
+	if (LL_HRTIM_GetADCTrigSrc(HRTIM1, trig) == 0U) {
+		LL_HRTIM_SetADCTrigSrc(HRTIM1, trig, LL_HRTIM_ADCTRIG_SRC13_MPER);
+	}
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		const struct watchdog_trip *w = &awds[i];
+		if (w->adc != adc_num) {
+			continue;
+		}
+		awd_enable(a, w);
+		if (armed) {
+			/* Data acquisition restarted with the trips locked (PWM may run):
+			 * reprogram the window only; a self-test would trip for real. */
+			awd_window(a, w->awd, w->lo, w->hi, true);
+			continue;
+		}
+		eev_fault_config(w->flt);
+		if (!hw_trigger) {
+			snprintk(arm_error, sizeof(arm_error), "ADC%u is software-triggered: its watchdog would see "
+				 "data only when the application asks", adc_num);
+			awd_state[i] = 2U;
+			printk("safety: %s\n", arm_error);
+			continue;
+		}
+		awd_state[i] = (awd_self_test(a, w) == 0) ? 1U : 2U;
+		if (awd_state[i] != 1U) {
+			printk("safety: %s\n", arm_error);
+		}
+	}
+#else
+	ARG_UNUSED(adc_num);
+#endif
+}
+
+int safety_trips_watchdog_count(void)
+{
+	return SAFETY_WATCHDOG_TRIPS;
+}
+
+void safety_trips_watchdog_channel(int index, uint8_t *adc, uint8_t *channel)
+{
+#if SAFETY_WATCHDOG_TRIPS > 0
+	*adc = awds[index].adc;
+	*channel = awds[index].channel;
+#else
+	ARG_UNUSED(index);
+	*adc = 0U;
+	*channel = 0U;
+#endif
+}
+
+int safety_trips_watchdog_state(int index)
+{
+#if SAFETY_WATCHDOG_TRIPS > 0
+	return (index >= 0 && index < SAFETY_WATCHDOG_TRIPS) ? awd_state[index] : -1;
+#else
+	ARG_UNUSED(index);
+	return -1;
+#endif
+}
+
 /* Fault interrupt: the hardware already turned the outputs off; this records
  * the trip so it stays latched across a reset (ADR 0009). Register-only, so it
  * can run at zero latency. */
 static void hrtim_fault_isr(const void *arg)
 {
 	ARG_UNUSED(arg);
-	uint32_t flags = HRTIM1->sCommonRegs.ISR & 0x3FU;   /* FLT1..FLT6 */
+	uint32_t hw = HRTIM1->sCommonRegs.ISR & flt_to_hw(0x3FU);   /* FLT1..FLT6 */
+	uint32_t flags = flt_from_hw(hw);
 
-	HRTIM1->sCommonRegs.ICR = flags;
-	HRTIM1->sCommonRegs.IER &= ~flags;   /* a lasting fault would re-raise it at once */
+	HRTIM1->sCommonRegs.ICR = hw;
+	HRTIM1->sCommonRegs.IER &= ~hw;   /* a lasting fault would re-raise it at once */
 	if (flags != 0U) {
 		trip_flt_mask |= flags;
 		safety_outputs_disable_all();
@@ -287,11 +521,46 @@ int safety_trips_arm(void)
 	}
 	arm_error[0] = '\0';
 	uint32_t mask = 0U;
-#if SAFETY_COMPARATOR_TRIPS > 0
-	char text[96] = "";
+	char text[128] = "";
 	int len = 0;
 
+#if SAFETY_WATCHDOG_TRIPS > 0
+	/* Watchdog paths need data acquisition running: start it if the first
+	 * PWM output comes first (the scheduler then keeps it as it is). */
+	if (!safety_data_started()) {
+		if (safety_data_start() != 0) {
+			printk("safety: arming failed: data acquisition did not start. PWM refused (ADR 0009).\n");
+			return -1;
+		}
+	}
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		if (awd_state[i] != 1U) {
+			if (arm_error[0] == '\0') {
+				snprintk(arm_error, sizeof(arm_error), "ADC%u AWD%u (%s) not configured",
+					 awds[i].adc, awds[i].awd, awds[i].sensor);
+			}
+			printk("safety: arming failed: %s. PWM refused (ADR 0009).\n", arm_error);
+			return -1;
+		}
+		mask |= 1U << (awds[i].flt - 1U);
+		len += snprintk(text + len, sizeof(text) - len, "%s%s awd", len ? ", " : "", awds[i].sensor);
+	}
+	/* The AWD flag is sticky: clear it, let fresh conversions come, and refuse
+	 * if a limit is already exceeded before the timers listen to it. */
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		adc_of(awds[i].adc)->ISR = awd_flag(awds[i].awd);
+	}
+	k_busy_wait(200);
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		if (adc_of(awds[i].adc)->ISR & awd_flag(awds[i].awd)) {
+			snprintk(arm_error, sizeof(arm_error), "%s already outside its window at arming", awds[i].sensor);
+			printk("safety: arming failed: %s. PWM refused (ADR 0009).\n", arm_error);
+			return -1;
+		}
+	}
+#endif
 	LL_HRTIM_FLT_SetPrescaler(HRTIM1, LL_HRTIM_FLT_PRESCALER_DIV1);
+#if SAFETY_COMPARATOR_TRIPS > 0
 	for (size_t i = 0; i < SAFETY_COMPARATOR_TRIPS; i++) {
 		const struct comparator_trip *t = &trips[i];
 		int rc = configure(t);
@@ -314,6 +583,7 @@ int safety_trips_arm(void)
 		len += snprintk(text + len, sizeof(text) - len, "%s%s comp%c", len ? ", " : "", t->sensor,
 				t->high_bound ? '+' : '-');
 	}
+#endif
 	/* Every timer listens to the fault inputs, then everything is locked. */
 	uint32_t faults = 0U;
 	for (uint8_t f = 1; f <= 6; f++) {
@@ -328,15 +598,16 @@ int safety_trips_arm(void)
 		}
 		LL_HRTIM_TIM_LockFault(HRTIM1, ll_timers[k]);
 	}
+#if SAFETY_COMPARATOR_TRIPS > 0
 	for (size_t i = 0; i < SAFETY_COMPARATOR_TRIPS; i++) {
 		if (mask & (1U << (trips[i].flt - 1U))) {
 			*comp_csr(trips[i].comp) |= COMP_CSR_LOCK;
 		}
 	}
-	HRTIM1->sCommonRegs.ICR = mask;
-	HRTIM1->sCommonRegs.IER |= mask;
-	printk("safety: armed %s · self-test OK\n", len ? text : "(no comparator trip)");
 #endif
+	HRTIM1->sCommonRegs.ICR = flt_to_hw(mask);
+	HRTIM1->sCommonRegs.IER |= flt_to_hw(mask);
+	printk("safety: armed %s · self-test OK\n", len ? text : "(no hardware trip)");
 	IRQ_CONNECT(HRTIM1_FLT_IRQn, 0, hrtim_fault_isr, NULL, IRQ_ZERO_LATENCY);
 	irq_enable(HRTIM1_FLT_IRQn);
 	armed_flt_mask = mask;
@@ -376,21 +647,55 @@ bool safety_trips_source_active(void)
 	return false;
 }
 
+bool safety_trips_settle_and_check(void)
+{
+#if SAFETY_WATCHDOG_TRIPS > 0
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		adc_of(awds[i].adc)->ISR = awd_flag(awds[i].awd);   /* sticky: clear, then see if it comes back */
+	}
+	k_busy_wait(200);   /* several conversions at any trigger rate above 10 kHz */
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		if ((armed_flt_mask & (1U << (awds[i].flt - 1U))) &&
+		    (adc_of(awds[i].adc)->ISR & awd_flag(awds[i].awd))) {
+			return true;
+		}
+	}
+#endif
+	return safety_trips_source_active();
+}
+
 void safety_trips_clear(void)
 {
 	uint32_t m = armed_flt_mask;
 
 	trip_flt_mask = 0U;
-	HRTIM1->sCommonRegs.ICR = m;
-	HRTIM1->sCommonRegs.IER |= m;
+	HRTIM1->sCommonRegs.ICR = flt_to_hw(m);
+	HRTIM1->sCommonRegs.IER |= flt_to_hw(m);
 }
 
 int safety_trips_check(void)
 {
-#if SAFETY_COMPARATOR_TRIPS > 0
 	if (!armed) {
 		return 0;
 	}
+#if SAFETY_WATCHDOG_TRIPS > 0
+	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+		const struct watchdog_trip *w = &awds[i];
+		ADC_TypeDef *a = adc_of(w->adc);
+		uint32_t tr = (w->awd == 1U) ? (a->TR1 & (ADC_TR1_HT1 | ADC_TR1_LT1)) :
+			      (w->awd == 2U) ? a->TR2 : a->TR3;
+		uint32_t hshift = (w->awd == 1U) ? ADC_TR1_HT1_Pos : ADC_TR2_HT2_Pos;
+		bool en = (w->awd == 1U) ? ((a->CFGR & ADC_CFGR_AWD1EN) != 0U) :
+			  (w->awd == 2U) ? ((a->AWD2CR & (1U << w->channel)) != 0U) :
+			  ((a->AWD3CR & (1U << w->channel)) != 0U);
+		if (!en || tr != (((uint32_t)w->hi << hshift) | w->lo)) {
+			safety_outputs_disable_all();
+			safety_supervision_latch(SAFETY_FAULT_TRIP, 1U << 9 | i);
+			return -1;
+		}
+	}
+#endif
+#if SAFETY_COMPARATOR_TRIPS > 0
 	for (size_t i = 0; i < SAFETY_COMPARATOR_TRIPS; i++) {
 		const struct comparator_trip *t = &trips[i];
 		if (!(armed_flt_mask & (1U << (t->flt - 1U)))) {

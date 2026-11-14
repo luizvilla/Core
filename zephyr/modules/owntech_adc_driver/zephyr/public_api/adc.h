@@ -160,6 +160,12 @@ void adc_configure_use_dma(uint8_t adc_number, bool use_dma);
 /**
  * @brief Starts all configured ADCs.
  */
+/**
+ * @brief Returns the trigger source configured for an ADC (software by default).
+ * @param adc_number Number of the ADC (1 to 5).
+ */
+adc_ev_src_t adc_get_trigger_source(uint8_t adc_number);
+
 void adc_start();
 
 /**

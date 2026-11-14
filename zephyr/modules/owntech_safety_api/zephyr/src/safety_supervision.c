@@ -246,7 +246,7 @@ int safety_supervision_clear_fault(void)
 	if ((HRTIM1->sCommonRegs.OENR & HRTIM_ALL_OUTPUTS) != 0U) {
 		return -1;
 	}
-	if (safety_trips_source_active()) {
+	if (safety_trips_settle_and_check()) {
 		return -1;   /* a limit is still exceeded */
 	}
 	safety_trips_clear();

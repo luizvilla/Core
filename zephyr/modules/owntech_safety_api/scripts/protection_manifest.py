@@ -66,7 +66,9 @@ def build_model(edt):
                 chans.append({'adc': label, 'channel': c.data.get('input'), 'spin_pin': sp,
                               'mcu_pin': pins.get(sp)})
         gain, offset = prop(node, 'default-gain'), prop(node, 'default-offset')
-        sensors[name] = {'gain': f32(gain) if gain is not None else None,
+        dadc = prop(node, 'default-adc', 'UNKNOWN_ADC')
+        sensors[name] = {'default_adc': None if dadc in (None, 'UNKNOWN_ADC') else 'adc' + dadc[-1],
+                         'gain': f32(gain) if gain is not None else None,
                          'offset': f32(offset) if offset is not None else 0.0,
                          'conv': prop(node, 'sensor-conv-type', 'LINEAR'), 'channels': chans}
     limits = []
@@ -75,7 +77,8 @@ def build_model(edt):
                        'high': f32(prop(node, 'threshold-high')), 'low': f32(prop(node, 'threshold-low')),
                        'protection': prop(node, 'protection', 'hardware'), 'exception': prop(node, 'exception'),
                        'comparator_bound': prop(node, 'comparator-bound', 'high'),
-                       'priority': prop(node, 'priority')})
+                       'priority': prop(node, 'priority'),
+                       'hardware_bounds': prop(node, 'hardware-bounds')})
     by_pin = {ch['spin_pin']: n for n, s in sensors.items() for ch in s['channels']}
     legs = []
     for node in edt.compat2okay.get('power-leg', []):
@@ -121,6 +124,24 @@ def comparator_table(alloc):
             '#define SAFETY_COMPARATOR_TABLE \\\n' + '\n'.join(rows) + '\n\n')
 
 
+def watchdog_table(alloc):
+    """C initialisers of the ADC-watchdog trips, for safety_trips.c (one entry per watchdog; a window may cover
+    both bounds of a limit)."""
+    rows, seen = [], set()
+    for l in alloc['limits']:
+        for bound in ('low', 'high'):
+            p = l['paths'][bound]
+            if not p or p['kind'] != 'adc_watchdog' or (p['adc'], p['awd']) in seen:
+                continue
+            seen.add((p['adc'], p['awd']))
+            rows.append(f'    {{ "{l["sensor"]}", {p["adc"][-1]}, {p["awd"]}, {p["channel"]}, {p["flt"]}, '
+                        f'{p["counts_low"]}, {p["counts_high"]} }}, \\')
+    return ('/* sensor, ADC n, watchdog k, channel, FLT (= EEV), window low, window high (12 bits for AWD1, 8 for\n'
+            ' * AWD2/AWD3; a side without hardware protection is open: 0 or full scale) */\n'
+            f'#define SAFETY_WATCHDOG_TRIPS {len(rows)}\n'
+            '#define SAFETY_WATCHDOG_TABLE \\\n' + '\n'.join(rows) + '\n\n')
+
+
 def plan_text(alloc):
     """One-line plan for the boot line: LIMIT low/high path kinds."""
     short = {'comparator': 'comp', 'adc_watchdog': 'awd', 'software': 'sw'}
@@ -163,7 +184,7 @@ def main():
                     f'#define SAFETY_PROTECTION_SHIELD "{shield}"\n'
                     f'#define SAFETY_PROTECTION_PLAN "{text}"\n'
                     f'#define SAFETY_PROTECTION_LIMITS {len(alloc["limits"])}\n'
-                    + comparator_table(alloc) + '#endif\n')
+                    + comparator_table(alloc) + watchdog_table(alloc) + '#endif\n')
     print(f'safety: protection plan for {shield}: {plan_text(alloc)}')
     for l in alloc['limits']:
         print(f'safety:   {l["sensor"]:12s} low {path_text(l["paths"]["low"]):24s} high {path_text(l["paths"]["high"])}')

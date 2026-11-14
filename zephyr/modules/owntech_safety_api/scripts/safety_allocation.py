@@ -46,10 +46,25 @@ def counts(value, gain, offset):
     return max(0, min(ADC_MAX, int(round(raw))))
 
 
+# EEV4/EEV5 are taken by peak-current mode (COMP1/COMP3 -> EEV4/EEV5, owntech_hrtim_driver _CM_init_EEV): the
+# ADC2 watchdogs 1 and 2, which reach FLT4/FLT5 only through them, are never assigned.
+AWD_RESERVED = {('adc2', 1), ('adc2', 2)}
+
+
+def hardware_bounds(limit):
+    """Bounds that need a hardware path: 'hardware-bounds' if set, else both for a current (name starting with I)
+    and the high bound only otherwise (a low voltage is a range check, not a hazard: a boost output starts at 0 V)."""
+    hb = limit.get('hardware_bounds')
+    if hb is None:
+        hb = 'both' if limit['sensor'].upper().startswith('I') else 'high'
+    return ['high', 'low'] if hb == 'both' else [hb]
+
+
 def _bound_order(limit):
-    """Bounds in protection order: the comparator bound first."""
+    """Bounds needing hardware, in protection order: the comparator bound first."""
+    need = hardware_bounds(limit)
     first = limit.get('comparator_bound', 'high')
-    return [first, 'low' if first == 'high' else 'high']
+    return sorted(need, key=lambda b: 0 if b == first else 1)
 
 
 def allocate(model):
@@ -100,9 +115,12 @@ def allocate(model):
             results[i] = entry
             continue
         need = _bound_order(lim)
+        soft = [x for x in ('high', 'low') if x not in need]
+        for x in soft:
+            entry['paths'][x] = {'kind': 'software'}
         # 1. Comparator on the comparator bound, from any channel's pin.
-        b = need[0]
-        for ch in sensor['channels']:
+        b = need[0] if need else None
+        for ch in (sensor['channels'] if b == lim.get('comparator_bound', 'high') else []):
             comp = COMP_INP.get(ch.get('mcu_pin'), (None,))[0]
             flt = COMP_FLT.get(comp)
             if comp is None or flt is None or comp in used_comp or flt in used_flt or not linear:
@@ -123,21 +141,26 @@ def allocate(model):
         left = [x for x in need if entry['paths'][x] is None]
         if left and linear:
             done = False
-            for ch in sensor['channels']:
+            # The watchdog only sees what data acquisition converts: the sensor's default ADC (any, if it has none).
+            dflt = sensor.get('default_adc')
+            chans = [c for c in sensor['channels'] if dflt is None or c['adc'] == dflt]
+            for ch in chans:
                 for k in (1, 2, 3):
                     key = (ch['adc'], k)
                     flt = AWD_FLT.get(key)
-                    if flt is None or key in used_awd or flt in used_flt:
+                    if flt is None or key in used_awd or key in AWD_RESERVED or flt in used_flt:
                         continue
                     used_awd[key] = name
                     used_flt[flt] = f'{name} {"/".join(left)} ({ch["adc"].upper()} AWD{k})'
                     shift = 12 - AWD_BITS[k]
                     hi, lo = counts(lim.get('high'), gain, offset), counts(lim.get('low'), gain, offset)
+                    # A bound without hardware protection leaves that side of the window open.
+                    c_hi = (hi >> shift) if 'high' in need and hi is not None else (ADC_MAX >> shift)
+                    c_lo = (lo >> shift) if 'low' in need and lo is not None else 0
                     for x in left:
                         entry['paths'][x] = {'kind': 'adc_watchdog', 'adc': ch['adc'], 'awd': k, 'eev': flt,
                                              'flt': flt, 'channel': ch['channel'], 'bits': AWD_BITS[k],
-                                             'counts_high': None if hi is None else hi >> shift,
-                                             'counts_low': None if lo is None else lo >> shift}
+                                             'counts_high': c_hi, 'counts_low': c_lo}
                     done = True
                     break
                 if done:
@@ -149,7 +172,9 @@ def allocate(model):
                     entry['paths'][x] = {'kind': 'software', 'exception': entry['exception']}
                 entry['covered'] = True
             else:
-                why = 'not a linear sensor' if not linear else 'no free comparator or ADC watchdog'
+                why = ('not a linear sensor' if not linear else
+                       'no free comparator, and no free ADC watchdog on its default ADC '
+                       f'({(sensor.get("default_adc") or "any").upper()})')
                 errors.append(f'{name}: no hardware path for the {" and ".join(missing)} bound ({why}). '
                               f'Route the sensor to a free comparator input or ADC1/ADC2 channel, or state why '
                               f'software protection is acceptable with exception = "..." on its safety-thresholds node.')

@@ -1,0 +1,10 @@
+/* Bare Spin: with no shield the current sensor pins float near 0 V, which the
+ * Twist scaling reads as -10 A, below the -7 A low limit. The test lowers the two
+ * low limits to -11 A so a floating pin sits inside the ADC-watchdog window. */
+&i1lowtd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+};
+
+&i2lowtd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+};

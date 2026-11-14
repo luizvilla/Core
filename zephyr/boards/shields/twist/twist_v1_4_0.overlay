@@ -231,7 +231,6 @@
 			threshold-name = "V1_LOW_TD";
 			threshold-high = <0x428c0000>; /* 70.0 */
 			threshold-low = <0xc1200000>; /* -10.0 */
-			exception = "legacy board: every HRTIM fault input is taken by higher-priority limits (ADR 0009); software path only";
 			status = "okay";
 		};
 
@@ -281,6 +280,7 @@
 			threshold-name = "I_HIGH_TD";
 			threshold-high = <0x40e00000>; /* 7.0 */
 			threshold-low = <0xc0e00000>; /* -7.0 */
+			exception = "legacy board: the only free watchdog on its default ADC (ADC2) protects the I2_LOW low bound (ADR 0009); software path only";
 			status = "okay";
 		};
 

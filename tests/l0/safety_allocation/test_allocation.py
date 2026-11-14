@@ -61,18 +61,19 @@ def main():
     line('L0-ALC-03', ('adc2', 1) not in awd and a['resources']['flt'].get('FLT4', '').endswith('(COMP1)'),
          'COMP1 uses FLT4: ADC2 AWD1 (FLT4) is skipped', 'no ADC2 AWD1', f'watchdogs {sorted(set(awd))}')
 
-    # 04 exhaustion: 7 non-comparator limits on ADC1/ADC2 -> 6 windows, the 7th is an error; with an exception, covered
-    sens = {f'V{i}': sensor(26, 'PC2', (('adc1', 8), ('adc2', 8))) for i in range(7)}
-    lims = [limit(f'V{i}', 70, -10) for i in range(7)]
+    # 04 exhaustion: 5 non-comparator limits, 4 usable watchdogs (ADC1 AWD1-3, ADC2 AWD3; ADC2 AWD1/2 reserved for
+    # peak-current mode) -> the 5th is an error; with an exception, covered
+    sens = {f'V{i}': sensor(26, 'PC2', (('adc1', 8), ('adc2', 8))) for i in range(5)}
+    lims = [limit(f'V{i}', 70, -10) for i in range(5)]
     a = allocate({'sensors': sens, 'limits': lims})
-    line('L0-ALC-04.a', len(a['errors']) == 1 and 'V6' in a['errors'][0] and 'exception' in a['errors'][0],
-         'Seventh limit with no free fault input: one error naming it and the fix', '1 error on V6 with the fix',
+    line('L0-ALC-04.a', len(a['errors']) == 1 and 'V4' in a['errors'][0] and 'exception' in a['errors'][0],
+         'Fifth limit with no free watchdog: one error naming it and the fix', '1 error on V4 with the fix',
          f"{len(a['errors'])} error(s): {a['errors'][0][:60] if a['errors'] else ''}")
-    lims[6]['exception'] = 'test'
+    lims[4]['exception'] = 'test'
     a = allocate({'sensors': sens, 'limits': lims})
-    line('L0-ALC-04.b', not a['errors'] and kinds(a, 'V6') == ('software', 'software'),
+    line('L0-ALC-04.b', not a['errors'] and kinds(a, 'V4') == ('software', 'software'),
          'With an exception, the limit falls back to the software path', 'no error, software/software',
-         f"{len(a['errors'])} errors, {kinds(a, 'V6')}")
+         f"{len(a['errors'])} errors, {kinds(a, 'V4')}")
 
     # 05 protection = software uses no hardware
     a = allocate({'sensors': {'I1': sensor(30, 'PA1')}, 'limits': [limit('I1', protection='software')]})
@@ -80,13 +81,13 @@ def main():
          'protection = software takes no comparator or fault input', 'no FLT used', str(a['resources']['flt']))
 
     # 06 priority decides who gets the last channel
-    sens = {f'V{i}': sensor(26, 'PC2', (('adc1', 8), ('adc2', 8))) for i in range(7)}
-    lims = [limit(f'V{i}', 70, -10, exception='x') for i in range(7)]
-    lims[6]['priority'] = 1
+    sens = {f'V{i}': sensor(26, 'PC2', (('adc1', 8), ('adc2', 8))) for i in range(5)}
+    lims = [limit(f'V{i}', 70, -10, exception='x') for i in range(5)]
+    lims[4]['priority'] = 1
     a = allocate({'sensors': sens, 'limits': lims})
-    line('L0-ALC-06', kinds(a, 'V6') == ('adc_watchdog', 'adc_watchdog') and kinds(a, 'V5')[0] == 'software',
-         'priority 1 on the last-declared limit gives it a hardware window first', 'V6 watchdog, V5 software',
-         f"V6 {kinds(a, 'V6')}, V5 {kinds(a, 'V5')}")
+    line('L0-ALC-06', kinds(a, 'V4')[1] == 'adc_watchdog' and kinds(a, 'V3')[1] == 'software',
+         'priority 1 on the last-declared limit gives it a hardware window first', 'V4 watchdog, V3 software',
+         f"V4 {kinds(a, 'V4')}, V3 {kinds(a, 'V3')}")
 
     # 07 comparator-bound = low: the comparator watches the low bound, inverted
     a = allocate({'sensors': {'I1': sensor(30, 'PA1')}, 'limits': [limit('I1', comparator_bound='low')]})
@@ -118,6 +119,27 @@ def main():
     line('L0-ALC-10', 'Why it matters' in w and 'Fix:' in w and 'reset-state-safe' in w,
          'Safe output not declared safe at reset: warning explains why and how to fix', 'why + fix',
          w[:80] if w else 'no warning')
+    # 13 the watchdog goes on the sensor's default ADC (the one data acquisition converts)
+    sd = sensor(26, 'PC2', (('adc1', 8), ('adc2', 8)))
+    sd['default_adc'] = 'adc2'
+    a = allocate({'sensors': {'IH': sd}, 'limits': [limit('IH')]})
+    p = a['limits'][0]['paths']['high']
+    line('L0-ALC-13', p['kind'] == 'adc_watchdog' and p['adc'] == 'adc2',
+         'A sensor converted on ADC2 by default gets an ADC2 watchdog, never ADC1', 'ADC2', p.get('adc', p['kind']))
+
+    # 14 voltage: hardware on the high bound only by default; the window's low side is open
+    a = allocate({'sensors': {'VH': sensor(27, 'PC3', (('adc1', 9),))}, 'limits': [limit('VH', 100, 10)]})
+    l = a['limits'][0]
+    line('L0-ALC-14', kinds(a, 'VH') == ('software', 'adc_watchdog') and l['paths']['high']['counts_low'] == 0,
+         'A voltage limit needs hardware on its high bound only; the window low side is 0', "software low, watchdog high, low 0",
+         f"{kinds(a, 'VH')}, low counts {l['paths']['high'].get('counts_low')}")
+
+    # 15 ADC2 AWD1/AWD2 stay free for peak-current mode (EEV4/EEV5)
+    sens = {f'V{i}': sensor(26, 'PC2', (('adc2', 8),)) for i in range(3)}
+    a = allocate({'sensors': sens, 'limits': [limit(f'V{i}', 70, -10, exception='x') for i in range(3)]})
+    used = set(a['resources']['adc_watchdogs'])
+    line('L0-ALC-15', 'ADC2 AWD1' not in used and 'ADC2 AWD2' not in used,
+         'ADC2 AWD1 and AWD2 are never assigned (EEV4/EEV5 belong to peak-current mode)', 'not used', str(sorted(used)))
     return 0
 
 

@@ -50,6 +50,8 @@ Copy the closest shield in `zephyr/boards/shields/` and declare, in addition to 
 - **a limit for each protected quantity**, in physical units. It is the board's absolute maximum: user code can only tighten it.
 - **`safe-state`** for each leg if it is not `"open"`.
 - **the safe outputs**, each with its safe level, plus `reset-state-safe;` once you have checked the pull resistor on the schematic.
+- **`hardware-bounds`** where the default is wrong: both bounds of a current and only the high bound of other quantities need hardware by default (a low voltage limit would stop a boost from starting).
+- **`default-adc`** on every sensor: an ADC watchdog can only watch the ADC data acquisition converts the sensor on.
 - **an explicit exception** for any limit that has no hardware path. The build refuses to compile a required protection with no path, unless the exception says so.
 
 Then build. The build stops with one `ERROR:` line per limit that has no hardware path and no exception, saying how to fix it, and warns for safe outputs not declared safe at reset. It writes the **protection manifest** (`.pio/build/<env>/zephyr/safety/protection-manifest.json`) and the boot line (`safety: <shield>: <limit> <low path>-/<high path>+ ...`).

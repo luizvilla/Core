@@ -131,6 +131,18 @@ void adc_configure_use_dma(uint8_t adc_number, bool use_dma)
 	enable_dma[adc_number-1] = use_dma;
 }
 
+adc_ev_src_t adc_get_trigger_source(uint8_t adc_number)
+{
+	if ( (adc_number == 0) || (adc_number > NUMBER_OF_ADCS) )
+		return software;
+	return adc_trigger_sources[adc_number-1];
+}
+
+__attribute__((weak)) void adc_safety_before_start(uint8_t adc_num)
+{
+	(void)adc_num;
+}
+
 void adc_start()
 {
 	/* Initialize ADCs */
@@ -238,6 +250,17 @@ void adc_start()
 			adc_core_configure_trigger_source(adc_num,
 											  LL_ADC_REG_TRIG_EXT_RISING,
 											  trig);
+		}
+	}
+
+	/* Safety API hook (ADR 0009): ADC watchdogs, overrun mode and hardware
+	 * trigger are set here, the only moment their registers are writable
+	 * (ADC enabled, not converting). No-op without the Safety API. */
+	for (uint8_t adc_num = 1 ; adc_num <= NUMBER_OF_ADCS ; adc_num++)
+	{
+		if (enabled_channels_count[adc_num-1] > 0)
+		{
+			adc_safety_before_start(adc_num);
 		}
 	}
 
