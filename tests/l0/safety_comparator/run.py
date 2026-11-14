@@ -21,11 +21,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'common')
 import target_harness as th  # noqa: E402
 
 ENV = 'SAFETY_COMP'
-FIELDS = ['magic', 'layout', 'boot_count', 'ack', 'busy', 'latched_at_boot', 'pending'] + [f'r{i}' for i in range(42)]
+FIELDS = ['magic', 'layout', 'boot_count', 'ack', 'busy', 'latched_at_boot', 'pending'] + [f'r{i}' for i in range(48)]
 # LATCH_RESET reboots: it runs first so the results of the other cases (some beyond the 18 backup registers)
 # are all from the final boot. TIGHTEN changes the I1_LOW threshold: it runs last.
-CASES = [('CLEAR', 0), ('LATCH_RESET', 7), ('CONFIG', 1), ('AWD_CONFIG', 8), ('LOCKS', 2), ('TRIP_I1', 3),
-         ('TRIP_I2', 4), ('AWD_TRIP', 9), ('DAC_TAMPER', 5), ('TIGHTEN', 6)]
+# CLEAR_RULE leaves the board needing a reboot: it runs last.
+CASES = [('CLEAR', 0), ('LATCH_RESET', 7), ('CONFIG', 1), ('AWD_CONFIG', 8), ('SAFE_CONFIG', 10), ('LOCKS', 2),
+         ('TRIP_I1', 3), ('TRIP_I2', 4), ('AWD_TRIP', 9), ('DAC_TAMPER', 5), ('TIGHTEN', 6), ('CLEAR_RULE', 11)]
 COMPARATOR_REACTION_US = 0.5   # declared, ADR 0009 (filter 282 ns + comparator 31 ns max)
 WATCHDOG_REACTION_US = 60.0    # declared, ADR 0009: 3 switching periods at 50 kHz
 ALL_FLT = 0b111111             # Twist 1.4.1: comparators FLT4/FLT5, watchdogs FLT1/FLT2/FLT3/FLT6
@@ -51,11 +52,12 @@ def main():
     for name, code in CASES:
         rep, entry = p.run(name, code)
         log['cases'].append(entry)
-    r = [rep[f'r{i}'] for i in range(42)]
+    r = [rep[f'r{i}'] for i in range(48)]
     log['results'] = r
     boots = {c['case']: c['boots'] for c in log['cases']}
     ok = {c['case']: c['status'] == 'acknowledged' for c in log['cases']}
     hz = r[20] or 170_000_000
+    expect = r[44]   # pin levels the fault state gives (each leg's safe state, from OUTxR)
     mask = r[21] or 0xFF3
     J, L = th.judge, th.line
 
@@ -104,8 +106,8 @@ def main():
           f'<= {COMPARATOR_REACTION_US} us', f'{pus:.3f} us ({path} cycles)')
         L(f'{cid}.f', 'INFO', f'{name}: pin step to fault flag, including the GPIO write, the pad and the polling loop',
           'information', f'{us:.3f} us ({cyc} cycles)')
-        L(f'{cid}.c', J(mode and pins & mask == 0), f'{name}: every switching PWM pin low after the trip',
-          f'0x000 on mask {mask:#05x}', f'{pins & mask:#05x}')
+        L(f'{cid}.c', J(mode and pins & mask == expect & mask), f'{name}: every PWM pin at its leg\'s safe state after the trip',
+          f'{expect & mask:#05x} on mask {mask:#05x}', f'{pins & mask:#05x}')
         L(f'{cid}.d', J((f >> 9) & 1 and (f >> 10) & 1), f'{name}: trip latched, PWM refused while latched', 'latched, refused',
           f'latched {(f >> 9) & 1}, refused {(f >> 10) & 1}')
         L(f'{cid}.e', J((f >> 11) & 1 and (f >> 12) & 1 and (f >> 13) & 1),
@@ -167,11 +169,42 @@ def main():
       'flag set', f"mode {'output' if mode == 1 else 'charged analog' if mode == 2 else 'none'}")
     L('L0-AWD-02.b', J(mode and 0 < us <= WATCHDOG_REACTION_US), 'V_HIGH: step to fault flag',
       f'<= {WATCHDOG_REACTION_US:g} us', f'{us:.2f} us ({cyc} cycles)')
-    L('L0-AWD-02.c', J(mode and pins & mask == 0), 'V_HIGH: every switching PWM pin low after the trip',
-      f'0x000 on mask {mask:#05x}', f'{pins & mask:#05x}')
+    L('L0-AWD-02.c', J(mode and pins & mask == expect & mask), 'V_HIGH: every PWM pin at its leg\'s safe state after the trip',
+      f'{expect & mask:#05x} on mask {mask:#05x}', f'{pins & mask:#05x}')
     L('L0-AWD-02.d', J((f >> 9) & 1 and (f >> 10) & 1 and (f >> 11) & 1 and (f >> 12) & 1 and (f >> 13) & 1),
       'V_HIGH: latched, PWM refused, clear refused while beyond, accepted once back, PWM back',
       'latched, refused, refused, cleared, back', f'flags {(f >> 9) & 0x1F:05b}')
+
+    # L0-SST: safe states, safe outputs, fault record, clear rule (#20)
+    oa, oc = r[42], r[43]
+    def faults(outr):
+        return ((outr >> 4) & 3, (outr >> 20) & 3)
+    L('L0-SST-01.a', J(faults(oa) == (2, 2) and faults(oc) == (2, 1) and expect & mask == 0x020),
+      'Fault levels from the devicetree: LEG1 (timer A) open, LEG2 (timer C) short-low: TC2 (low side) active',
+      'A 10/10, C 10/01, expected pins 0x020', f'A {faults(oa)}, C {faults(oc)}, expected {expect & mask:#05x}')
+    so, legs = r[45], r[47]
+    rc_late = (legs >> 8) & 0xFF
+    L('L0-SST-01.b', J((so >> 8) & 1 and (legs & 0xFF) == 2 and rc_late == 0xFF),
+      'One safe output and two legs declared; setSafeState() refused once armed', 'outputs 1, legs 2, rc -1',
+      f'outputs {(so >> 8) & 1}, legs {legs & 0xFF}, rc {rc_late - 256 if rc_late > 127 else rc_late}')
+    L('L0-SST-02', J(r[12] & mask == 0x020 and r[38] & mask == 0x020),
+      'After a comparator trip and a watchdog trip, LEG2 keeps its low side on and every other switch is off',
+      '0x020 both', f'comparator {r[12] & mask:#05x}, watchdog {r[38] & mask:#05x}')
+    L('L0-SST-03', J(so & 7 == 7), 'The safe output (test relay) drops to its safe level on a comparator trip, a '
+      'watchdog trip and a threshold read-back', 'all three', f'{so & 7:03b} (b0 comparator, b1 watchdog, b2 read-back)')
+    fp = (so >> 16) & 3
+    L('L0-SST-04', J(r[17] & mask == 0x020 and fp == 1),
+      'A fault found by software (threshold read-back) stops through a real hardware fault (external event forced): '
+      'LEG2 shorted, not opened', '0x020, path external event', f"{r[17] & mask:#05x}, path {['none', 'external event', 'comparator'][fp]}")
+    tw = th.read_words(th.symbol(ENV, 'g_safety_cmp_text')[0], 24) or []
+    text = b''.join(w.to_bytes(4, 'little') for w in tw).split(b'\0')[0].decode(errors='replace')
+    L('L0-SST-05', J('I1_LOW high limit (COMP1->FLT4)' in text), 'The fault description names the sensor, bound and path',
+      'contains "I1_LOW high limit (COMP1->FLT4)"', text[:90] or '(empty)')
+    cr = r[46]
+    rcs = [((cr >> (8 * k)) & 0xFF) for k in range(3)]
+    rcs = [x - 256 if x > 127 else x for x in rcs]
+    L('L0-SST-06', J(rcs == [0, -2, -2]), 'A second fault within the repeat-clear window needs a reboot',
+      'clear 0, then -2, still -2 later', str(rcs))
 
     with open(os.path.join(a.out, 'report.json'), 'w') as f:
         json.dump(log, f, indent=1)
@@ -180,7 +213,7 @@ def main():
         'Checks that each comparator trip the build allocated is armed, self-tested and locked before the first PWM '
         'output, that a sensor beyond its limit turns every PWM output off in hardware within the declared time, that '
         'the locks hold, that a threshold changed behind the API trips, and that a trip stays latched (ADR 0009).',
-        ['L0-CMP-', 'L0-AWD-'],
+        ['L0-CMP-', 'L0-AWD-', 'L0-SST-'],
         [['Board', 'Bare Spin with the Twist 1.4.1 devicetree: I1_LOW on PA1 (COMP1/DAC3_CH1 -> FLT4), I2_LOW on PC1 '
                    '(COMP3/DAC1_CH1 -> FLT5), high limit 7 A = DAC 3400; PWM A, C, D, E, F at 200 kHz'],
          ['Stimulus', 'comparator: the firmware steps the floating sensor pin to 3.3 V; watchdog: ADC1 stopped, '

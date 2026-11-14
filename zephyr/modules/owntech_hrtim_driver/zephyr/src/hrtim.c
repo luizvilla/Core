@@ -759,13 +759,14 @@ void hrtim_tu_gpio_init(hrtim_tu_number_t tu_number)
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
 
-    /* Fault state Inactive on both outputs (ADR 0009). An output whose fault
-     * state is "no action" ignores the fault inputs and the system fault
-     * (RM0440 §27.3.15), so this must be set before the timer is enabled. */
-    LL_HRTIM_OUT_SetFaultState(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H,
-                               LL_HRTIM_OUT_FAULTSTATE_INACTIVE);
-    LL_HRTIM_OUT_SetFaultState(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L,
-                               LL_HRTIM_OUT_FAULTSTATE_INACTIVE);
+    /* Fault level of both outputs: the leg's safe state (ADR 0009), inactive
+     * by default. An output whose fault state is "no action" ignores the fault
+     * inputs and the system fault (RM0440 §27.3.15), and the level is fixed
+     * once the timer runs, so this is set before the counter is enabled. */
+    uint32_t fault_out1, fault_out2;
+    hrtim_safety_fault_levels(tu_number, &fault_out1, &fault_out2);
+    LL_HRTIM_OUT_SetFaultState(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H, fault_out1);
+    LL_HRTIM_OUT_SetFaultState(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L, fault_out2);
 
     /* GPIO initialization */
     LL_AHB2_GRP1_EnableClock(tu_channel[tu_number]->gpio_conf.tu_gpio_CLK);
@@ -829,6 +830,18 @@ void hrtim_out_dis(hrtim_tu_number_t tu_number)
  *        latched (ADR 0009). Without the safety module, outputs are allowed.
  * @return true if the outputs may be enabled.
  */
+/**
+ * @brief Fault level of the two outputs of a timing unit: the safety module
+ *        overrides it with the leg's safe state (ADR 0009). Default: inactive.
+ */
+__attribute__((weak)) void hrtim_safety_fault_levels(hrtim_tu_number_t tu_number,
+                                                     uint32_t *out1, uint32_t *out2)
+{
+    (void)tu_number;
+    *out1 = LL_HRTIM_OUT_FAULTSTATE_INACTIVE;
+    *out2 = LL_HRTIM_OUT_FAULTSTATE_INACTIVE;
+}
+
 __attribute__((weak)) bool hrtim_safety_output_enable_allowed(void)
 {
     return true;

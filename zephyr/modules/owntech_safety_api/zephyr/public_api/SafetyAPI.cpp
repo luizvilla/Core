@@ -161,3 +161,13 @@ int8_t SafetyAPI::setTripThreshold(sensor_t sensor, float32_t low, float32_t hig
     if (rc_high == -3 || rc_low == -3) return -3;
     return 0;
 }
+
+int8_t SafetyAPI::setSafeState(int leg, safety_safe_state_t state)
+{
+    return (int8_t)safety_set_leg_safe_state(leg, state);
+}
+
+int SafetyAPI::getFaultDescription(char *buf, size_t size)
+{
+    return safety_supervision_describe(buf, size);
+}

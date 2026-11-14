@@ -34,6 +34,7 @@
 #include "../src/safety_enum.h"
 #include "safety_supervision.h"
 #include "safety_trips.h"
+#include "safety_states.h"
 
 
 class SafetyAPI{
@@ -306,6 +307,24 @@ class SafetyAPI{
      *         of the sensor's measurement range.
      */
     int8_t setTripThreshold(sensor_t sensor, float32_t low, float32_t high);
+
+    /**
+     * @brief Sets a leg's safe state (ADR 0009): the state of its switches on
+     *        any trip. Only before the leg is initialised (the HRTIM fixes it
+     *        once its timer runs); the devicetree property safe-state is the
+     *        usual way.
+     * @param leg   LEG1, LEG2, ... (devicetree order)
+     * @param state SAFETY_SAFE_OPEN, SAFETY_SAFE_SHORT_LOW or SAFETY_SAFE_SHORT_HIGH
+     * @return 0; -1 too late; -2 bad leg or state.
+     */
+    int8_t setSafeState(int leg, safety_safe_state_t state);
+
+    /**
+     * @brief Writes the text of the latched fault into buf, e.g.
+     *        "hardware trip: I1_LOW high limit (COMP1->FLT4)".
+     * @return the text length.
+     */
+    int getFaultDescription(char *buf, size_t size);
 
 
 };

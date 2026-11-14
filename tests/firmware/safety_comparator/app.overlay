@@ -8,3 +8,22 @@
 &i2lowtd {
 	threshold-low = <0xc1300000>; /* -11.0 */
 };
+
+/* Safe states (#20): LEG2 shorts its low side on a trip (its own current I2_LOW
+ * has a comparator trip, as the build requires); a safe output on Spin pin 21
+ * (PB9, free on a bare Spin) stands for a relay that opens when low. */
+&leg2 {
+	safe-state = "short-low";
+};
+
+/ {
+	safety-outputs {
+		compatible = "safety-outputs";
+		test_relay: test-relay {
+			gpios = <&spin_header 21 0>;
+			output-name = "TEST_RELAY";
+			safe-level = <0>;
+			reset-state-safe;
+		};
+	};
+};

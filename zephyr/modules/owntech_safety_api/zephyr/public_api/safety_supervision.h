@@ -45,6 +45,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -104,12 +105,18 @@ bool safety_supervision_armed(void);
 /** @brief @return the latched fault, SAFETY_FAULT_NONE if there is none. */
 safety_fault_t safety_supervision_get_fault(void);
 
+/** @brief Text of the latched fault, e.g. "hardware trip: I1_LOW high limit (COMP1->FLT4)". @return length. */
+int safety_supervision_describe(char *buf, size_t size);
+
 /** @brief Copies the record of the latched fault. */
 void safety_supervision_get_record(safety_fault_record_t *record);
 
 /**
  * @brief Clears the latched fault so that PWM outputs can be enabled again.
- * @return 0 when cleared; -1 if a PWM output is still enabled (refused).
+ * @return 0 when cleared; -1 if a PWM output is still enabled or a limit is
+ *         still exceeded (refused); -2 when a second fault came within
+ *         CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS of the previous clear: only a
+ *         reboot clears it.
  */
 int safety_supervision_clear_fault(void);
 

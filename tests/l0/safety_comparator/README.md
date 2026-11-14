@@ -1,4 +1,4 @@
-# L0-CMP / L0-AWD · Hardware trips on the Spin
+# L0-CMP / L0-AWD / L0-SST · Hardware trips and safe states on the Spin
 
 Checks the comparator trips of [ADR 0009](../../../docs/adr/0009-safety-api-hardware-protection.md) (issue luizvilla/Core#18): each comparator trip the build allocated is armed, self-tested and locked before the first PWM output, a sensor beyond its limit turns every PWM output off in hardware, the locks hold, a threshold changed behind the API trips, and a trip stays latched.
 
@@ -22,5 +22,9 @@ The protocol (command word over SWD, acknowledgement in RAM, pending mark in bac
 The same firmware arms the Twist 1.4.1 watchdogs (I1_LOW ADC1 AWD1, V_HIGH ADC1 AWD2, V1_LOW ADC1 AWD3, I2_LOW ADC2 AWD3) on data acquisition, which the Safety API starts itself here (no application data acquisition). A test overlay lowers the current low limits to −11 A so floating pins sit inside the windows. A pin cannot hold a level against the ADC sampling capacitor, so the watchdog trip is provoked by the window: ADC1 stopped, a window every reading falls out of, ADC1 restarted on its HRTIM trigger (test code only).
 
 Findings: the first allocation watched channels on the wrong ADC (now: the sensor's default ADC only); the ADC driver kept a software trigger after the hook changed the register (now changed through DataAPI); a DMA interrupt per sequence starved the CPU (now `startUnattended`, no interrupt); FLT6 is bit 6 of the HRTIM flags. Measured: comparator output to fault flag 0.347 µs; ADC restart to fault flag 1.72 µs.
+
+## Safe states (L0-SST, issue luizvilla/Core#20)
+
+The test overlay sets LEG2 (timer C) `safe-state = "short-low"` and declares a safe output on Spin pin 21 (PB9); `app.conf` shortens the repeat-clear window to 100 ms so back-to-back cases are not refused. Checked: fault levels in OUTxR, PWM pins after each trip against them (TC2 on, all else off), the test relay dropping, the read-back fault stopping through a forced hardware fault (external event), the fault text, and the repeat-clear rule (runs last: it leaves the board needing a reboot).
 
 Not covered here: the low-bound comparator in service (the self-test exercises the active-low path on every comparator; an in-service check needs a stimulus that holds a level: SPOC bench).

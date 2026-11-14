@@ -87,14 +87,23 @@ def build_model(edt):
             timer = pw[0].controller.labels[0] if pw and pw[0].controller.labels else None
             cur = prop(child, 'current-pin-num')
             legs.append({'name': prop(child, 'leg-name'), 'timer': timer,
+                         'pwm_x1_high': prop(child, 'pwm-x1-high', 1),
                          'safe_state': prop(child, 'safe-state', 'open'),
                          'current_sensor': by_pin.get(cur), 'short_risk_accepted': prop(child, 'short-risk-accepted')})
     outputs = []
     for node in edt.compat2okay.get('safety-outputs', []):
         for child in node.children.values():
             g = (prop(child, 'gpios') or [None])[0]
-            sp = g.data.get('pin') if g is not None else None
-            outputs.append({'name': prop(child, 'output-name', child.name), 'spin_pin': sp, 'mcu_pin': pins.get(sp),
+            # edtlib resolves the Spin header's gpio-map: the controller is already the MCU port (gpiob) and the
+            # cell its pin. A spin-header controller (unresolved) would carry the Spin pin instead.
+            label = (g.controller.labels[0] if g is not None and g.controller.labels else '')
+            cell = g.data.get('pin') if g is not None else None
+            if label.startswith('gpio') and len(label) == 5 and cell is not None:
+                mcu = f'P{label[4].upper()}{cell}'
+                sp = next((k for k, v in pins.items() if v == mcu), None)
+            else:
+                sp, mcu = cell, pins.get(cell)
+            outputs.append({'name': prop(child, 'output-name', child.name), 'spin_pin': sp, 'mcu_pin': mcu,
                             'safe_level': prop(child, 'safe-level', 0),
                             'reset_state_safe': bool(prop(child, 'reset-state-safe', False))})
     shield = None
@@ -142,6 +151,43 @@ def watchdog_table(alloc):
             '#define SAFETY_WATCHDOG_TABLE \\\n' + '\n'.join(rows) + '\n\n')
 
 
+FAULT_INACTIVE, FAULT_ACTIVE = 2, 1   # HRTIM OUTxR FAULTx: 10 inactive, 01 active
+
+
+def leg_table(alloc):
+    """C initialisers of each leg's safe state: HRTIM timer index (pwma = 0 ... pwmf = 5) and the fault level of
+    its two outputs. short-low turns the low-side switch on: OUT2 if PWMx1 drives the high side, else OUT1."""
+    rows = []
+    for g in alloc['legs']:
+        t = g.get('timer') or ''
+        if not (t.startswith('pwm') and len(t) == 4):
+            continue
+        idx = ord(t[3]) - ord('a')
+        state = g.get('safe_state', 'open')
+        f1 = f2 = FAULT_INACTIVE
+        x1_high = bool(g.get('pwm_x1_high', 1))
+        if state == 'short-low':
+            f1, f2 = (FAULT_INACTIVE, FAULT_ACTIVE) if x1_high else (FAULT_ACTIVE, FAULT_INACTIVE)
+        elif state == 'short-high':
+            f1, f2 = (FAULT_ACTIVE, FAULT_INACTIVE) if x1_high else (FAULT_INACTIVE, FAULT_ACTIVE)
+        rows.append(f'    {{ "{g["name"]}", {idx}, {f1}, {f2}, {2 if x1_high else 1} }}, \\')
+    return ('/* leg, HRTIM timer index, fault level OUT1, fault level OUT2 (2 inactive, 1 active), low-side output */\n'
+            f'#define SAFETY_LEGS {len(rows)}\n#define SAFETY_LEG_TABLE \\\n' + '\n'.join(rows) + '\n\n')
+
+
+def safe_output_table(alloc):
+    """C initialisers of the safe outputs: port, pin, safe level."""
+    rows = []
+    for o in alloc['safe_outputs']:
+        mp = o.get('mcu_pin')
+        if not mp:
+            continue
+        rows.append(f'    {{ "{o["name"]}", \'{mp[1]}\', {int(mp[2:])}, {o.get("safe_level", 0)} }}, \\')
+    return ('/* safe output, port, pin, safe level */\n'
+            f'#define SAFETY_SAFE_OUTPUTS {len(rows)}\n#define SAFETY_SAFE_OUTPUT_TABLE \\\n'
+            + '\n'.join(rows) + '\n\n')
+
+
 def plan_text(alloc):
     """One-line plan for the boot line: LIMIT low/high path kinds."""
     short = {'comparator': 'comp', 'adc_watchdog': 'awd', 'software': 'sw'}
@@ -184,7 +230,8 @@ def main():
                     f'#define SAFETY_PROTECTION_SHIELD "{shield}"\n'
                     f'#define SAFETY_PROTECTION_PLAN "{text}"\n'
                     f'#define SAFETY_PROTECTION_LIMITS {len(alloc["limits"])}\n'
-                    + comparator_table(alloc) + watchdog_table(alloc) + '#endif\n')
+                    + comparator_table(alloc) + watchdog_table(alloc) + leg_table(alloc)
+                    + safe_output_table(alloc) + '#endif\n')
     print(f'safety: protection plan for {shield}: {plan_text(alloc)}')
     for l in alloc['limits']:
         print(f'safety:   {l["sensor"]:12s} low {path_text(l["paths"]["low"]):24s} high {path_text(l["paths"]["high"])}')

@@ -15,6 +15,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,16 @@ int safety_trips_watchdog_state(int index);
 /** @brief Waits for fresh conversions and @return true while any armed trip sees its limit exceeded.
  *         Clears the sticky ADC-watchdog flags first (used by clearFault). */
 bool safety_trips_settle_and_check(void);
+/** @brief Raises a real hardware fault: through an armed watchdog's external event (EEV1-3 switched to a forced
+ *         TIMx TRGO), else an armed comparator's threshold to the extreme. @return 0 if the HRTIM fault flag rose. */
+int safety_trips_force_fault(void);
+/** @brief @return how the last forced fault was raised: 1 external event, 2 comparator, 0 not raised. */
+int safety_trips_last_force_path(void);
+/** @brief Writes every armed comparator threshold back to its current value (after a forced fault). */
+void safety_trips_restore_thresholds(void);
+/** @brief Text of a trip detail (fault inputs, or threshold read-back), e.g. "I1_LOW high limit (COMP1->FLT4)".
+ *         @return length written. */
+int safety_trips_describe(uint32_t detail, char *buf, size_t size);
 
 #ifdef __cplusplus
 }

@@ -28,13 +28,15 @@
 #include "SafetyAPI.h"
 #include "safety_supervision.h"
 #include "safety_trips.h"
+#include "safety_states.h"
 
 #define REPORT_MAGIC  0x31504D43U  /* "CMP1" */
-#define N_RESULTS     42U
+#define N_RESULTS     48U
 
 enum : uint32_t {
 	CASE_CLEAR = 0, CASE_CONFIG = 1, CASE_LOCKS = 2, CASE_TRIP_I1 = 3, CASE_TRIP_I2 = 4,
 	CASE_DAC_TAMPER = 5, CASE_TIGHTEN = 6, CASE_LATCH_RESET = 7, CASE_AWD_CONFIG = 8, CASE_AWD_TRIP = 9,
+	CASE_SAFE_CONFIG = 10, CASE_CLEAR_RULE = 11,
 };
 
 enum {
@@ -69,6 +71,11 @@ enum {
 	R_AWD_TRIP = 36,   /* b0-1 step mode, b8 flag, b9 latched, b10 refused, b11 clear refused, b12 cleared, b13 back */
 	R_AWD_CYC = 37, R_AWD_PINS = 38, R_AWD_FLT_MASK = 39,
 	R_PATH0 = 40, R_PATH1 = 41,   /* comparator output -> HRTIM fault flag, cycles (I1_LOW, I2_LOW) */
+	/* safe states (#20) */
+	R_OUTR_A = 42, R_OUTR_C = 43, R_EXPECT = 44,  /* expected pin levels in the fault state (from OUTxR) */
+	R_SAFE_OUT = 45,    /* b0 relay low after TRIP_I1, b1 after AWD_TRIP, b2 after DAC_TAMPER, b8 safe outputs declared */
+	R_CLEAR_RULE = 46,  /* b0-7 rc first clear, b8-15 rc second clear (as uint8), b16-23 rc later clear */
+	R_SAFE_LEGS = 47,
 };
 
 struct report_t {
@@ -77,6 +84,7 @@ struct report_t {
 };
 
 extern "C" {
+__attribute__((used)) volatile char g_safety_cmp_text[96];   /* fault description after TRIP_I1 */
 __attribute__((used)) volatile report_t g_safety_cmp_report;
 __attribute__((used)) volatile uint32_t g_safety_cmp_cmd;
 }
@@ -104,6 +112,34 @@ static uint32_t pwm_pin_levels(void)
 {
 	uint32_t a = GPIOA->IDR, b = GPIOB->IDR, c = GPIOC->IDR;
 	return ((a >> 8) & 0xFU) | (((b >> 12) & 0xFU) << 4) | (((c >> 8) & 0x3U) << 8) | (((c >> 6) & 0x3U) << 10);
+}
+
+/* The test relay (PB9): the application "closes" it (high) before a trip. */
+static void relay_close(void)
+{
+	RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
+	GPIOB->BSRR = 1U << 9;
+	GPIOB->MODER = (GPIOB->MODER & ~(3U << 18)) | (1U << 18);
+}
+
+static bool relay_open(void)
+{
+	return (GPIOB->IDR & (1U << 9)) == 0U;
+}
+
+/* Pin levels the fault state should give, from each timer's FAULT1/FAULT2. */
+static uint32_t expected_fault_pins(void)
+{
+	static const struct { uint8_t timer, bit; } map[] = {
+		{0, 0}, {2, 4}, {3, 6}, {4, 8}, {5, 10},   /* A, C, D, E, F: OUT1 at bit, OUT2 at bit + 1 */
+	};
+	uint32_t m = 0U;
+	for (auto e : map) {
+		uint32_t outr = HRTIM1->sTimerxRegs[e.timer].OUTxR;
+		if ((outr & HRTIM_OUTR_FAULT1) == HRTIM_OUTR_FAULT1_0) m |= 1U << e.bit;
+		if ((outr & HRTIM_OUTR_FAULT2) == HRTIM_OUTR_FAULT2_0) m |= 1U << (e.bit + 1U);
+	}
+	return m;
 }
 
 static bool outputs_enabled(void)
@@ -211,6 +247,7 @@ static uint32_t trip_case(GPIO_TypeDef *g, uint32_t pin, uint32_t flt, uint32_t 
 {
 	pin_discharge(g, pin);
 	pwm_start_all();
+	relay_close();
 	k_msleep(5);
 	uint32_t cycles = 0U;
 	/* Time the hardware alone: the Safety API's fault interrupt would clear the
@@ -225,6 +262,14 @@ static uint32_t trip_case(GPIO_TypeDef *g, uint32_t pin, uint32_t flt, uint32_t 
 		flags |= 1U << 8;
 	}
 	k_msleep(2);
+	if (r_flags == R_TRIP0) {
+		result_set(R_SAFE_OUT, (ram_results[R_SAFE_OUT] & ~1U) | (relay_open() ? 1U : 0U));
+		char text[96];
+		safety.getFaultDescription(text, sizeof(text));
+		for (size_t i = 0; i < sizeof(text); i++) {
+			g_safety_cmp_text[i] = text[i];
+		}
+	}
 	if (safety_supervision_get_fault() == SAFETY_FAULT_TRIP) {
 		flags |= 1U << 9;
 	}
@@ -316,8 +361,11 @@ static void case_dac_tamper(void)
 	task.startCritical(false);
 	k_msleep(5);
 	uint32_t good = (uint32_t)safety_trips_dac_code(0);
+	relay_close();
 	DAC3->DHR12R1 = 4000U;   /* looser threshold written behind the Safety API's back */
 	k_msleep(5);
+	result_set(R_SAFE_OUT, (ram_results[R_SAFE_OUT] & ~(4U | 0x30000U)) | (relay_open() ? 4U : 0U)
+		   | ((uint32_t)safety_trips_last_force_path() << 16));
 	uint32_t v = 0U;
 	safety_fault_record_t rec;
 	safety_supervision_get_record(&rec);
@@ -416,6 +464,7 @@ static void awd_restore(uint32_t tr2)
 static void case_awd_trip(void)
 {
 	pwm_start_all();
+	relay_close();
 	k_msleep(5);
 	uint32_t tr2 = ADC1->TR2;
 	uint32_t cycles = 0U;
@@ -425,6 +474,8 @@ static void case_awd_trip(void)
 	uint32_t flags = mode;
 	k_busy_wait(5);
 	result_set(R_AWD_PINS, pwm_pin_levels());
+	k_msleep(2);
+	result_set(R_SAFE_OUT, (ram_results[R_SAFE_OUT] & ~2U) | (relay_open() ? 2U : 0U));
 	if (flag(2) || (safety_trips_tripped() & 0x2U)) {
 		flags |= 1U << 8;
 	}
@@ -450,6 +501,38 @@ static void case_awd_trip(void)
 	pwm_stop_all();
 	result_set(R_AWD_TRIP, flags);
 	result_set(R_AWD_CYC, cycles);
+}
+
+static void case_safe_config(void)
+{
+	pwm_start_all();
+	pwm_stop_all();
+	result_set(R_OUTR_A, HRTIM1->sTimerxRegs[0].OUTxR);
+	result_set(R_OUTR_C, HRTIM1->sTimerxRegs[2].OUTxR);
+	result_set(R_EXPECT, expected_fault_pins());
+	result_set(R_SAFE_OUT, (ram_results[R_SAFE_OUT] & ~0x100U) | (safety_safe_output_count() == 1 ? 0x100U : 0U));
+	/* Too late once armed: the HRTIM fixes the fault levels. */
+	result_set(R_SAFE_LEGS, (uint32_t)safety_leg_count() | ((uint32_t)(uint8_t)safety.setSafeState(0, SAFETY_SAFE_SHORT_LOW) << 8));
+}
+
+/* Two faults within the repeat-clear window (100 ms in this build): the second
+ * clear needs a reboot, and so does any later one. Runs last. */
+static void case_clear_rule(void)
+{
+	uint32_t cyc;
+	int rc[3];
+	for (int k = 0; k < 2; k++) {
+		pin_discharge(GPIOA, 1);
+		pwm_start_all();
+		k_msleep(2);
+		(void)step_up(GPIOA, 1, 4, &cyc);
+		k_msleep(2);
+		pin_discharge(GPIOA, 1);
+		rc[k] = safety.clearFault();
+	}
+	k_msleep(200);
+	rc[2] = safety.clearFault();
+	result_set(R_CLEAR_RULE, (uint32_t)(uint8_t)rc[0] | ((uint32_t)(uint8_t)rc[1] << 8) | ((uint32_t)(uint8_t)rc[2] << 16));
 }
 
 static void evaluate_pending(uint32_t pending)
@@ -536,6 +619,8 @@ int main(void)
 			case CASE_LATCH_RESET: case_latch_reset(seq); break;
 			case CASE_AWD_CONFIG: case_awd_config(); break;
 			case CASE_AWD_TRIP: case_awd_trip(); break;
+			case CASE_SAFE_CONFIG: case_safe_config(); break;
+			case CASE_CLEAR_RULE: case_clear_rule(); break;
 			default: break;
 			}
 			ack(seq);

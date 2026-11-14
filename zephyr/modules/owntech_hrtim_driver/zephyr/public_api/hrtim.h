@@ -105,6 +105,14 @@ int hrtim_get_apb2_clock();
 void hrtim_init_default_all();
 
 /**
+ * @brief Safety hooks (ADR 0009), weak defaults in hrtim.c, overridden by the
+ *        safety module: fault level of a timing unit's two outputs (set before
+ *        its counter runs), and the gate in front of any output enable.
+ */
+void hrtim_safety_fault_levels(hrtim_tu_number_t tu_number, uint32_t *out1, uint32_t *out2);
+bool hrtim_safety_output_enable_allowed(void);
+
+/**
  * @brief   Initializes a given timing unit
  *
  * @param[in] tu_number        Timing unit number:

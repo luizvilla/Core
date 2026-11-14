@@ -10,3 +10,12 @@ config OWNTECH_SAFETY_SUPERVISION
 		CPU supervision (ADR 0009): independent watchdog, fatal-error
 		handler and HRTIM system fault. It has no prompt on purpose:
 		user configuration cannot turn it off. It does not need a shield.
+
+config OWNTECH_SAFETY_REPEAT_CLEAR_MS
+	int "Time after a clear during which a new fault requires a reboot (ms)"
+	default 10000
+	range 100 600000
+	depends on OWNTECH_SAFETY_SUPERVISION
+	help
+		ADR 0009: clearFault() after a second fault within this time of
+		the previous clear is refused until a reboot.
