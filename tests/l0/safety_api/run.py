@@ -108,11 +108,13 @@ def main():
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     J, L = th.judge, th.line
-    log = {'cases': {}, 'results': {}, 'text': {}}
+    log = {'cases': [], 'results': {}, 'text': {}}
     res = {}
     for env in ENVS:
         r, text, entries = run_env(env, a.out, not a.no_flash)
-        log['cases'][env] = entries
+        for e in entries:   # one flat case list for the review page, the build in each case name
+            log['cases'].append(dict(e, case=f"{env} {e.get('case', '?')}", boots=e.get('boots', 0),
+                                     status=e.get('status', '?')))
         if r is None:
             L('L0-API-00' if env == 'SAFETY_API' else 'L0-API-06', 'FAIL', f'{env} build, flash or protocol', 'all '
               'cases acknowledged', f'see build_{env}.txt and report.json')
