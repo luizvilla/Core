@@ -113,6 +113,11 @@ void timer_stm32_config(const struct device* dev,
 				flags = IRQ_ZERO_LATENCY;
 			}
 
+			/* Zephyr refuses to connect an enabled line (assert in
+			 * irq_connect_dynamic): a task stopped then defined again
+			 * reconfigures a line that is still enabled. */
+			irq_disable(data->interrupt_line);
+
 			irq_connect_dynamic(data->interrupt_line,
 								data->interrupt_prio,
 								timer_stm32_callback,
