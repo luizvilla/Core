@@ -160,3 +160,22 @@ child-binding:
                     It will only stop generating the PWM in the GPIO corresponding to output 2,
                     the GPIO will still be configured in alternate mode.
       required : false
+
+    safe-state:
+      type: string
+      required: false
+      default: "open"
+      enum:
+        - "open"
+        - "short-low"
+        - "short-high"
+      description: |
+        ADR 0009. State of this leg's switches on any trip: open (both off, default), short-low (low side on),
+        short-high (high side on), e.g. short-low to brake a motor. Fixed before the PWM starts.
+
+    short-risk-accepted:
+      type: string
+      required: false
+      description: |
+        A short-* safe state turns a switch on even when the trip came from that switch. The build requires a
+        hardware trip on the leg's own current; this property states why the leg may short without one.

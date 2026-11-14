@@ -89,6 +89,10 @@ list(APPEND EXTRA_CONF_FILE ${EXTRA_LIB_CONF_FILE})
 FILELIST(EXTRA_OVERLAY_APP_FILE ${APP_DIR} overlay)
 # Add app.overlay path to zephyr variables
 set(EXTRA_DTC_OVERLAY_FILE ${EXTRA_OVERLAY_APP_FILE})
+# Design-time check (tools/safety_check.py): a draft shield overlay on top.
+if(DEFINED SAFETY_DRAFT_OVERLAY)
+  list(APPEND EXTRA_DTC_OVERLAY_FILE ${SAFETY_DRAFT_OVERLAY})
+endif()
 
 # Check for third party modules
 if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party_modules)

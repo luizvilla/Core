@@ -1,0 +1,26 @@
+description: |
+  Safe outputs (ADR 0009): GPIOs that the firmware drives to their safe level on any trip, such as a grid relay or
+  a gate-driver enable. After a watchdog reset the MCU pins float, so the board itself must hold each one at its
+  safe level (pull resistor); declare it with reset-state-safe once checked on the schematic.
+
+compatible: "safety-outputs"
+
+child-binding:
+  description: One safe output.
+  properties:
+    gpios:
+      type: phandle-array
+      required: true
+      description: The pin, usually on the Spin header connector (<&spin_header PIN FLAGS>).
+    output-name:
+      type: string
+      required: false
+      description: Name shown in the boot line and the protection table (default the node name).
+    safe-level:
+      type: int
+      required: true
+      enum: [0, 1]
+      description: Pin level of the safe state (e.g. 0 for a relay that opens when its command is low).
+    reset-state-safe:
+      type: boolean
+      description: The board holds this pin at its safe level while the MCU resets (checked on the schematic).

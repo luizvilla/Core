@@ -24,6 +24,7 @@ Each campaign writes `tests/out/<date>_<sha>_<time>_<id>/` with one log per test
 | [`run_all.sh`](run_all.sh) | Campaign runner: every `tests/l0/*/run.sh`, then record, review page, control center |
 | [`common/`](common/README.md) | Check helper, build helper, record writer (`make_record.py`), review page (`review_report.py`), control center, catalogue checker, on-target preflight |
 | [`firmware/`](firmware/) | Test firmware environments (`pio_tests.ini`) and their apps; never for a power board on a bench |
+| [`l0/safety_allocation/`](l0/safety_allocation/) | L0-ALC: protection allocation on synthetic boards and on every shield devicetree, committed tables up to date (no hardware), issue luizvilla/Core#17 |
 | [`l0/safety_supervision/`](l0/safety_supervision/README.md) | L0-SUP: CPU supervision on the Spin (watchdog, fatal-error handler, HRTIM system fault), issue luizvilla/Core#16 |
 | `catalogue.json` | Every test, defined once |
 | `out/` | Campaigns (git-ignored) and `control-center.html` |

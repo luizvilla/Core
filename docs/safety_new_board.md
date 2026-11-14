@@ -1,6 +1,6 @@
 # Protecting a new power board
 
-> **Status: planned.** This page describes the process decided in [ADR 0009](adr/0009-safety-api-hardware-protection.md). The tools it names (`tools/safety_check.py`, the protection manifest, the generated tests) are being built on branch `safety-hw`. Each step names what exists today.
+> **Status (2026-11-14):** the design-time check, the protection allocation, the protection manifest and the build-check of every shield exist (issue luizvilla/Core#17). The comparator and ADC-watchdog trips themselves are armed by later steps (#18, #19); until then the boot line prints the plan. The generated L2 tests (§4) are planned. Design: [ADR 0009](adr/0009-safety-api-hardware-protection.md).
 
 This page is for anyone designing a new power shield for the Spin, or adding the devicetree of an existing one. It covers what to do so that the board's limits are protected without the CPU, and how the board joins the safety tests.
 
@@ -20,7 +20,7 @@ Design rules:
 | Relay, contactor or driver enable | Add a pull resistor that holds its **safe level** while the MCU resets: after a watchdog reset the MCU pins float |
 | DC bus voltage | A comparator input if one is free; otherwise ADC1 or ADC2 |
 
-Comparator inputs on the Spin header:
+Comparator inputs on the Spin header (the check above lists the free ones for your draft):
 
 | Spin pin | MCU pin | Comparator | Note |
 |---|---|---|---|
@@ -37,7 +37,8 @@ Comparator inputs on the Spin header:
 **Check the draft:** write a draft overlay with the sensor pins and the legs, then run
 
 ```bash
-tools/safety_check.py my_shield_draft.overlay     # planned
+tools/safety_check.py my_shield_draft.overlay                  # a complete draft shield
+tools/safety_check.py my_changes.overlay --base twist:1_4_2    # changes on top of an existing shield
 ```
 
 It runs the same allocation as the build and prints which limits get a comparator, an ADC watchdog or only software, the conflicts, the free pins, and the safe outputs still missing a reset declaration. **Attach the report to the schematic review.**
@@ -51,7 +52,9 @@ Copy the closest shield in `zephyr/boards/shields/` and declare, in addition to 
 - **the safe outputs**, each with its safe level, plus `reset-state-safe;` once you have checked the pull resistor on the schematic.
 - **an explicit exception** for any limit that has no hardware path. The build refuses to compile a required protection with no path, unless the exception says so.
 
-Then build. The build-check covers every shield in `zephyr/boards/shields/` automatically. It writes the **protection manifest**, the boot line and the board's protection table in the docs.
+Then build. The build stops with one `ERROR:` line per limit that has no hardware path and no exception, saying how to fix it, and warns for safe outputs not declared safe at reset. It writes the **protection manifest** (`.pio/build/<env>/zephyr/safety/protection-manifest.json`) and the boot line (`safety: <shield>: <limit> <low path>-/<high path>+ ...`).
+
+The build-check (`bash tests/l0/safety_allocation/run.sh`, also part of `tests/run_all.sh --l0`) covers every shield in `zephyr/boards/shields/` automatically, and checks that `docs/safety/boards/<shield>.md` matches the build: after adding or changing a shield, run it with `--update-docs` and commit the table.
 
 ## 3. Run the bare-Spin tests (L0): no new code
 

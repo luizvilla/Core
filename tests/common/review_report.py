@@ -296,6 +296,14 @@ def test_cases(out, rows):
                       'target': meta.get('target', []), 'report': folder / meta.get('report', 'timing_report.json'),
                       'figures': meta.get('figures', 'tim01'),
                       'order': 'zz_' + folder.name})
+    for man in sorted(out.glob('*/allocation_manifest.json')):
+        folder = man.parent
+        meta = json.loads(man.read_text())
+        prefixes = tuple(meta.get('criteria') or [])
+        cases.append({'folder': folder, 'kind': 'allocation', 'title': meta.get('title', folder.name),
+                      'purpose': meta.get('purpose'), 'rows': [r for r in rows if r['id'].startswith(prefixes)],
+                      'conditions': [(k, html.escape(v)) for k, v in meta.get('conditions', [])],
+                      'shields': meta.get('shields', []), 'order': 'zy_' + folder.name})
     for man in sorted(out.glob('*/bench_manifest.json')):
         folder = man.parent
         meta = json.loads(man.read_text())
@@ -976,6 +984,69 @@ TIM02_COLS = ([('tick', 'whole tick'), ('tick_sensors', 'sensors')] + [('2:' + k
               + [('tick_control', 'controlStep'), ('tick_apply', 'writes'), ('tick_scope', 'scope')])
 
 
+def allocation_figure(folder, shields):
+    """@brief L0-ALC: one row per shield, one cell per HRTIM fault input, coloured by the path holding it.
+
+    Blue: comparator, orange: ADC watchdog, grey: free. The cell names the limit and bound. The table below it
+    gives the same data per limit.
+    """
+    e = html.escape
+    W, label_w, cell_w, row_h, top = 960, 170, 130, 30, 34
+    rows = [s for s in shields if s.get('builds') and (folder / f"{s['shield']}.json").exists()]
+    H = top + row_h * len(rows) + 40
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="HRTIM fault inputs per shield" '
+           f'font-family="system-ui,sans-serif" font-size="11">']
+    for k in range(6):
+        svg.append(f'<text x="{label_w + k * cell_w + cell_w / 2}" y="{top - 10}" fill="{INK2}" text-anchor="middle">FLT{k + 1}</text>')
+    for i, sh in enumerate(rows):
+        man = json.loads((folder / f"{sh['shield']}.json").read_text())
+        flt = man['resources']['flt']
+        y = top + i * row_h
+        svg.append(f'<text x="{label_w - 8}" y="{y + 19}" fill="{INK}" text-anchor="end">{e(sh["shield"])}</text>')
+        for k in range(6):
+            v = flt.get(f'FLT{k + 1}')
+            fill = GRID if v is None else (SERIES[0] if '(COMP' in v else SERIES[1])
+            txt = 'free' if v is None else v.split(' (')[0]
+            x = label_w + k * cell_w
+            svg.append(f'<rect x="{x + 2}" y="{y + 3}" width="{cell_w - 4}" height="{row_h - 6}" rx="3" fill="{fill}">'
+                       f'<title>{e(sh["shield"])} FLT{k + 1}: {e(v or "free")}</title></rect>'
+                       f'<text x="{x + cell_w / 2}" y="{y + 19}" text-anchor="middle" fill="{text_on(fill)}">{e(txt[:20])}</text>')
+    ly = H - 14
+    for j, (lab, col) in enumerate([('comparator', SERIES[0]), ('ADC watchdog', SERIES[1]), ('free', GRID)]):
+        svg.append(f'<rect x="{label_w + j * 140}" y="{ly - 10}" width="12" height="12" fill="{col}" rx="2"/>'
+                   f'<text x="{label_w + j * 140 + 18}" y="{ly}" fill="{INK2}">{lab}</text>')
+    svg.append('</svg>')
+    return ''.join(svg)
+
+
+def allocation_tables(folder, shields):
+    """@brief L0-ALC: the protection table of each shield (the same file as docs/safety/boards/)."""
+    e = html.escape
+    out = []
+    for sh in shields:
+        f = folder / f"{sh['shield']}.json"
+        if not f.exists():
+            out.append(f'<p class="sub">{e(sh["shield"])}: did not build, see {e(sh["shield"])}.log.</p>')
+            continue
+        man = json.loads(f.read_text())
+        out.append(f'<details><summary>{e(man["shield"])} ({e(sh["shield"])})</summary><table>'
+                   '<tr><th>Limit</th><th>Low</th><th>High</th><th>Low bound</th><th>High bound</th><th>Exception</th></tr>')
+        for l in man['limits']:
+            def pt(p):
+                if not p:
+                    return 'none'
+                if p['kind'] == 'comparator':
+                    return f"COMP{p['comp']} → FLT{p['flt']}"
+                if p['kind'] == 'adc_watchdog':
+                    return f"{p['adc'].upper()} AWD{p['awd']} → FLT{p['flt']}"
+                return 'software'
+            out.append(f'<tr><td>{e(l["sensor"])}</td><td>{l["low"]:g}</td><td>{l["high"]:g}</td>'
+                       f'<td>{e(pt(l["paths"]["low"]))}</td><td>{e(pt(l["paths"]["high"]))}</td>'
+                       f'<td>{e(l.get("exception") or "")}</td></tr>')
+        out.append('</table></details>')
+    return ''.join(out)
+
+
 def supervision_cases_table(rep):
     """@brief L0-SUP: one row per case as the harness ran it (acknowledged, resets, time, fault latched at boot)."""
     e = html.escape
@@ -1274,6 +1345,13 @@ def main(out):
             for k, v in c['target']:
                 p.append(f'<tr><td>{e(k)}</td><td>{e(v)}</td></tr>')
             p.append('</table></div>')
+        elif c.get('kind') == 'allocation':
+            p.append('<h3>2 · Build snapshot</h3><p class="sub">Devicetree and allocation only (no firmware, no board): '
+                     'the shields checked and whether each built.</p><div class="wrap"><table class="kv">')
+            for sh in c['shields']:
+                p.append(f'<tr><td>{e(sh["shield"])}</td><td>{"builds" if sh.get("builds") else "does not build"}'
+                         f'{"" if sh.get("docs_match", True) else ", committed table differs"}</td></tr>')
+            p.append('</table></div>')
         elif c.get('kind') == 'bench':
             p.append('<h3>2 · Bench snapshot</h3><p class="sub">Bench test (level L2): the firmware and the oscilloscope '
                      'setup of each capture, in place of a model.</p>')
@@ -1285,6 +1363,15 @@ def main(out):
         for r in sorted(c['rows'], key=sort_key):
             p.append(f'<tr><td>{e(r["id"])}</td><td>{verdict_badge(r)}</td><td>{e(r["measured"])}</td></tr>')
         p.append('</table>')
+        if c.get('kind') == 'allocation':
+            p.append('<h3>4 · Figures</h3>')
+            p.append('<figure><div><b>HRTIM fault inputs per shield</b></div>' + allocation_figure(f, c['shields'])
+                     + '<figcaption>Each row a shield, each cell one of the six HRTIM fault inputs, coloured by the path '
+                     'that holds it (comparator or ADC watchdog) and labelled with the limit; grey: free. A row with no '
+                     'grey has no channel left: any further limit on that board needs an exception or a routing change. '
+                     'The per-limit tables follow.</figcaption></figure>')
+            p.append(allocation_tables(f, c['shields']))
+            continue
         if c.get('kind') == 'bench':
             p.append('<h3>4 · Figures</h3>')
             p.append(bench_figures(f, c['bench']))

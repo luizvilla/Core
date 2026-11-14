@@ -22,3 +22,43 @@ properties:
     type: int
     required: true
     description: The value of the low threshold below which the program will return an error code
+
+  protection:
+    type: string
+    required: false
+    default: "hardware"
+    enum:
+      - "hardware"
+      - "software"
+    description: |
+      ADR 0009. "hardware" (default): both bounds must get a hardware path (comparator or ADC watchdog to an HRTIM
+      fault input), assigned by the build. If the board cannot provide one, the build fails unless `exception`
+      states why software protection is acceptable. "software": the limit is only checked by the Safety API's
+      polling (for quantities that are not a hazard, e.g. a measurement range check).
+
+  exception:
+    type: string
+    required: false
+    description: |
+      Why this limit may fall back to the software path where no hardware path exists on this board (for example
+      "legacy board: sensor routed to a pin no comparator or free ADC watchdog reaches"). Shown in the protection
+      table. Without it, a hardware limit with no hardware path is a build error.
+
+  comparator-bound:
+    type: string
+    required: false
+    default: "high"
+    enum:
+      - "high"
+      - "low"
+    description: |
+      Which bound the comparator watches when the sensor pin reaches one (a comparator trips in one direction
+      only). The other bound gets an ADC-watchdog window if one is free.
+
+  priority:
+    type: int
+    required: false
+    description: |
+      Order in which the build serves limits when hardware channels are scarce: lower first. Default 10 for
+      currents (sensor names starting with I) and 20 otherwise. Give the hazard that matters most on this board
+      the lowest number (e.g. the DC bus overvoltage).
