@@ -160,6 +160,18 @@ static void run_scenario(uint32_t c)
 		spin.pwm.initUnit(u);
 		spin.pwm.setDutyCycle(u, 0.5);
 	}
+	/* ADC triggers as an application sets them (docs/spin_dataAPI.md): ADC1 on
+	 * PWMA, ADC2 on PWMC, once per switching period. Without them Core main
+	 * converts nothing (no dispatch work) while safety-hw's watchdog path adds
+	 * its own trigger: the comparison would not be like for like. */
+	spin.data.configureTriggerSource(ADC_1, TRIG_PWM);
+	spin.data.configureTriggerSource(ADC_2, TRIG_PWM);
+	spin.pwm.setAdcTrigger(PWMA, ADC_1);
+	spin.pwm.setAdcTrigger(PWMC, ADC_2);
+	spin.pwm.setAdcTriggerInstant(PWMA, 0.06);
+	spin.pwm.setAdcTriggerInstant(PWMC, 0.06);
+	spin.pwm.enableAdcTrigger(PWMA);
+	spin.pwm.enableAdcTrigger(PWMC);
 	shield.sensors.enableDefaultTwistSensors();
 	if (s1) {
 		safety.initShield();   /* the old software check on every Twist sensor with a limit */
