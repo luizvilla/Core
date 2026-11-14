@@ -120,7 +120,6 @@
 			default-order = <0>;
 			default-gain = <0x3ba3d70a>;
 			default-offset = <0xc1200000>;
-			spin-pin = <30>;
 			sensor-conv-type = "LINEAR";
 			i1-low-adc1 {
 				io-channels = <&adc1 2>;
