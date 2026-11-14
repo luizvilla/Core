@@ -1,0 +1,23 @@
+/* Safety API timing overhead firmware (issue #27). Bare Spin with the Twist
+ * 1.4.1 devicetree: with no shield the current pins float near 0 V, read as
+ * -10 A, and V_HIGH reads about 0 V. The low limits are widened so neither the
+ * hardware trips nor the old software check (scenario S1) trip on a bare Spin.
+ * The B0 build (Core main) uses this file without the idle-band lines, which
+ * its bindings do not know (tests/l0/safety_timing/build_before.sh). */
+&i1lowtd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+	idle-band = <0x41400000>;     /* 12.0 */
+};
+
+&i2lowtd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+	idle-band = <0x41400000>;     /* 12.0 */
+};
+
+&ihightd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+};
+
+&vhightd {
+	threshold-low = <0xc1200000>; /* -10.0 */
+};

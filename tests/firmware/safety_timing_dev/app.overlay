@@ -1,0 +1,9 @@
+/* Development build of the timing firmware (issue #27): the same devicetree plus development mode. */
+#include "../safety_timing/app.overlay"
+
+/ {
+	safety-config {
+		compatible = "safety-config";
+		safety-mode = "development";
+	};
+};
