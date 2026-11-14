@@ -4,4 +4,7 @@
 .vscode/launch.json
 .vscode/settings.json
 old
-src/Data_records/*
+src/Data_records/*# Test campaigns, virtual environment and Python caches
+tests/out/
+.venv/
+__pycache__/
