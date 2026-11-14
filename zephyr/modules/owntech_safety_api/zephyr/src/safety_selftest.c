@@ -57,7 +57,11 @@ extern char __rom_region_end[];
 extern char _image_ram_start[];
 extern char _image_ram_end[];
 
-#define BLOCK_WORDS        16U
+/* Words tested per block, with every interrupt off: 4 words keep the window
+ * under 2 us (16 words: 7.4 us measured, #27). A run-time slice tests
+ * RUNTIME_RAM_BYTES as consecutive blocks, interrupts back on between them. */
+#define BLOCK_WORDS        4U
+#define RUNTIME_RAM_BYTES  64U
 #define SRAM_START         ((uintptr_t)CONFIG_SRAM_BASE_ADDRESS)
 #define SRAM_END           (SRAM_START + (uintptr_t)CONFIG_SRAM_SIZE * 1024U)
 #define STACK_GUARD_BELOW  2048U
@@ -381,7 +385,7 @@ static void runtime_fn(struct k_work *work)
 
 	/* One block of the image's .data/.bss. */
 	uintptr_t start = (uintptr_t)_image_ram_start & ~3U, end = (uintptr_t)_image_ram_end & ~3U;
-	if (ram_cursor < start || ram_cursor + 4U * BLOCK_WORDS > end) {
+	if (ram_cursor < start || ram_cursor + RUNTIME_RAM_BYTES > end) {
 		uint32_t now_ms = k_uptime_get_32();
 		if (ram_cursor != 0U) {
 			g_safety_selftest.runtime_ram_passes++;
@@ -391,11 +395,11 @@ static void runtime_fn(struct k_work *work)
 		ram_cursor = start;
 	}
 	uint32_t bytes;
-	if (!ram_test(ram_cursor, ram_cursor + 4U * BLOCK_WORDS, &bytes)) {
+	if (!ram_test(ram_cursor, ram_cursor + RUNTIME_RAM_BYTES, &bytes)) {
 		fail(SAFETY_SELFTEST_RAM, "RAM (run time)");
 		return;
 	}
-	ram_cursor += 4U * BLOCK_WORDS;
+	ram_cursor += RUNTIME_RAM_BYTES;
 
 	/* 1 KiB of flash CRC; a complete pass is compared with the reference. */
 	size_t total = g_safety_selftest.flash_bytes;
