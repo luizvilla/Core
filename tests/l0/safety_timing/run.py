@@ -20,6 +20,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -49,6 +50,9 @@ REACT_PERIODS = 7          # software trip: 5 periods declared, +1 in progress, 
 def flash(name, env, out):
     log = os.path.join(out, f'build_{env}.txt')
     print(f'== build and flash {name} (env {env})', flush=True)
+    # Clean build: PlatformIO does not reconfigure on app.overlay or app.conf edits (a stale devicetree kept B0's
+    # old V1_LOW/V2_LOW limits once, and its software check tripped in every S1 run).
+    shutil.rmtree(os.path.join(th.REPO, '.pio', 'build', env), ignore_errors=True)
     if env == 'TOV_BEFORE':
         with open(log, 'w') as f:
             return subprocess.run(['bash', os.path.join(HERE, 'build_before.sh'), '--flash'], stdout=f,

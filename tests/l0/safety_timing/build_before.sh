@@ -50,6 +50,8 @@ extra_scripts =
     pre:owntech/scripts/pre_usb.py
     pre:owntech/scripts/pre_version.py
 INI
+# Clean build: PlatformIO does not reconfigure on app.overlay edits.
+rm -rf "$wt/.pio/build/TOV_BEFORE"
 echo "== B0: Core main at $BEFORE_COMMIT, worktree $wt"
 "$pio" run -d "$wt" -e TOV_BEFORE "${target[@]}"
 rc=$?
