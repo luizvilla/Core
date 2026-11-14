@@ -39,6 +39,8 @@
 // STM32 LL
 #include <stm32_ll_bus.h>
 #include <stm32_ll_system.h>
+#include <stm32_ll_pwr.h>
+#include <stm32_ll_rcc.h>
 
 // Owntech driver
 #include "dac.h"
@@ -47,6 +49,51 @@ static const struct device* dac2 = DEVICE_DT_GET(DAC2_DEVICE);
 
 /////
 // Functions to be run
+
+/**
+ * @brief Set the flash wait states from the current STM32G4 reference manual.
+ *
+ * Zephyr's clock driver calls LL_SetFlashLatency() from STM32CubeG4 LL
+ * v1.5.1, whose table predates the flash recharacterization and selects
+ * 8 wait states at 170 MHz. RM0440 specifies 34 MHz per wait state in
+ * Range 1 boost mode and 30 MHz in Range 1 normal mode, so 170 MHz needs
+ * 4 wait states in boost mode.
+ *
+ * Runs after the clock driver. Only lowers the latency, and only for a
+ * Range 1 configuration with HCLK equal to SYSCLK; otherwise the clock
+ * driver's conservative value is preserved.
+ *
+ * @return Always returns 0 (success).
+ */
+static int _flash_latency_init()
+{
+#if defined(CONFIG_SOC_SERIES_STM32G4X)
+	if (LL_PWR_GetRegulVoltageScaling() != LL_PWR_REGU_VOLTAGE_SCALE1 ||
+	    LL_RCC_GetAHBPrescaler() != LL_RCC_SYSCLK_DIV_1)
+	{
+		return 0;
+	}
+
+	const uint32_t hclk = sys_clock_hw_cycles_per_sec();
+	const uint32_t step = LL_PWR_IsEnabledRange1BoostMode() ? 34000000U : 30000000U;
+	const uint32_t limit = LL_PWR_IsEnabledRange1BoostMode() ? 170000000U : 150000000U;
+	if (hclk == 0U || hclk > limit)
+	{
+		return 0;
+	}
+
+	const uint32_t wait_states = (hclk - 1U) / step;
+	if (wait_states < LL_FLASH_GetLatency())
+	{
+		LL_FLASH_SetLatency(wait_states);
+		while (LL_FLASH_GetLatency() != wait_states)
+		{
+		}
+	}
+#endif /* CONFIG_SOC_SERIES_STM32G4X */
+
+	return 0;
+}
 
 static int _vrefbuf_init()
 {
@@ -127,6 +174,11 @@ static int _register_cdc_rate_callback()
 
 /////
 // Zephyr macros to automatically run above functions
+
+SYS_INIT(_flash_latency_init,
+         PRE_KERNEL_1,
+         CONFIG_KERNEL_INIT_PRIORITY_DEVICE
+        );
 
 SYS_INIT(_vrefbuf_init,
          PRE_KERNEL_1, // To be run in the first init phase
