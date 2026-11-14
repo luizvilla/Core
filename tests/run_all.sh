@@ -37,7 +37,7 @@ done
 [ ${#levels[@]} -eq 0 ] && levels=(L0 L1)
 
 sha=$(git -C "$repo" rev-parse --short=7 HEAD)
-[ -z "$(git -C "$repo" status --porcelain)" ] || sha="$sha-dirty"
+[ -z "$(git -C "$repo" status --porcelain --untracked-files=no)" ] || sha="$sha-dirty"
 mkdir -p "$repo/tests/out"
 # Keep repeated campaigns/profiles instead of deleting earlier evidence.
 out=$(mktemp -d "$repo/tests/out/$(date +%F)_${sha}_$(date +%H%M%S)_XXXXXX")

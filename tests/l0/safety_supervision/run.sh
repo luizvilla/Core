@@ -37,7 +37,7 @@ fi
 if [ -z "${CORE_TEST_OUT:-}" ]; then
     # Standalone: a campaign of its own, so the record, the review page and the control center show it.
     sha=$(git -C "$repo" rev-parse --short=7 HEAD)
-    [ -z "$(git -C "$repo" status --porcelain)" ] || sha="$sha-dirty"
+    [ -z "$(git -C "$repo" status --porcelain --untracked-files=no)" ] || sha="$sha-dirty"
     mkdir -p "$repo/tests/out"
     campaign=$(mktemp -d "$repo/tests/out/$(date +%F)_${sha}_$(date +%H%M%S)_XXXXXX")
     CORE_TEST_OUT="$campaign" CORE_TARGET=1 bash "$0" "$@" 2>&1 | tee "$campaign/l0_safety_supervision.log"
