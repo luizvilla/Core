@@ -78,7 +78,8 @@ def build_model(edt):
                        'protection': prop(node, 'protection', 'hardware'), 'exception': prop(node, 'exception'),
                        'comparator_bound': prop(node, 'comparator-bound', 'high'),
                        'priority': prop(node, 'priority'),
-                       'hardware_bounds': prop(node, 'hardware-bounds')})
+                       'hardware_bounds': prop(node, 'hardware-bounds'),
+                       'idle_band': f32(prop(node, 'idle-band')) if prop(node, 'idle-band') is not None else None})
     by_pin = {ch['spin_pin']: n for n, s in sensors.items() for ch in s['channels']}
     legs = []
     for node in edt.compat2okay.get('power-leg', []):
@@ -143,10 +144,15 @@ def watchdog_table(alloc):
             if not p or p['kind'] != 'adc_watchdog' or (p['adc'], p['awd']) in seen:
                 continue
             seen.add((p['adc'], p['awd']))
+            current = l['sensor'].upper().startswith('I')
+            band = l.get('idle_band') if l.get('idle_band') is not None else \
+                0.25 * max(abs(l['high'] or 0.0), abs(l['low'] or 0.0))
             rows.append(f'    {{ "{l["sensor"]}", {p["adc"][-1]}, {p["awd"]}, {p["channel"]}, {p["flt"]}, '
-                        f'{p["counts_low"]}, {p["counts_high"]} }}, \\')
+                        f'{p["counts_low"]}, {p["counts_high"]}, {float(l.get("gain") or 0.0)!r}f, '
+                        f'{float(l.get("offset") or 0.0)!r}f, {float(band)!r}f, {1 if current else 0} }}, \\')
     return ('/* sensor, ADC n, watchdog k, channel, FLT (= EEV), window low, window high (12 bits for AWD1, 8 for\n'
-            ' * AWD2/AWD3; a side without hardware protection is open: 0 or full scale) */\n'
+            ' * AWD2/AWD3; a side without hardware protection is open: 0 or full scale), sensor gain, offset, idle\n'
+            ' * band (current sensors: largest reading allowed at idle), current? */\n'
             f'#define SAFETY_WATCHDOG_TRIPS {len(rows)}\n'
             '#define SAFETY_WATCHDOG_TABLE \\\n' + '\n'.join(rows) + '\n\n')
 
@@ -212,9 +218,11 @@ def main():
         edt = pickle.load(f)
     shield, model = build_model(edt)
     alloc = allocate(model)
-    for l in alloc['limits']:   # sensor scaling, for the firmware's threshold conversions
+    by_sensor = {m['sensor']: m for m in model['limits']}
+    for l in alloc['limits']:   # sensor scaling and idle band, for the firmware's checks
         sn = model['sensors'].get(l['sensor'], {})
         l['gain'], l['offset'] = sn.get('gain'), sn.get('offset')
+        l['idle_band'] = by_sensor.get(l['sensor'], {}).get('idle_band')
     os.makedirs(a.out_dir, exist_ok=True)
     manifest = {'layout': 1, 'shield': shield, 'model': model, **alloc}
     with open(os.path.join(a.out_dir, 'protection-manifest.json'), 'w') as f:

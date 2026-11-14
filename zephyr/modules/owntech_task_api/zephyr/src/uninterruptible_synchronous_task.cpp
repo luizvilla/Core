@@ -30,6 +30,7 @@
 #ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
 #include "safety_supervision.h"
 #include "safety_trips.h"
+#include "safety_selftest.h"
 #endif
 
 /* OwnTech Power API */
@@ -128,10 +129,13 @@ void user_task_proxy()
 	}
 
 #ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
-	/* Thresholds read back every period (ADR 0009, #18). */
+	/* Program-flow checkpoints (ADR 0009, #21): the application's task
+	 * returned, the thresholds were read back, the sensors are plausible;
+	 * only then is the watchdog fed. */
+	safety_supervision_checkpoint(SAFETY_CP_USER_TASK);
 	(void)safety_trips_check();
-	/* Fed only once the period's work returned: a control task that never
-	 * returns lets the watchdog reset the MCU (ADR 0009). */
+	safety_supervision_checkpoint(SAFETY_CP_TRIPS_CHECKED);
+	safety_plausibility_period();
 	safety_supervision_feed();
 #endif
 }

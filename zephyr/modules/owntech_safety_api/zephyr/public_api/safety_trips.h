@@ -51,6 +51,8 @@ int safety_trips_dac_code(int index);
 int safety_trips_watchdog_count(void);
 /** @brief ADC (1 or 2) and channel watched by ADC-watchdog trip index. */
 void safety_trips_watchdog_channel(int index, uint8_t *adc, uint8_t *channel);
+/** @brief @return 1 if watchdog trip index watches a current sensor. */
+int safety_trips_watchdog_is_current(int index);
 /** @brief @return 1 self-test passed, 2 failed, 0 not configured yet, for watchdog trip index. */
 int safety_trips_watchdog_state(int index);
 /** @brief Waits for fresh conversions and @return true while any armed trip sees its limit exceeded.

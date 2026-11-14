@@ -26,11 +26,12 @@
 #include "SpinAPI.h"
 #include "TaskAPI.h"
 #include "safety_supervision.h"
+#include "safety_selftest.h"
 
 /* ---- Protocol (mirrored in tests/l0/safety_supervision/report.py) ------- */
 
 #define REPORT_MAGIC   0x31505553U  /* "SUP1" */
-#define REPORT_LAYOUT  3U
+#define REPORT_LAYOUT  4U
 #define N_RESULTS      18U
 
 enum sup_case : uint32_t {
@@ -44,6 +45,13 @@ enum sup_case : uint32_t {
 	CASE_IRQ_MASKED       = 7,  /* interrupts masked forever, no control task */
 	CASE_LOCKUP           = 8,  /* Cortex-M4 lockup (fault with FAULTMASK set) */
 	CASE_SOFT_RESET_LATCH = 9,  /* a software reset keeps the latched fault */
+	CASE_STK_RUNTIME      = 10, /* let the run-time self-tests run 6 s */
+	CASE_STK_INJECT_RAM   = 11, /* self-test fault injection, then a reboot */
+	CASE_STK_INJECT_FLASH = 12,
+	CASE_STK_INJECT_CLOCK = 13,
+	CASE_STK_INJECT_CPU   = 14,
+	CASE_STK_FLOW         = 15, /* a skipped program-flow checkpoint: watchdog reset */
+	CASE_STK_IRQ_RATE     = 16, /* control interrupt 4x faster than declared */
 };
 
 /* Result words (index into results[]). */
@@ -70,6 +78,9 @@ enum {
 	R_CORE_HZ = 17,
 };
 
+/* Self-test case results (L0-STK): per case b0-7 latched fault, b8-15 detail, b16 PWM refused, b17 clear
+ * refused (-2), b18 clean after the reboot (no latch, boot self-tests passed). Kept in BKP28 + a RAM copy. */
+#define N_STK 7
 struct sup_report_t {
 	uint32_t magic;
 	uint32_t layout;
@@ -85,6 +96,7 @@ struct sup_report_t {
 	uint32_t fault_stack;
 	uint32_t fault_lr;
 	uint32_t results[N_RESULTS];
+	uint32_t stk[N_STK];
 };
 
 extern "C" {
@@ -94,7 +106,7 @@ __attribute__((used)) volatile uint32_t g_safety_sup_cmd;  /* (sequence << 8) | 
 
 /* Backup registers: CPU supervision owns BKP0-9. */
 #define BKP_BOOTS    (TAMP->BKP10R)
-#define BKP_PENDING  (TAMP->BKP29R)  /* (sequence << 8) | case, plus stage in bits 4-7 of the case byte */
+#define BKP_PENDING  (TAMP->BKP29R)  /* (sequence << 12) | (stage << 8) | case */
 #define BKP_ACK      (TAMP->BKP31R)  /* last sequence acknowledged, survives resets */
 static volatile uint32_t *const bkp_results = &TAMP->BKP11R; /* BKP11..BKP28 */
 
@@ -102,6 +114,16 @@ static volatile uint32_t *const bkp_results = &TAMP->BKP11R; /* BKP11..BKP28 */
 static const hrtim_tu_number_t units[] = {PWMA, PWMC, PWMD, PWME, PWMF};
 static const uint32_t OUTPUT_MASK = 0xFF3U;   /* TA1 TA2 TC1 TC2 TD1 TD2 TE1 TE2 TF1 TF2 */
 #define HRTIM_ALL_OUTPUTS 0xFFFU
+
+/* A self-test case's result crosses its reboot in BKP30; the harness reads it right after the case. */
+static volatile uint32_t *const bkp_stk = &TAMP->BKP30R;   /* result of the case across its reboot */
+static uint32_t stk_ram[N_STK];
+
+static void stk_set(uint32_t k, uint32_t v)
+{
+	stk_ram[k] = v;
+	g_safety_sup_report.stk[k] = v;
+}
 
 static void result_set(uint32_t i, uint32_t v)
 {
@@ -140,7 +162,7 @@ static bool outputs_enabled(void)
 
 static void set_pending(uint32_t seq, uint32_t c, uint32_t stage)
 {
-	BKP_PENDING = (seq << 8) | (stage << 4) | c;
+	BKP_PENDING = (seq << 12) | (stage << 8) | c;
 }
 
 static void ack(uint32_t seq)
@@ -337,14 +359,34 @@ static void provoke(uint32_t seq, uint32_t c)
 /* Evaluation after the reset caused by a pending case. */
 static void evaluate_pending(uint32_t pending)
 {
-	uint32_t seq = pending >> 8;
-	uint32_t c = pending & 0xFU;
-	uint32_t stage = (pending >> 4) & 0xFU;
+	uint32_t seq = pending >> 12;
+	uint32_t c = pending & 0xFFU;
+	uint32_t stage = (pending >> 8) & 0xFU;
 	safety_fault_record_t rec;
 
 	safety_supervision_get_record(&rec);
 	BKP_PENDING = 0U;
 
+	if (c >= CASE_STK_INJECT_RAM && c <= CASE_STK_IRQ_RATE) {
+		uint32_t word = *bkp_stk, k = (word >> 24) & 0xFU, v = word & 0x00FFFFFFU;
+		if (c == CASE_STK_FLOW) {   /* evaluated here: the watchdog reset was the reaction */
+			k = 5;
+			v = (uint32_t)safety_supervision_get_fault() & 0xFFU;
+			pwm_start_all();
+			if (!outputs_enabled()) v |= 1U << 16;
+			(void)safety_supervision_clear_fault();
+			pwm_stop_all();
+		}
+		/* after the reboot: self-test faults are cleared at boot and the tests run again */
+		if (c != CASE_STK_FLOW && safety_supervision_get_fault() == SAFETY_FAULT_NONE &&
+		    g_safety_selftest.boot_passed == 31U) {
+			v |= 1U << 18;
+		}
+		stk_set(k, v);
+		*bkp_stk = 0U;
+		ack(seq);
+		return;
+	}
 	switch (c) {
 	case CASE_FATAL_STACK:
 	case CASE_FATAL_HARDFAULT: {
@@ -387,12 +429,79 @@ static void evaluate_pending(uint32_t pending)
 	ack(seq);
 }
 
+
+static uint32_t stk_latch_word(void)
+{
+	safety_fault_record_t rec;
+	safety_supervision_get_record(&rec);
+	uint32_t v = ((uint32_t)rec.fault & 0xFFU) | ((rec.reason & 0xFFU) << 8);
+	pwm_start_all();
+	if (!outputs_enabled()) v |= 1U << 16;
+	if (safety_supervision_clear_fault() == -2) v |= 1U << 17;
+	pwm_stop_all();
+	return v;
+}
+
+static void stk_reboot(uint32_t seq, uint32_t c, uint32_t k, uint32_t v)
+{
+	/* k in bits 24-27, value in bits 0-23 */
+	*bkp_stk = (k << 24) | (v & 0x00FFFFFFU);
+	set_pending(seq, c, 1U);
+	sys_reboot(SYS_REBOOT_COLD);
+}
+
+static void case_stk_inject(uint32_t seq, uint32_t c, uint32_t what, uint32_t k)
+{
+	pwm_start_all();
+	safety_selftest_inject(what);
+	for (int i = 0; i < 800 && safety_supervision_get_fault() == SAFETY_FAULT_NONE; i++) {
+		k_msleep(10);
+	}
+	uint32_t v = stk_latch_word();
+	safety_selftest_inject(0);
+	stk_reboot(seq, c, k, v);
+}
+
+static void case_stk_irq_rate(uint32_t seq, uint32_t c)
+{
+	pwm_start_all();
+	task.createCritical(control_task, 100, source_tim6);
+	task.startCritical(false);
+	k_msleep(20);
+	/* 4x faster than declared, behind the task API. With the preload on, the
+	 * new period starts at the next update; without it, an ARR below the
+	 * running count makes the counter run to 0xFFFF first (a gap the watchdog
+	 * catches instead). */
+	TIM6->CR1 |= TIM_CR1_ARPE;
+	TIM6->ARR = TIM6->ARR / 4U;
+	k_msleep(50);
+	task.stopCritical();
+	stk_reboot(seq, c, 6, stk_latch_word());
+}
+
+static void case_stk_flow(uint32_t seq, uint32_t c)
+{
+	pwm_start_all();
+	task.createCritical(control_task, 100, source_tim6);
+	task.startCritical(false);
+	k_msleep(20);
+	set_pending(seq, c, 0U);
+	safety_selftest_inject(SAFETY_SELFTEST_INJECT_FLOW);
+	k_msleep(1000);   /* the watchdog resets long before */
+	safety_selftest_inject(0);
+	BKP_PENDING = 0U;
+}
+
 static void clear_all(void)
 {
 	for (uint32_t i = 0; i < N_RESULTS; i++) {
 		result_set(i, 0U);
 	}
 	BKP_PENDING = 0U;
+	*bkp_stk = 0U;
+	for (uint32_t k = 0; k < N_STK; k++) {
+		stk_set(k, 0U);
+	}
 	(void)safety_supervision_clear_fault();
 }
 
@@ -420,7 +529,7 @@ int main(void)
 
 	uint32_t last = BKP_ACK;
 	if (pending != 0U) {
-		last = pending >> 8;
+		last = pending >> 12;
 		g_safety_sup_report.busy = last;
 		evaluate_pending(pending);
 	}
@@ -440,6 +549,13 @@ int main(void)
 			case CASE_CONFIG: case_config(); ack(seq); break;
 			case CASE_NO_FALSE_RESET: case_no_false_reset(); ack(seq); break;
 			case CASE_SLOW_TASK: case_slow_task(); ack(seq); break;
+			case CASE_STK_RUNTIME: pwm_start_all(); k_msleep(6000); pwm_stop_all(); ack(seq); break;
+			case CASE_STK_INJECT_RAM: case_stk_inject(seq, c, SAFETY_SELFTEST_INJECT_RAM, 1); break;
+			case CASE_STK_INJECT_FLASH: case_stk_inject(seq, c, SAFETY_SELFTEST_INJECT_FLASH, 2); break;
+			case CASE_STK_INJECT_CLOCK: case_stk_inject(seq, c, SAFETY_SELFTEST_INJECT_CLOCK, 3); break;
+			case CASE_STK_INJECT_CPU: case_stk_inject(seq, c, SAFETY_SELFTEST_INJECT_CPU, 4); break;
+			case CASE_STK_FLOW: case_stk_flow(seq, c); break;
+			case CASE_STK_IRQ_RATE: case_stk_irq_rate(seq, c); break;
 			default: provoke(seq, c); break;
 			}
 		}

@@ -35,12 +35,19 @@ OPENOCD_SCRIPTS = os.path.join(PKG, 'tool-openocd', 'openocd', 'scripts')
 NM = os.path.join(PKG, 'toolchain-gccarmnoneeabi', 'bin', 'arm-none-eabi-nm')
 
 # Mirrors tests/firmware/safety_supervision/main.cpp
-MAGIC, LAYOUT, N_RESULTS = 0x31505553, 3, 18
+MAGIC, LAYOUT, N_RESULTS, N_STK = 0x31505553, 4, 18, 7
 HEAD = ('magic', 'layout', 'boot_count', 'ack', 'busy', 'latched_at_boot', 'pending',
         'fault_reason', 'fault_pc', 'fault_thread', 'fault_context', 'fault_stack', 'fault_lr')
-REPORT = struct.Struct('<%dI%dI' % (len(HEAD), N_RESULTS))
+REPORT = struct.Struct('<%dI%dI%dI' % (len(HEAD), N_RESULTS, N_STK))
 CASES = [('CLEAR', 0), ('CONFIG', 1), ('NO_FALSE_RESET', 2), ('SLOW_TASK', 3), ('FATAL_STACK', 4),
-         ('FATAL_HARDFAULT', 5), ('CONTROL_STUCK', 6), ('IRQ_MASKED', 7), ('LOCKUP', 8), ('SOFT_RESET_LATCH', 9)]
+         ('FATAL_HARDFAULT', 5), ('CONTROL_STUCK', 6), ('IRQ_MASKED', 7), ('LOCKUP', 8), ('SOFT_RESET_LATCH', 9),
+         ('STK_RUNTIME', 10), ('STK_INJECT_RAM', 11), ('STK_INJECT_FLASH', 12), ('STK_INJECT_CLOCK', 13),
+         ('STK_INJECT_CPU', 14), ('STK_FLOW', 15), ('STK_IRQ_RATE', 16)]
+STK_INDEX = {'STK_INJECT_RAM': 1, 'STK_INJECT_FLASH': 2, 'STK_INJECT_CLOCK': 3, 'STK_INJECT_CPU': 4,
+             'STK_FLOW': 5, 'STK_IRQ_RATE': 6}
+SELFTEST_FIELDS = ['magic', 'boot_passed', 'us_cpu', 'us_ram', 'us_flash', 'us_clock', 'ram_bytes', 'flash_bytes',
+                   'flash_ref', 'clock_counts', 'vrefint', 'vref_mv', 'rt_cpu', 'rt_ram_passes', 'rt_flash_passes',
+                   'rt_clock', 'rt_max_us', 'last_failure']
 R = dict(CONFIG=0, TIMEOUT_DEFAULT=1, NO_FALSE_RESET=2, SLOW_TASK=3, STACK_FLAGS=4, STACK_REASON=5,
          STACK_OUTPUTS=6, STACK_CYCLES=7, HARD_FLAGS=8, HARD_REASON=9, HARD_OUTPUTS=10, HARD_CYCLES=11,
          STUCK_FLAGS=12, IRQ_FLAGS=13, LOCKUP_FLAGS=14, SOFTRESET_FLAGS=15, OUTPUT_MASK=16, CORE_HZ=17)
@@ -93,7 +100,8 @@ def read_report(addr):
             return None
         v = REPORT.unpack(open(path, 'rb').read())
     rep = dict(zip(HEAD, v[:len(HEAD)]))
-    rep['results'] = list(v[len(HEAD):])
+    rep['results'] = list(v[len(HEAD):len(HEAD) + N_RESULTS])
+    rep['stk'] = list(v[len(HEAD) + N_RESULTS:])
     return rep if rep['magic'] == MAGIC else None
 
 
@@ -136,7 +144,7 @@ def write_manifest(out, log):
                       'the watchdog, the fatal-error handler and the HRTIM system fault are armed with the PWM, every '
                       'provoked CPU failure turns every PWM output off within its declared fault reaction time, and the '
                       'fault stays latched across the reset until cleared.',
-           'criteria': ['L0-SUP-'],
+           'criteria': ['L0-SUP-', 'L0-STK-'],
            'conditions': [['Board', 'Bare Spin, no shield, no power stage; PWM units A, C, D, E, F at 200 kHz, 50 %'],
                           ['Fault injection', 'from the test firmware: thread stack overflow (MPU guard), undefined '
                                               'instruction, control task that never returns, interrupts masked, '
@@ -172,6 +180,16 @@ def main():
     cmd_addr, _ = symbol('g_safety_sup_cmd')
 
     rep = wait(addr, lambda r: r['busy'] == 0, 30, 'firmware did not start')
+    st_addr, _ = symbol('g_safety_selftest')
+
+    def selftest():
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.bin')
+            openocd(f'dump_image {path} {st_addr:#x} {4 * len(SELFTEST_FIELDS)}', check=False)
+            w = struct.unpack(f'<{len(SELFTEST_FIELDS)}I', open(path, 'rb').read())
+        return dict(zip(SELFTEST_FIELDS, w))
+    stk = {}
+    boot_st = selftest()
     log = {'cases': []}
     for name, code in CASES:
         before = rep
@@ -195,6 +213,10 @@ def main():
                   f"stack {f['fault_stack'] & ~0xFFF:#010x} size {(f['fault_stack'] & 0xFFF) * 8}, lr {f['fault_lr']:#010x}", flush=True)
         log['cases'].append(entry)
         print(f"== {name}: {status}, {entry['boots']} reset(s), {entry['seconds']} s", flush=True)
+        if name in STK_INDEX:
+            stk[name] = rep['stk'][STK_INDEX[name]]
+        if name == 'STK_RUNTIME':
+            log['selftest_runtime'] = selftest()
     res = rep['results']
     log['report'] = rep
     boots = {c['case']: c['boots'] for c in log['cases']}
@@ -266,6 +288,44 @@ def main():
          'latched before and after the software reset', f'fault {sr & 0xFF}, still latched {sr >> 8 & 1}')
     line('L0-SUP-09.b', judge(sr >> 9 & 1), 'The latched fault clears with clearFault() after a software reset',
          'cleared', str(sr >> 9 & 1))
+
+    # L0-STK: Class B self-tests (#21)
+    log['selftest_boot'] = boot_st
+    b = boot_st
+    us = lambda k: b[k]
+    line('L0-STK-01.a', judge(b['magic'] == 0x54535453 and b['boot_passed'] == 31),
+         'Start-up self-tests: CPU registers, RAM, flash reference, clock, VREFINT', 'all five passed (31)',
+         f"passed {b['boot_passed']:05b}")
+    line('L0-STK-01.b', 'INFO', 'Start-up self-test durations and coverage', 'information',
+         f"CPU {us('us_cpu')} us, RAM {us('us_ram')} us over {b['ram_bytes']} B, flash CRC {us('us_flash')} us over "
+         f"{b['flash_bytes']} B, clock {us('us_clock')} us")
+    f_tim = 170_000_000
+    lo, hi = 8 * f_tim / (34000 * 1.05), 8 * f_tim / (29500 * 0.95)
+    line('L0-STK-01.c', judge(lo <= b['clock_counts'] <= hi), 'System clock measured against the LSI (TIM5, 8 LSI periods)',
+         f'{lo:.0f} to {hi:.0f} counts', f"{b['clock_counts']} counts (LSI {8 * f_tim / max(b['clock_counts'], 1) / 1000:.2f} kHz)")
+    line('L0-STK-01.d', judge(1987 <= b['vref_mv'] <= 2109), 'VREF+ from VREFINT against the 2.048 V VREFBUF (±3 %)',
+         '1987 to 2109 mV', f"{b['vref_mv']} mV (reading {b['vrefint']})")
+    rt = log.get('selftest_runtime', {})
+    line('L0-STK-02.a', judge(rt.get('rt_cpu', 0) > 300 and rt.get('rt_flash_passes', 0) >= 1 and rt.get('rt_clock', 0) >= 3
+                              and rt.get('rt_ram_passes', 0) >= 1),
+         'Run-time self-tests run: CPU registers, RAM passes, flash CRC passes, clock checks', 'CPU > 300, >= 1 RAM and flash pass, >= 3 clock',
+         f"CPU {rt.get('rt_cpu')}, RAM passes {rt.get('rt_ram_passes')}, flash passes {rt.get('rt_flash_passes')}, clock {rt.get('rt_clock')}")
+    line('L0-STK-02.b', 'INFO', 'Longest run-time self-test slice (system work queue)', 'information', f"{rt.get('rt_max_us')} us")
+    names = {'STK_INJECT_RAM': ('RAM', 2), 'STK_INJECT_FLASH': ('flash CRC', 3), 'STK_INJECT_CLOCK': ('clock', 4),
+             'STK_INJECT_CPU': ('CPU registers', 1)}
+    for k, (name, (what, det)) in enumerate(names.items(), start=3):
+        v = stk.get(name, 0)
+        line(f'L0-STK-0{k}', judge((v & 0xFF) == 4 and ((v >> 8) & 0xFF) == det and (v >> 16) & 1 and (v >> 17) & 1 and (v >> 18) & 1),
+             f'Injected {what} self-test failure: latched, PWM refused, clear refused (reboot only), clean after the reboot',
+             f'fault 4 detail {det}, refused, -2, clean', f"fault {v & 0xFF} detail {(v >> 8) & 0xFF}, flags {(v >> 16) & 7:03b}")
+    v = stk.get('STK_FLOW', 0)
+    line('L0-STK-07', judge(boots.get('STK_FLOW', 0) >= 1 and (v & 0xFF) == 2 and (v >> 16) & 1),
+         'A skipped program-flow checkpoint lets the watchdog reset the MCU; watchdog fault latched', '>= 1 reset, fault 2, refused',
+         f"{boots.get('STK_FLOW', 0)} reset(s), fault {v & 0xFF}, refused {(v >> 16) & 1}")
+    v = stk.get('STK_IRQ_RATE', 0)
+    line('L0-STK-08', judge((v & 0xFF) == 4 and ((v >> 8) & 0xFF) == 6 and (v >> 16) & 1 and (v >> 17) & 1),
+         'Control interrupts 4x faster than declared: self-test fault latched, PWM refused', 'fault 4 detail 6, refused, -2',
+         f"fault {v & 0xFF} detail {(v >> 8) & 0xFF}, flags {(v >> 16) & 3:02b}")
 
     with open(os.path.join(a.out, 'report.json'), 'w') as f:
         json.dump(log, f, indent=1)

@@ -103,6 +103,11 @@ int8_t DataAPI::ensureChannel(adc_t adc_number, uint8_t channel_num)
 	return DataAPI::enableChannel(adc_number, channel_num);
 }
 
+float32_t DataAPI::peekAdcChannel(adc_t adc_number, uint8_t channel_num)
+{
+	return DataAPI::peekChannel(adc_number, channel_num);
+}
+
 int8_t DataAPI::startUnattended()
 {
 	if (DataAPI::is_started == true)

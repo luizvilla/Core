@@ -297,6 +297,8 @@ struct watchdog_trip {
 	const char *sensor;
 	uint8_t adc, awd, channel, flt;
 	uint16_t lo, hi;
+	float gain, offset, idle_band;
+	uint8_t current;
 };
 
 #if SAFETY_WATCHDOG_TRIPS > 0
@@ -388,6 +390,7 @@ static int awd_self_test(ADC_TypeDef *a, const struct watchdog_trip *w)
 	bool tripped = out && wait_flag(w->flt, true, 20);
 
 	bool still = convert_once(a, w, w->lo, w->hi);
+	uint32_t raw = a->DR;   /* the quiet conversion's reading (DR keeps it) */
 	a->ISR = awd_flag(w->awd);
 	HRTIM1->sCommonRegs.ICR = hrtim_flt_flag(w->flt);
 	k_busy_wait(2);
@@ -407,6 +410,16 @@ static int awd_self_test(ADC_TypeDef *a, const struct watchdog_trip *w)
 	if (!quiet) {
 		snprintk(arm_error, sizeof(arm_error), "%s already outside its window at start", w->sensor);
 		return -1;
+	}
+	/* Plausibility at idle (PWM off when data acquisition starts): a current
+	 * sensor must read near zero (IEC 60730-1 H.2 7.2: A/D plausibility). */
+	if (w->current && w->gain != 0.0f) {
+		float v = (float)raw * w->gain + w->offset;
+		if (v > w->idle_band || v < -w->idle_band) {
+			snprintk(arm_error, sizeof(arm_error), "%s reads %d mA at idle, beyond its idle band (offset or "
+				 "broken sensor, or current already flowing)", w->sensor, (int)(v * 1000.0f));
+			return -1;
+		}
 	}
 	return 0;
 }
@@ -484,6 +497,16 @@ void safety_trips_watchdog_channel(int index, uint8_t *adc, uint8_t *channel)
 	ARG_UNUSED(index);
 	*adc = 0U;
 	*channel = 0U;
+#endif
+}
+
+int safety_trips_watchdog_is_current(int index)
+{
+#if SAFETY_WATCHDOG_TRIPS > 0
+	return (index >= 0 && index < SAFETY_WATCHDOG_TRIPS) ? awds[index].current : 0;
+#else
+	ARG_UNUSED(index);
+	return 0;
 #endif
 }
 

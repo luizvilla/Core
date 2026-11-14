@@ -74,3 +74,11 @@ properties:
       Which bounds need a hardware path. Default: both for a current (sensor name starting with I), the high bound
       only otherwise: a low voltage limit is a range check, not a hazard (a boost output starts at 0 V), so a
       hardware trip on it would stop the converter from starting. The other bound stays on the software path.
+
+  idle-band:
+    type: int
+    required: false
+    description: |
+      For a current sensor watched by an ADC watchdog: the largest reading allowed at idle (PWM off, when data
+      acquisition starts), in the sensor's unit, as an IEEE 754 float. Default: a quarter of the larger limit
+      magnitude. A reading outside it (sensor offset drift, broken sensor, current already flowing) refuses arming.

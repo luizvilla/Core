@@ -3,10 +3,12 @@
  * low limits to -11 A so a floating pin sits inside the ADC-watchdog window. */
 &i1lowtd {
 	threshold-low = <0xc1300000>; /* -11.0 */
+	idle-band = <0x41400000>;     /* 12.0: a floating pin reads -10 A at idle */
 };
 
 &i2lowtd {
 	threshold-low = <0xc1300000>; /* -11.0 */
+	idle-band = <0x41400000>;     /* 12.0 */
 };
 
 /* Safe states (#20): LEG2 shorts its low side on a trip (its own current I2_LOW

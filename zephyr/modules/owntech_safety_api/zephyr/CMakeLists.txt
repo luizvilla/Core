@@ -7,7 +7,8 @@ if(CONFIG_OWNTECH_SAFETY_API OR CONFIG_OWNTECH_SAFETY_SUPERVISION)
 
   # CPU supervision: always on whenever the HRTIM driver is built (ADR 0009)
   if(CONFIG_OWNTECH_SAFETY_SUPERVISION)
-    zephyr_library_sources(src/safety_supervision.c src/safety_trips.c src/safety_states.c)
+    zephyr_library_sources(src/safety_supervision.c src/safety_trips.c src/safety_states.c
+                           src/safety_selftest.c src/safety_cpu_test.S)
     # Disable the PWM at the first C instruction of the fault path, before
     # Zephyr's fault logging (see safety_supervision.c). A Zephyr update that
     # renames these functions makes the link fail instead of silently losing it.

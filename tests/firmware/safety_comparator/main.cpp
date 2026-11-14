@@ -17,6 +17,7 @@
  * tests/firmware/safety_supervision). Never flash it on a powered board.
  */
 
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/irq.h>
@@ -29,14 +30,15 @@
 #include "safety_supervision.h"
 #include "safety_trips.h"
 #include "safety_states.h"
+#include "safety_selftest.h"
 
 #define REPORT_MAGIC  0x31504D43U  /* "CMP1" */
-#define N_RESULTS     48U
+#define N_RESULTS     50U
 
 enum : uint32_t {
 	CASE_CLEAR = 0, CASE_CONFIG = 1, CASE_LOCKS = 2, CASE_TRIP_I1 = 3, CASE_TRIP_I2 = 4,
 	CASE_DAC_TAMPER = 5, CASE_TIGHTEN = 6, CASE_LATCH_RESET = 7, CASE_AWD_CONFIG = 8, CASE_AWD_TRIP = 9,
-	CASE_SAFE_CONFIG = 10, CASE_CLEAR_RULE = 11,
+	CASE_SAFE_CONFIG = 10, CASE_CLEAR_RULE = 11, CASE_FROZEN = 12,
 };
 
 enum {
@@ -76,6 +78,8 @@ enum {
 	R_SAFE_OUT = 45,    /* b0 relay low after TRIP_I1, b1 after AWD_TRIP, b2 after DAC_TAMPER, b8 safe outputs declared */
 	R_CLEAR_RULE = 46,  /* b0-7 rc first clear, b8-15 rc second clear (as uint8), b16-23 rc later clear */
 	R_SAFE_LEGS = 47,
+	R_FROZEN = 48,      /* b0-7 latched fault, b8-15 detail low byte, b16-23 sensor index, b24 a value was read */
+	R_FROZEN_V = 49,    /* the frozen value seen, as float bits */
 };
 
 struct report_t {
@@ -535,10 +539,58 @@ static void case_clear_rule(void)
 	result_set(R_CLEAR_RULE, (uint32_t)(uint8_t)rc[0] | ((uint32_t)(uint8_t)rc[1] << 8) | ((uint32_t)(uint8_t)rc[2] << 16));
 }
 
+/* Frozen current sensor. The check needs dispatched data, i.e. acquisition
+ * started the way an application does (scheduler, before the first PWM
+ * output): the case reboots, and after the reboot starts the control task with
+ * data management, then the PWM, with the floating current pins whose reading
+ * never changes. After CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS periods the check
+ * must latch a frozen-sensor self-test fault. Runs last. */
+static void case_frozen_start(uint32_t seq)
+{
+	BKP_PENDING = (seq << 8) | CASE_FROZEN;
+	sys_reboot(SYS_REBOOT_COLD);
+}
+
+static void case_frozen_after_reboot(void)
+{
+	(void)safety.clearFault();   /* the CLEAR_RULE trip is still latched (it survives a reset) */
+	pin_discharge(GPIOA, 1);
+	pin_discharge(GPIOC, 1);
+	spin.pwm.initFixedFrequency(200000);   /* the scheduler needs the HRTIM period */
+	for (auto u : units) {
+		spin.pwm.initUnit(u);
+		spin.pwm.setDutyCycle(u, 0.5);
+	}
+	task.createCritical(control_task, 100, source_tim6);
+	task.startCritical(true);   /* data acquisition with dispatch, before the first PWM output */
+	for (auto u : units) {
+		spin.pwm.startDualOutput(u);
+	}
+	k_msleep(50);
+	float v = spin.data.peekAdcChannel(ADC_1, 2);   /* I1_LOW */
+	k_msleep(500);
+	task.stopCritical();
+	safety_fault_record_t rec;
+	safety_supervision_get_record(&rec);
+	uint32_t bits;
+	memcpy(&bits, &v, sizeof(bits));
+	result_set(R_FROZEN, ((uint32_t)rec.fault & 0xFFU) | ((rec.reason & 0xFFU) << 8) | (((rec.reason >> 8) & 0xFFU) << 16)
+		   | ((v != NO_VALUE) ? (1U << 24) : 0U));
+	result_set(R_FROZEN_V, bits);
+	for (auto u : units) {
+		spin.pwm.stopDualOutput(u);
+	}
+}
+
 static void evaluate_pending(uint32_t pending)
 {
 	uint32_t seq = pending >> 8;
 	BKP_PENDING = 0U;
+	if ((pending & 0xFFU) == CASE_FROZEN) {
+		case_frozen_after_reboot();
+		ack(seq);
+		return;
+	}
 	uint32_t v = 0U;
 	if (safety_supervision_get_fault() == SAFETY_FAULT_TRIP) {
 		v |= 1U;
@@ -621,6 +673,7 @@ int main(void)
 			case CASE_AWD_TRIP: case_awd_trip(); break;
 			case CASE_SAFE_CONFIG: case_safe_config(); break;
 			case CASE_CLEAR_RULE: case_clear_rule(); break;
+			case CASE_FROZEN: case_frozen_start(seq); break;
 			default: break;
 			}
 			ack(seq);

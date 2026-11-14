@@ -65,6 +65,7 @@ typedef enum
     SAFETY_FAULT_FATAL_ERROR = 1, /**< Zephyr fatal error (stack overflow, hard fault, panic...) */
     SAFETY_FAULT_WATCHDOG    = 2, /**< Independent watchdog reset: the control task stopped */
     SAFETY_FAULT_TRIP        = 3, /**< Hardware trip (comparator or ADC watchdog), or a threshold changed behind the API */
+    SAFETY_FAULT_SELFTEST    = 4, /**< Class B self-test failed (detail: SAFETY_SELFTEST_*); only a reboot clears it */
 } safety_fault_t;
 
 /** What CPU supervision recorded about the latched fault. It survives the
@@ -82,8 +83,17 @@ typedef struct
     uint32_t lr;              /**< Link register of the fault frame: the caller of an assert or panic */
 } safety_fault_record_t;
 
-/** @brief Feeds the watchdog. Called by the control task once per period. */
+/** @brief Feeds the watchdog. Called by the control task once per period, after
+ *         both program-flow checkpoints of the period were passed. */
 void safety_supervision_feed(void);
+
+/** Program-flow checkpoints of a control period (IEC 60730-1 H.2 1.3). */
+#define SAFETY_CP_TRIPS_CHECKED  (1U << 0)   /**< thresholds read back */
+#define SAFETY_CP_USER_TASK      (1U << 1)   /**< the application's control task returned */
+#define SAFETY_CP_ALL            (SAFETY_CP_TRIPS_CHECKED | SAFETY_CP_USER_TASK)
+
+/** @brief Marks a program-flow checkpoint of the current control period. */
+void safety_supervision_checkpoint(uint32_t cp);
 
 /**
  * @brief The control task started: from now on it alone feeds the watchdog.

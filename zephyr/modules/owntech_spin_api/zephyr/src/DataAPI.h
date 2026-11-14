@@ -229,6 +229,16 @@ public:
 	int8_t startUnattended();
 
 	/**
+	 * @brief Latest converted value of an ADC channel, without any lock (safe
+	 *        in an interrupt). Used by the Safety API's plausibility checks.
+	 *
+	 * @param adc_number ADC_1 to ADC_5
+	 * @param channel_num ADC channel number
+	 * @return the value in the channel's unit, or NO_VALUE if none was acquired.
+	 */
+	float32_t peekAdcChannel(adc_t adc_number, uint8_t channel_num);
+
+	/**
 	 * @brief Stops the module if it is started.
 	 *
 	 * @return `0` if everything went well, `-1` if there was an error.

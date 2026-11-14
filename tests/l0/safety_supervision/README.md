@@ -40,3 +40,9 @@ Reaction times use the DWT cycle counter: the firmware marks the cycle count jus
 - **Zephyr logs before the fatal handler.** With the default `CONFIG_EXCEPTION_DEBUG=y`, 250 to 300 µs passed between the fault and `k_sys_fatal_error_handler()`, with the PWM still switching; with the dump off, still 100 to 150 µs. CPU supervision now wraps the two C entry points of the fault path (`-Wl,--wrap=z_arm_fault,--wrap=z_fatal_error`): **0.82 µs** (stack overflow) and **0.95 µs** (undefined instruction).
 - **`task.stopCritical()` then `task.createCritical()` panicked** (TIM6 source): Zephyr asserts in `irq_connect_dynamic()` that the line is disabled, and the timer driver left it enabled. Fixed in `owntech_timer_driver`.
 - **Fault messages never reach the console**: the CPU halts and the watchdog resets within 1 ms, before the console flushes. The fault record in the backup registers (reason, PC, LR, thread, IPSR, stack) is the diagnostic channel; `run.py` prints it with the thread's symbol.
+
+## Class B self-tests (L0-STK, issue luizvilla/Core#21)
+
+The same firmware, with `CONFIG_OWNTECH_SAFETY_TEST_HOOKS=y` (`tests/firmware/safety_supervision/app.conf`), checks the start-up results (read from `g_safety_selftest` over SWD), lets the run-time tests run 6 s, then injects a failure into the RAM, flash, clock and CPU tests (each: latched, PWM refused, `clearFault()` refused with -2, clean after the reboot), skips a program-flow checkpoint (watchdog reset) and makes TIM6 fire four times faster than declared (interrupt-rate fault). The frozen-sensor case (L0-STK-09) is in [L0-CMP](../safety_comparator/README.md): it needs a shield devicetree and acquisition started with dispatch.
+
+Measured (2026-11-14): RAM March C- 16.4 ms over 122 KB, flash CRC 3.8 ms over 192 KB, clock 42420 counts (LSI 32.06 kHz), VREF+ 2053 mV (VREFBUF 2.048 V), longest run-time slice 509 µs.

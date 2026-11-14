@@ -19,3 +19,23 @@ config OWNTECH_SAFETY_REPEAT_CLEAR_MS
 	help
 		ADR 0009: clearFault() after a second fault within this time of
 		the previous clear is refused until a reboot.
+
+config OWNTECH_SAFETY_RUNTIME_SELFTEST
+	bool "Class B self-tests at run time (ADR 0009)"
+	default y
+	depends on OWNTECH_SAFETY_SUPERVISION
+	help
+		CPU registers, RAM, flash CRC and clock checked in slices every
+		10 ms by the system work queue. The start-up self-tests always run.
+		Turn off only for development measurements.
+
+config OWNTECH_SAFETY_FROZEN_PERIODS
+	int "Control periods with an unchanged current reading before a sensor counts as frozen"
+	default 2000
+	range 100 100000
+	depends on OWNTECH_SAFETY_SUPERVISION
+
+config OWNTECH_SAFETY_TEST_HOOKS
+	bool "Fault injection hooks for the safety L0 tests (never in an application)"
+	default n
+	depends on OWNTECH_SAFETY_SUPERVISION
