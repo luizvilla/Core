@@ -667,6 +667,101 @@
    "status": "implemented",
    "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#22)",
    "harness": "tests/l0/safety_api/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-00",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Timing overhead harness failure before a reported criterion must fail the campaign",
+   "criterion": "Reported only when a build, a flash or the harness fails before its criteria.",
+   "source": "campaign runner",
+   "status": "implemented",
+   "status_note": "Infrastructure fallback",
+   "reports_only_failures": true
+  },
+  {
+   "id": "L0-TOV-01",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The safety code in the control interrupt costs at most 5 % of the period",
+   "criterion": "per scenario and rate: sum of the block maxima (software check, read-back, plausibility, feed), B1p probes; provisional limit",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-02",
+   "tab": "safety",
+   "level": "L0",
+   "title": "No Safety API code keeps interrupts off longer than 2 us",
+   "criterion": "RAM self-test block and HRTIM gate re-check; provisional limit",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-03",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The Safety API adds at most 2 us to the task-start jitter",
+   "criterion": "worst deviation of the gap between task starts from the period, B1 against B0 (B2 for reference); provisional limit",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-04",
+   "tab": "safety",
+   "level": "L0",
+   "title": "No lost period, no spurious fault",
+   "criterion": "every build and scenario: no start later than 1.5 periods, all periods counted, no fault latched, PWM on at the end",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-05",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The Safety API takes at most 5 % more CPU from the application",
+   "criterion": "CPU not left to a main-thread loop (interrupts and work queue), B1 against B0; provisional limit",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-06",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The software reaction time holds under load",
+   "criterion": "B1 and B2: setChannelWatch to outputs stopped <= 7 control periods (5 declared), TRIP 0x403",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-TOV-07",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Arming time, self-test slices, longest preemption, rest of the interrupt, flash wait states",
+   "criterion": "information",
+   "conditions": "Bare Spin, Twist 1.4.1 devicetree (low limits widened for the floating pins), flash at 4 wait states; builds B0 Core main 8111a0dc, B1 safety-hw production, B1p with probes, B2 development (self-tests off, disarm); control task 50 and 100 us on the HRTIM, 10 us load, data dispatch, PWM at 200 kHz; 4 s per scenario",
+   "source": "Issue luizvilla/Core#27; `docs/safety/timing_overhead.md`; `tests/firmware/safety_timing/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
+   "harness": "tests/l0/safety_timing/run.sh --run"
   }
  ],
  "retired": {}

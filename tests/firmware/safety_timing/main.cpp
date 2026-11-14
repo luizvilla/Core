@@ -39,14 +39,15 @@
 #include "safety_mode.h"
 #include "safety_supervision.h"
 #define NEW_SAFETY 1
+#include "safety_timing.h"
 #else
 #define NEW_SAFETY 0
 #define SAFETY_DEVELOPMENT_MODE 0
 #endif
 
 #define REPORT_MAGIC  0x31564F54U  /* "TOV1" */
-#define MEASURE_S     10U
-#define LOAD_US       25U          /* busy load of the control task */
+#define MEASURE_S     4U
+#define LOAD_US       10U          /* busy load of the control task */
 #define HIST_BINS     64U          /* gap deviation from the period, 0.25 us per bin, centred */
 #define HIST_STEP_CYC 42U          /* 0.25 us at 170 MHz (rounded) */
 
@@ -178,6 +179,9 @@ static void run_scenario(uint32_t c)
 	/* Measurement window: the main thread counts the cycles it gets. */
 	uint64_t window = (uint64_t)MEASURE_S * SystemCoreClock, got = 0U;
 	uint32_t longest = 0U;
+#ifdef CONFIG_OWNTECH_SAFETY_TIMING_PROBES
+	g_safety_timing.reset = 1U;   /* the probe record covers the window only */
+#endif
 	recording = true;
 	uint32_t start = DWT->CYCCNT, last = start;
 	uint64_t elapsed = 0U;
@@ -204,6 +208,7 @@ static void run_scenario(uint32_t c)
 	if (c == CASE_REACT) {
 		/* Software trip under load: V_HIGH reads about 0 V, its min tightened to 99. */
 		sensor_t vh = V_HIGH;
+		safety.initShield(&vh, 0);   /* devicetree thresholds, nothing watched yet */
 		float32_t x = 99.0f;
 		(void)safety.setChannelThresholdMin(&vh, &x, 1);
 		uint32_t t0 = DWT->CYCCNT;
@@ -216,7 +221,13 @@ static void run_scenario(uint32_t c)
 		r->react_reason = rec.reason;
 		safety.unsetChannelWatch(&vh, 1);
 	}
-	r->fault_after = (c == CASE_REACT) ? 0U : (uint32_t)safety.getFault();
+	if (c != CASE_REACT) {
+		safety_fault_record_t rec;
+		safety_supervision_get_record(&rec);
+		r->fault_after = (uint32_t)rec.fault;
+		r->react_reason = rec.reason;   /* which limit, if a fault was latched */
+		r->react_cycles = rec.pc;       /* the reading, for a software trip (float bits) */
+	}
 #endif
 	r->outputs_on_end = outputs_enabled() ? 1U : 0U;
 	for (auto u : units) {

@@ -21,3 +21,13 @@
 &vhightd {
 	threshold-low = <0xc1200000>; /* -10.0 */
 };
+
+/* A floating V1_LOW / V2_LOW pin reads about -92 V with the Twist scaling: below -10 V the old software check of
+ * scenario S1 trips at once (found in the first run). */
+&v1lowtd {
+	threshold-low = <0xc3160000>; /* -150.0 */
+};
+
+&v2lowtd {
+	threshold-low = <0xc3160000>; /* -150.0 */
+};

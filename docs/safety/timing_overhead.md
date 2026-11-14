@@ -52,7 +52,7 @@ B0 is built in a temporary git worktree at `main` (which has no `OWNTECH_APP_DIR
 
 **Rates**: 50 µs (20 kHz, the micro-inverter) and 100 µs.
 
-**Load**: a calibrated busy loop in the control task, with data dispatch and PWM running.
+**Load**: a busy loop of 10 µs in the control task, with data dispatch and PWM running (25 µs was planned; at 50 µs it overloads B1, see the findings).
 
 **Measured in every build** (by the test firmware itself, no library probe):
 - task-start jitter over many periods: worst case, spread, histogram;
@@ -110,4 +110,55 @@ The before/after uses the micro-inverter's own suite L0-TIM ([ADR 0005](../adr/0
 
 ## Results and findings
 
-None yet.
+### 2026-11-14, first measurements (probe build B1p, bare Spin, scenario S0)
+
+Exploratory runs, before the harness. They are not campaign results; the campaign numbers will replace them.
+
+Per period, safety-hw production with probes, 100 µs control task, 25 µs load:
+
+| Block of the control interrupt | Mean | Max |
+|---|---|---|
+| old software check, no sensor watched | 2.11 µs | 2.13 µs |
+| data dispatch (Core, not safety) | 18.1 µs | 20.5 µs |
+| user task (test load) | 25.4 µs | 25.4 µs |
+| threshold read-back | 3.81 µs | 3.82 µs |
+| frozen-sensor check | 7.08 µs | 7.09 µs |
+| watchdog feed and interrupt-rate check | 1.42 µs | 1.42 µs |
+
+Other records:
+- RAM self-test block with every interrupt off: **7.5–8.0 µs**;
+- longest run-time self-test slice: 530–640 µs;
+- first output enable (arming): 2.1 ms at 100 µs, 3.2 ms at 50 µs.
+
+Findings:
+- **The safety code costs about 14.4 µs per period**: 14 % of a 100 µs period, 29 % of a 50 µs one. That is far above the provisional 5 %, so step 1.4 will need optimisation. The heaviest blocks are the frozen-sensor check (7.1 µs for two current sensors) and the read-back (3.8 µs). Even the old software check costs 2.1 µs with nothing to check.
+- **The flash runs at 8 wait states** (FLASH_ACR LATENCY = 8; 4 are enough at 170 MHz) on Core `main` and on `safety-hw`. The micro-inverter work on `apf_quadrature` found the same: 8 → 4 wait states shortened its tick by about 38 %, and moving the hot path to CCM SRAM removed more. B0 and B1 share it, so the before/after stays fair, but the absolute numbers here are inflated. Step 2 measures with `apf_quadrature`'s flash settings.
+- **Overload ends in a watchdog reset.** At 50 µs with a 25 µs load, B1's control interrupt (≈ 50 µs) exceeds the period and the board resets on the independent watchdog. The watchdog is fed from the control interrupt on every period, so the mechanism is not yet explained; investigation pending. With a 10 µs load, B1 runs, and the control interrupt takes about 71 % of the CPU.
+- **Bare-Spin artefact:** the floating current pins never change, so the frozen-sensor check fires after 2000 periods. In the timing builds `CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS` = 100000 keeps the check running at its usual cost without firing within the 4 s window.
+
+### 2026-11-14, first full pass at 4 wait states (scratch run, before the campaign)
+
+The flash is now at 4 wait states in every build (Luiz Villa's request): `safety-hw` carries `perf(spin)` (code of `59e55b9a` from `apf_quadrature`), and B0 gets the same patch (`tests/l0/safety_timing/flash_ws4.patch`).
+
+| 50 µs task, S0 (no safety call) | B0 before | B1 after | B2 dev, self-tests off, disarmed |
+|---|---|---|---|
+| CPU taken from the main thread | 33.8 % | 73.6 % | 68.5 % |
+| worst task-start deviation | 6.7 µs | 21.0 µs | 10.1 µs |
+| longest stretch taken from the main thread | 24 µs | 692 µs | 83 µs |
+| first output enable (arming) | 2 µs | 1.7 ms | 0.8 ms |
+
+Per block (B1p, mean): old software check 1.47 µs (10.6 µs on six sensors in S1); read-back 2.56 µs; frozen-sensor check 4.99 µs; feed 0.92 µs. Total 10.0 µs per period (18.8 µs in S1). Data dispatch is 11.4 µs at 50 µs and 18.4 µs at 100 µs, but it is not safety code. RAM self-test block with interrupts off: 7.42 µs. Software trip under load: 230 µs from setChannelWatch() to stop (≤ 350 µs).
+
+Findings:
+- **The probed blocks do not explain the extra CPU.** B2 vs B0 is about 35 % at 50 µs, but B2's probed safety blocks are only about 15 %.
+  - *Ruled out:* data dispatch volume. B0 and B2 have the same ADC triggers and sequences (registers read mid-window); only the watchdog-enable bit differs.
+  - *Found by PC sampling in B1* (100 halts in the window): 55 % in the control interrupt, 34 % in threads, **9 % in SysTick**. The backup watchdog feeder is a kernel timer every 200 µs. It keeps firing while the control task is the one feeding. Its callback returns at once, but each tick goes through the kernel's timeout code, with spinlock validation (asserts are on in these builds). That code runs with interrupts masked, which plausibly also explains part of B1's jitter.
+- **Test fixes:**
+  - S1's old software check tripped on a floating sensor in B1 and B2. The scenario now records which limit, so it can be widened in the test overlay.
+  - In B0, the old reaction (GPIO reconfiguration) left OENR set, so a trip there was invisible.
+  - The REACT case now loads the devicetree thresholds before tightening V_HIGH. B2's 0x483 was a high limit of 0.
+
+Optimisations, one commit each, re-measured after each:
+- 1.4a: stop the feeder timer while the control task feeds;
+- 1.4b: RAM self-test in 4-word blocks with interrupts re-enabled between them, same work per slice;
+- then the frozen-sensor check, the old software check and the read-back.

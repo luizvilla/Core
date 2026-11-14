@@ -8,7 +8,8 @@
 ##
 ## Core main has no OWNTECH_APP_DIR hook and no pio_tests.ini, so the firmware is built in a git worktree of that
 ## commit (.pio/before_worktree, ignored by git): main.cpp goes to its src/, the test overlay without the idle-band
-## lines (unknown to main's bindings) to src/app.overlay, and an env TOV_BEFORE is appended to its platformio.ini.
+## lines (unknown to main's bindings) to src/app.overlay, an env TOV_BEFORE is appended to its platformio.ini, and
+## flash_ws4.patch sets the flash to 4 wait states, as safety-hw does (otherwise main runs at 8).
 ## The ELF is copied to .pio/build/TOV_BEFORE/firmware.elf, where the harness looks for symbols.
 ## @return the build (or upload) exit code.
 ##
@@ -29,6 +30,8 @@ if [ ! -d "$wt" ] || [ "$(git -C "$wt" rev-parse --short=8 HEAD 2>/dev/null)" !=
     git -C "$repo" worktree add --detach "$wt" "$BEFORE_COMMIT" || exit 1
 fi
 git -C "$wt" checkout -q -- . && git -C "$wt" clean -qfd src
+# The flash at 4 wait states, as on safety-hw (perf(spin) commit): before and after at the same flash setting.
+git -C "$wt" apply "$here/flash_ws4.patch" || exit 1
 cp "$repo/tests/firmware/safety_timing/main.cpp" "$wt/src/main.cpp"
 grep -v 'idle-band' "$repo/tests/firmware/safety_timing/app.overlay" > "$wt/src/app.overlay"
 cat >> "$wt/platformio.ini" <<'INI'
@@ -41,6 +44,11 @@ board_shield_version = 1_4_1
 board_build.zephyr.cmake_extra_args = -DBUILD_ENV_NAME=TOV_BEFORE
 upload_protocol = custom
 upload_command = ${platformio.packages_dir}/tool-openocd/bin/openocd -d1 -s ${platformio.packages_dir}/tool-openocd/openocd/scripts -f interface/stlink.cfg -f target/stm32g4x.cfg -c "program $SOURCE 0x8047800 verify reset exit"
+# MCUboot image header and confirmation (without it the bootloader refuses the image), console on USB
+extra_scripts =
+    pre:owntech/scripts/pre_bootloader_common.py
+    pre:owntech/scripts/pre_usb.py
+    pre:owntech/scripts/pre_version.py
 INI
 echo "== B0: Core main at $BEFORE_COMMIT, worktree $wt"
 "$pio" run -d "$wt" -e TOV_BEFORE "${target[@]}"
