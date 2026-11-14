@@ -65,8 +65,17 @@ list(APPEND ZEPHYR_EXTRA_MODULES ${SUBDIRS})
 # Add extra config and overlay files
 get_filename_component(PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
 
+# Application folder: src/ by default. A test environment may build another
+# folder instead by passing -DOWNTECH_APP_DIR=<path relative to the project>
+# in board_build.zephyr.cmake_extra_args (e.g. the safety test firmware).
+if(DEFINED OWNTECH_APP_DIR)
+  set(APP_DIR ${PARENT_DIR}/${OWNTECH_APP_DIR})
+else()
+  set(APP_DIR ${PARENT_DIR}/src)
+endif()
+
 # Looking for app.conf file
-FILELIST(EXTRA_APP_CONF_FILE ${PARENT_DIR}/src conf)
+FILELIST(EXTRA_APP_CONF_FILE ${APP_DIR} conf)
 # Add app.conf path to zephyr variables
 set(EXTRA_CONF_FILE ${EXTRA_APP_CONF_FILE})
 
@@ -77,7 +86,7 @@ CONFLIB(EXTRA_LIB_CONF_FILE ${PARENT_DIR}/owntech/lib/${BUILD_ENV_NAME} conf)
 list(APPEND EXTRA_CONF_FILE ${EXTRA_LIB_CONF_FILE})
 
 # Looking for app.overlay file
-FILELIST(EXTRA_OVERLAY_APP_FILE ${PARENT_DIR}/src overlay)
+FILELIST(EXTRA_OVERLAY_APP_FILE ${APP_DIR} overlay)
 # Add app.overlay path to zephyr variables
 set(EXTRA_DTC_OVERLAY_FILE ${EXTRA_OVERLAY_APP_FILE})
 
@@ -110,5 +119,13 @@ cmake_minimum_required(VERSION 3.13.1)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(owntech_power_api)
-target_sources(app PRIVATE ../src/main.cpp)
-zephyr_include_directories(../src)
+# PlatformIO compiles the application sources itself (build_src_filter); the
+# app target below is used by plain west/CMake builds.
+if(DEFINED OWNTECH_APP_DIR)
+  FILE(GLOB OWNTECH_APP_SOURCES ${APP_DIR}/*.c ${APP_DIR}/*.cpp)
+  target_sources(app PRIVATE ${OWNTECH_APP_SOURCES})
+  zephyr_include_directories(${APP_DIR})
+else()
+  target_sources(app PRIVATE ../src/main.cpp)
+  zephyr_include_directories(../src)
+endif()

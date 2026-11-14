@@ -213,3 +213,7 @@ IEC 62109-1 4.4.4.1 asks for faults applied "using a switching device" with low 
 - closed by the injector Spin at a programmed or random phase of the PWM.
 
 It makes "fault at any point of the program sequence" (60730-1 H.13.2.5.1) repeatable and keeps the operator's hands away from short-circuit tests. Ratings, layout and the current-limited first runs are to be agreed with the hardware team before anything is built.
+
+## Implementation notes
+
+**2026-11-14, CPU supervision (luizvilla/Core#16), measured on a bare Spin (L0-SUP).** Zephyr formats and logs the exception and the fatal error before it calls `k_sys_fatal_error_handler()`: 250 to 300 µs with the default `CONFIG_EXCEPTION_DEBUG=y`, during which the PWM kept switching. Overriding the handler is therefore not enough. CPU supervision wraps the two C entry points of the fault path with the linker (`--wrap=z_arm_fault`, `--wrap=z_fatal_error`) and disables every HRTIM output first: 0.82 µs from a stack overflow, 0.95 µs from an undefined instruction. Consequences: any CPU fault stops the PWM, including faults Zephyr could recover from (userspace, debug monitor; unused by OwnTech); a Zephyr update that renames these functions makes the link fail instead of losing the protection silently. The watchdog timeout follows the control task: at least 3 periods, never under the 1 ms default (6.9 ms with a 2 ms task). A fault caught by CPU supervision stays latched across resets (TAMP backup registers) until `safety.clearFault()` or a power cycle: nothing restarts the converter on its own.

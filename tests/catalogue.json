@@ -1,0 +1,136 @@
+{
+ "_doc": "Every test of the board-agnostic validation, defined once (tests/common/catalogue.py). Shield-specific tests live on the application branches.",
+ "version": "safety-1",
+ "tabs": [
+  {
+   "id": "safety",
+   "title": "Safety",
+   "question": "Does the converter reach its safe state without relying on the CPU? CPU supervision, hardware trips and their declared fault reaction times (ADR 0009).",
+   "notes": [
+    "On-target tests run on a bare Spin through an ST-Link: `tests/run_all.sh --l0 --target`, or the test's own `run.sh --run`. They reflash the board: flash env USB again before a bench session."
+   ]
+  }
+ ],
+ "tests": [
+  {
+   "id": "L0-SUP-00",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Safety test harness failure before a reported criterion must fail the campaign",
+   "criterion": "Reported only when the build, the flash or the harness fails before its criteria.",
+   "source": "campaign runner",
+   "status": "implemented",
+   "status_note": "Infrastructure fallback",
+   "reports_only_failures": true
+  },
+  {
+   "id": "L0-SUP-01",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Arming connects the HRTIM system fault sources, enables the PVD, sets every fault state Inactive and starts the watchdog",
+   "criterion": ".a SYSCFG_CFGR2 CLL SPL PVDL ECCL = 1111; .b PVDE = 1; .c FAULT1 = FAULT2 = Inactive on timers A, C, D, E, F; .d watchdog timeout without a control task <= 1000 us over the LSI range",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-02",
+   "tab": "safety",
+   "level": "L0",
+   "title": "No false watchdog reset while the CPU is healthy",
+   "criterion": ".a no reset over 2 s with PWM on, fed by the kernel timer; .b no reset over 2 s fed by a 50 us control task",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-03",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A slow control task lengthens the watchdog timeout instead of resetting the board",
+   "criterion": ".a timeout with a 2 ms control task >= 3 periods (6000 us); .b no reset over 1 s",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-04",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A thread stack overflow disables every PWM output and latches the fault across the reset",
+   "criterion": ".a fatal error latched after the watchdog reset; .b reason K_ERR_STACK_CHK_FAIL; .c every switching PWM pin low after disabling; .d fault to outputs disabled <= 10 us; .e PWM refused while latched, clear refused with PWM on, accepted with PWM off, PWM back after clear",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-05",
+   "tab": "safety",
+   "level": "L0",
+   "title": "An undefined instruction disables every PWM output and latches the fault across the reset",
+   "criterion": ".a to .e as L0-SUP-04; reason K_ERR_CPU_EXCEPTION or K_ERR_ARM_USAGE_UNDEFINED_INSTRUCTION",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-06",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A control task that never returns makes the watchdog reset the board; the fault is latched",
+   "criterion": ".a watchdog fault latched after the reset; .b PWM refused while latched, back after clear",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-07",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Interrupts masked forever make the watchdog reset the board; the fault is latched",
+   "criterion": ".a, .b as L0-SUP-06",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-08",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A Cortex-M4 lockup makes the watchdog reset the board; the HRTIM system fault turns the outputs off",
+   "criterion": ".a, .b as L0-SUP-06; .c every PWM pin low within 1 us of the lockup (scope on the PWM pins, BLOCKED until the SPOC bench)",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14; .c needs the SPOC bench (luizvilla/Core#23, #26)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  },
+  {
+   "id": "L0-SUP-09",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A software reset keeps the latched fault; clearFault() clears it",
+   "criterion": ".a still latched after a software reset; .b cleared by clearFault()",
+   "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
+   "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#16)",
+   "harness": "tests/l0/safety_supervision/run.sh --run"
+  }
+ ],
+ "retired": {}
+}

@@ -2,3 +2,11 @@ config OWNTECH_SAFETY_API
 	bool "Enable OwnTech safety measures to protect the board"
 	default y
 	depends on OWNTECH_SHIELD_API
+
+config OWNTECH_SAFETY_SUPERVISION
+	bool
+	default y if OWNTECH_HRTIM_DRIVER
+	help
+		CPU supervision (ADR 0009): independent watchdog, fatal-error
+		handler and HRTIM system fault. It has no prompt on purpose:
+		user configuration cannot turn it off. It does not need a shield.

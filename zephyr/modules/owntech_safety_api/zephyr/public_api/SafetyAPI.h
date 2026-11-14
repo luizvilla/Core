@@ -32,6 +32,7 @@
 #include "arm_math.h"
 #include "ShieldAPI.h"
 #include "../src/safety_enum.h"
+#include "safety_supervision.h"
 
 
 class SafetyAPI{
@@ -272,6 +273,22 @@ class SafetyAPI{
      * 
      */
     int8_t retrieveThreshold(sensor_t sensor_threshold_retrieve);
+
+    /**
+     * @brief Returns the fault latched by CPU supervision (watchdog or fatal
+     *        error, ADR 0009). While a fault is latched, PWM outputs cannot
+     *        be enabled, even after a reset.
+     *
+     * @return SAFETY_FAULT_NONE, SAFETY_FAULT_FATAL_ERROR or SAFETY_FAULT_WATCHDOG.
+     */
+    safety_fault_t getFault();
+
+    /**
+     * @brief Clears the latched fault. Refused while any PWM output is enabled.
+     *
+     * @return 0 when cleared, -1 when refused.
+     */
+    int8_t clearFault();
 
 
 };

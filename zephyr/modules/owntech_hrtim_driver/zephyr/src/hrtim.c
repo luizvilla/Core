@@ -759,6 +759,14 @@ void hrtim_tu_gpio_init(hrtim_tu_number_t tu_number)
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
 
+    /* Fault state Inactive on both outputs (ADR 0009). An output whose fault
+     * state is "no action" ignores the fault inputs and the system fault
+     * (RM0440 §27.3.15), so this must be set before the timer is enabled. */
+    LL_HRTIM_OUT_SetFaultState(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H,
+                               LL_HRTIM_OUT_FAULTSTATE_INACTIVE);
+    LL_HRTIM_OUT_SetFaultState(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L,
+                               LL_HRTIM_OUT_FAULTSTATE_INACTIVE);
+
     /* GPIO initialization */
     LL_AHB2_GRP1_EnableClock(tu_channel[tu_number]->gpio_conf.tu_gpio_CLK);
 
@@ -815,8 +823,20 @@ void hrtim_out_dis(hrtim_tu_number_t tu_number)
     LL_HRTIM_DisableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
 }
 
+/**
+ * @brief Safety gate called before any output is enabled. The safety module
+ *        overrides it to arm CPU supervision and to refuse while a fault is
+ *        latched (ADR 0009). Without the safety module, outputs are allowed.
+ * @return true if the outputs may be enabled.
+ */
+__attribute__((weak)) bool hrtim_safety_output_enable_allowed(void)
+{
+    return true;
+}
+
 void hrtim_out_en(hrtim_tu_number_t tu_number)
 {
+    if (!hrtim_safety_output_enable_allowed()) return;
     LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
     LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
 }
@@ -828,6 +848,7 @@ void hrtim_out_dis_single(hrtim_output_units_t PWM_OUT)
 
 void hrtim_out_en_single(hrtim_output_units_t PWM_OUT)
 {
+    if (!hrtim_safety_output_enable_allowed()) return;
     LL_HRTIM_EnableOutput(HRTIM1, PWM_OUT);
 }
 

@@ -27,6 +27,10 @@
 /* Current module */
 #include "scheduling_common.h"
 
+#ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+#include "safety_supervision.h"
+#endif
+
 /* OwnTech Power API */
 #include "timer.h"
 #include "hrtim.h"
@@ -112,14 +116,21 @@ void user_task_proxy()
 
 #endif
 
-	if (user_periodic_task == NULL) return;
-
-	if (do_data_dispatch == true)
+	if (user_periodic_task != NULL)
 	{
-		spin.data.doFullDispatch();
+		if (do_data_dispatch == true)
+		{
+			spin.data.doFullDispatch();
+		}
+
+		user_periodic_task();
 	}
 
-	user_periodic_task();
+#ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+	/* Fed only once the period's work returned: a control task that never
+	 * returns lets the watchdog reset the MCU (ADR 0009). */
+	safety_supervision_feed();
+#endif
 }
 
 /* Public API */
@@ -239,6 +250,9 @@ void scheduling_start_uninterruptible_synchronous_task(
 		timer_start(timer6);
 
 		uninterruptibleTaskStatus = task_status_t::running;
+#ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+		safety_supervision_feeder_attach(task_period);
+#endif
 	}
 	else if (interrupt_source == source_hrtim)
 	{
@@ -248,6 +262,9 @@ void scheduling_start_uninterruptible_synchronous_task(
 		hrtim_PeriodicEvent_en(MSTR);
 
 		uninterruptibleTaskStatus = task_status_t::running;
+#ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+		safety_supervision_feeder_attach(task_period);
+#endif
 	}
 }
 
@@ -264,11 +281,17 @@ void scheduling_stop_uninterruptible_synchronous_task()
 		timer_stop(timer6);
 
 		uninterruptibleTaskStatus = task_status_t::suspended;
+#ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+		safety_supervision_feeder_detach();
+#endif
 	}
 	else if (interrupt_source == source_hrtim)
 	{
 		hrtim_PeriodicEvent_dis(MSTR);
 
 		uninterruptibleTaskStatus = task_status_t::suspended;
+#ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+		safety_supervision_feeder_detach();
+#endif
 	}
 }

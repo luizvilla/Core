@@ -133,3 +133,13 @@ int8_t SafetyAPI::retrieveThreshold(sensor_t sensor_threshold_retrieve)
     uint8_t ret = safety_retrieve_threshold_in_nvs(sensor_threshold_retrieve);
     return ret;
 }
+
+safety_fault_t SafetyAPI::getFault()
+{
+    return safety_supervision_get_fault();
+}
+
+int8_t SafetyAPI::clearFault()
+{
+    return (int8_t)safety_supervision_clear_fault();
+}
