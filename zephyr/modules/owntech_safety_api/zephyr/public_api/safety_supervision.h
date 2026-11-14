@@ -63,6 +63,7 @@ typedef enum
     SAFETY_FAULT_NONE        = 0, /**< No latched fault */
     SAFETY_FAULT_FATAL_ERROR = 1, /**< Zephyr fatal error (stack overflow, hard fault, panic...) */
     SAFETY_FAULT_WATCHDOG    = 2, /**< Independent watchdog reset: the control task stopped */
+    SAFETY_FAULT_TRIP        = 3, /**< Hardware trip (comparator or ADC watchdog), or a threshold changed behind the API */
 } safety_fault_t;
 
 /** What CPU supervision recorded about the latched fault. It survives the
@@ -111,6 +112,13 @@ void safety_supervision_get_record(safety_fault_record_t *record);
  * @return 0 when cleared; -1 if a PWM output is still enabled (refused).
  */
 int safety_supervision_clear_fault(void);
+
+/**
+ * @brief Latches a fault so that it survives a reset (any context, register-only).
+ * @param detail for SAFETY_FAULT_TRIP: the HRTIM fault inputs that tripped (bit n = FLTn+1), or 0x100 | index for
+ *        a threshold read-back mismatch.
+ */
+void safety_supervision_latch(safety_fault_t fault, uint32_t detail);
 
 /** @brief Disables every HRTIM output at once (emergency path, any context). */
 void safety_outputs_disable_all(void);

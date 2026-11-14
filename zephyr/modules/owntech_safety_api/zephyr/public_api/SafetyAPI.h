@@ -33,6 +33,7 @@
 #include "ShieldAPI.h"
 #include "../src/safety_enum.h"
 #include "safety_supervision.h"
+#include "safety_trips.h"
 
 
 class SafetyAPI{
@@ -289,6 +290,22 @@ class SafetyAPI{
      * @return 0 when cleared, -1 when refused.
      */
     int8_t clearFault();
+
+    /**
+     * @brief Tightens the hardware trip thresholds of a sensor, in its unit
+     *        (ADR 0009). Only tightening is accepted: a lower high limit, a
+     *        higher low limit than the current ones. The devicetree limit is
+     *        the loosest a board ever gets.
+     *
+     * @param sensor  sensor (e.g. I1_LOW)
+     * @param low     new low limit
+     * @param high    new high limit
+     * @return 0 when applied to every hardware bound of the sensor (a bound
+     *         with no comparator is left as it is); -1 when a bound would be
+     *         loosened (nothing changed on that bound); -3 when a limit is out
+     *         of the sensor's measurement range.
+     */
+    int8_t setTripThreshold(sensor_t sensor, float32_t low, float32_t high);
 
 
 };

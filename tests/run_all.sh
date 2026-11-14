@@ -54,6 +54,7 @@ object_code() {
         timing) echo TIM-01 ;;
         safety_supervision) echo SUP-00 ;;
         safety_allocation) echo ALC-00 ;;
+        safety_comparator) echo CMP-00 ;;
         l1) echo INT-00 ;;
         *) echo "$1" | tr '[:lower:]' '[:upper:]' ;;
     esac

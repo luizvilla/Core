@@ -100,6 +100,27 @@ def build_model(edt):
     return shield or 'no shield', {'sensors': sensors, 'limits': limits, 'legs': legs, 'safe_outputs': outputs}
 
 
+def comparator_table(alloc):
+    """C initialisers of the comparator trips, for safety_trips.c (one entry per comparator path)."""
+    rows = []
+    for l in alloc['limits']:
+        for bound in ('high', 'low'):
+            p = l['paths'][bound]
+            if not p or p['kind'] != 'comparator':
+                continue
+            port, pin = p['mcu_pin'][1], int(p['mcu_pin'][2:])
+            dac, ch = p['dac'].split('_CH')
+            inmsel = 4 + p['dac_options'].index(p['dac'])   # RM0440 Table 197: 100 or 101
+            rows.append(f'    {{ "{l["sensor"]}", {"1" if bound == "high" else "0"}, {p["comp"]}, {p["inpsel"]}, '
+                        f'{p["flt"]}, {1 if p["polarity"] == "inverted" else 0}, {dac[3:]}, {ch}, '
+                        f'{p["dac_code"] if p["dac_code"] is not None else 0}, \'{port}\', {pin}, {inmsel}, '
+                        f'{float(l.get("gain") or 0.0)!r}f, {float(l.get("offset") or 0.0)!r}f }}, \\')
+    return ('/* sensor, high bound?, comparator, INPSEL, FLT, inverted, DAC n, DAC channel, DAC code, port, pin,\n'
+            ' * INMSEL, sensor gain, sensor offset (value = counts * gain + offset) */\n'
+            f'#define SAFETY_COMPARATOR_TRIPS {len(rows)}\n'
+            '#define SAFETY_COMPARATOR_TABLE \\\n' + '\n'.join(rows) + '\n\n')
+
+
 def plan_text(alloc):
     """One-line plan for the boot line: LIMIT low/high path kinds."""
     short = {'comparator': 'comp', 'adc_watchdog': 'awd', 'software': 'sw'}
@@ -124,6 +145,9 @@ def main():
         edt = pickle.load(f)
     shield, model = build_model(edt)
     alloc = allocate(model)
+    for l in alloc['limits']:   # sensor scaling, for the firmware's threshold conversions
+        sn = model['sensors'].get(l['sensor'], {})
+        l['gain'], l['offset'] = sn.get('gain'), sn.get('offset')
     os.makedirs(a.out_dir, exist_ok=True)
     manifest = {'layout': 1, 'shield': shield, 'model': model, **alloc}
     with open(os.path.join(a.out_dir, 'protection-manifest.json'), 'w') as f:
@@ -138,7 +162,8 @@ def main():
                     '#ifndef SAFETY_PROTECTION_PLAN_H_\n#define SAFETY_PROTECTION_PLAN_H_\n'
                     f'#define SAFETY_PROTECTION_SHIELD "{shield}"\n'
                     f'#define SAFETY_PROTECTION_PLAN "{text}"\n'
-                    f'#define SAFETY_PROTECTION_LIMITS {len(alloc["limits"])}\n#endif\n')
+                    f'#define SAFETY_PROTECTION_LIMITS {len(alloc["limits"])}\n'
+                    + comparator_table(alloc) + '#endif\n')
     print(f'safety: protection plan for {shield}: {plan_text(alloc)}')
     for l in alloc['limits']:
         print(f'safety:   {l["sensor"]:12s} low {path_text(l["paths"]["low"]):24s} high {path_text(l["paths"]["high"])}')

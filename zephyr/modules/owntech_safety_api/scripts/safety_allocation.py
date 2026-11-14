@@ -71,6 +71,7 @@ def allocate(model):
     used_comp = {c: 'reserved' for c in reserved.get('comparators', [])}
     used_flt = {f: 'reserved' for f in reserved.get('flt', [])}
     used_awd = {}
+    used_dac = set(reserved.get('dacs', []))
     errors, warnings, out_limits = [], [], []
 
     def rank(i):
@@ -106,12 +107,16 @@ def allocate(model):
             flt = COMP_FLT.get(comp)
             if comp is None or flt is None or comp in used_comp or flt in used_flt or not linear:
                 continue
+            dac = next((d for d in COMP_DACS[comp] if d not in used_dac), None)
+            if dac is None:
+                continue
+            used_dac.add(dac)
             used_comp[comp] = name
             used_flt[flt] = f'{name} {b} (COMP{comp})'
             entry['paths'][b] = {'kind': 'comparator', 'comp': comp, 'inpsel': COMP_INP[ch['mcu_pin']][1],
                                  'flt': flt, 'mcu_pin': ch['mcu_pin'], 'spin_pin': ch['spin_pin'],
                                  'polarity': 'non-inverted' if b == 'high' else 'inverted',
-                                 'dac_options': list(COMP_DACS[comp]),
+                                 'dac_options': list(COMP_DACS[comp]), 'dac': dac,
                                  'dac_code': counts(lim.get(b), gain, offset) if linear else None}
             break
         # 2. ADC-watchdog window for the bounds still open (it covers both).

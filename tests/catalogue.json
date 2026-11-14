@@ -285,6 +285,101 @@
    "status": "implemented",
    "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#17)",
    "harness": "tests/l0/safety_allocation/run.sh"
+  },
+  {
+   "id": "L0-CMP-00",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Comparator test harness failure before a reported criterion must fail the campaign",
+   "criterion": "Reported only when the build, the flash or the harness fails before its criteria.",
+   "source": "campaign runner",
+   "status": "implemented",
+   "status_note": "Infrastructure fallback",
+   "reports_only_failures": true
+  },
+  {
+   "id": "L0-CMP-01",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Each allocated comparator trip is armed, self-tested and locked before the first PWM output",
+   "criterion": ".a armed on the allocated fault inputs; .b/.c comparator enabled, locked, inputs as allocated, DAC threshold; .d fault inputs active high, internal source, 282 ns filter, locked; .e every timer listens, FLTLCK; .f fault interrupt enabled",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-CMP-02",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Writes to the locked comparator and fault registers change nothing",
+   "criterion": "COMP1/COMP3 CSR, FLTINR1/2 and every FLTxR kept",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-CMP-03",
+   "tab": "safety",
+   "level": "L0",
+   "title": "I1_LOW beyond its limit turns every PWM output off in hardware within the declared time",
+   "criterion": ".a fault flag; .b step to flag <= 0.5 us; .c every switching PWM pin low; .d latched, PWM refused; .e clear refused while beyond the limit, accepted once back, PWM back",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-CMP-04",
+   "tab": "safety",
+   "level": "L0",
+   "title": "I2_LOW beyond its limit turns every PWM output off in hardware within the declared time",
+   "criterion": ".a to .e as L0-CMP-03",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-CMP-05",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A threshold written behind the Safety API trips within one control period",
+   "criterion": ".a latched, read-back detail, outputs off; .b clear once restored",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-CMP-06",
+   "tab": "safety",
+   "level": "L0",
+   "title": "setTripThreshold tightens a threshold and refuses to loosen it",
+   "criterion": "tighten to 5 A: DAC 3000; 6 A refused",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
+  },
+  {
+   "id": "L0-CMP-07",
+   "tab": "safety",
+   "level": "L0",
+   "title": "A trip stays latched across a software reset",
+   "criterion": "latched, PWM refused, cleared, PWM back",
+   "conditions": "Bare Spin with the Twist 1.4.1 devicetree (I1_LOW on COMP1, I2_LOW on COMP3, 7 A = DAC 3400); env SAFETY_COMP; PWM A, C, D, E, F at 200 kHz",
+   "source": "ADR 0009; `zephyr/modules/owntech_safety_api/zephyr/src/safety_trips.c`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#18)",
+   "harness": "tests/l0/safety_comparator/run.sh --run"
   }
  ],
  "retired": {}

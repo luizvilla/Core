@@ -143,3 +143,21 @@ int8_t SafetyAPI::clearFault()
 {
     return (int8_t)safety_supervision_clear_fault();
 }
+
+#define SAFETY_SENSOR_NAME(node_id) DT_PROP(node_id, sensor_name),
+static const char *const sensor_names[] = {
+    "UNDEFINED_SENSOR", DT_FOREACH_STATUS_OKAY(shield_sensors, SAFETY_SENSOR_NAME)
+};
+
+int8_t SafetyAPI::setTripThreshold(sensor_t sensor, float32_t low, float32_t high)
+{
+    if ((size_t)sensor >= sizeof(sensor_names) / sizeof(sensor_names[0]) || low >= high)
+    {
+        return -3;
+    }
+    int rc_high = safety_trips_set_threshold(sensor_names[sensor], true, high);
+    int rc_low = safety_trips_set_threshold(sensor_names[sensor], false, low);
+    if (rc_high == -1 || rc_low == -1) return -1;
+    if (rc_high == -3 || rc_low == -3) return -3;
+    return 0;
+}

@@ -29,6 +29,7 @@
 
 #ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
 #include "safety_supervision.h"
+#include "safety_trips.h"
 #endif
 
 /* OwnTech Power API */
@@ -127,6 +128,8 @@ void user_task_proxy()
 	}
 
 #ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
+	/* Thresholds read back every period (ADR 0009, #18). */
+	(void)safety_trips_check();
 	/* Fed only once the period's work returned: a control task that never
 	 * returns lets the watchdog reset the MCU (ADR 0009). */
 	safety_supervision_feed();
