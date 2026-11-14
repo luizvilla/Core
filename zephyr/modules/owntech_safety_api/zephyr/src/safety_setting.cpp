@@ -79,6 +79,17 @@ static bool sensor_errors[DT_SENSORS_NUMBER + 1];
  */
 static uint8_t safety_alert_counter = 0;
 
+/* Number of watched sensors: the check returns at once when there is none
+ * (the default: examples make no safety call), #27 */
+static uint8_t watched_count;
+
+static void count_watched(void)
+{
+    uint8_t n = 0;
+    for (uint8_t i = 1; i <= DT_SENSORS_NUMBER; i++) n += sensor_watch[i] ? 1U : 0U;
+    watched_count = n;
+}
+
 /* The first sensor found out of its limits, for the fault record */
 static uint8_t trip_sensor;
 static bool trip_high;
@@ -117,6 +128,7 @@ int8_t safety_set_sensor_watch(sensor_t * safety_sensors,
     {
         sensor_watch[safety_sensors[i]] = true;
     }
+    count_watched();
 
     return 0;
 }
@@ -151,6 +163,7 @@ int8_t safety_unset_sensor_watch(sensor_t * safety_sensors,
     {
         sensor_watch[safety_sensors[i]] = false;
     }
+    count_watched();
 
     return 0;
 }
@@ -351,7 +364,7 @@ int8_t safety_task()
 {
     int8_t status = 0;
 
-    if(safety_enable){
+    if(safety_enable && watched_count != 0){
         status = safety_watch();
 
         if(status != 0)
