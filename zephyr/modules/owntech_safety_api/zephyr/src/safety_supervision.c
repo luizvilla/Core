@@ -273,11 +273,19 @@ void safety_supervision_feeder_attach(uint32_t period_us)
 		iwdg_apply();
 	}
 	critical_feeder = true;
+	/* The control task feeds from now on: the kernel timer would only add a
+	 * SysTick interrupt every 200 us (measured: 9 % of the CPU and extra
+	 * task-start jitter with a 50 us task, #27). */
+	k_timer_stop(&feed_timer);
 }
 
 void safety_supervision_feeder_detach(void)
 {
 	critical_feeder = false;
+	if (armed) {
+		IWDG->KR = IWDG_KEY_FEED;   /* no gap until the timer's first tick */
+		k_timer_start(&feed_timer, K_USEC(200), K_USEC(200));
+	}
 }
 
 bool safety_supervision_armed(void)
@@ -442,7 +450,9 @@ static void arm(void)
 	iwdg_apply();
 
 	/* Until a control task attaches, a kernel timer feeds the watchdog. */
-	k_timer_start(&feed_timer, K_USEC(200), K_USEC(200));
+	if (!critical_feeder) {
+		k_timer_start(&feed_timer, K_USEC(200), K_USEC(200));
+	}
 	armed = true;
 }
 
