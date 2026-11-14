@@ -24,6 +24,7 @@
  */
 
 /* Include */
+#include <string.h>
 #include "safety_setting.h"
 
 /* Current Header */
@@ -57,6 +58,20 @@ static threshold_prop_t dt_threshold_props[] =
 	DT_FOREACH_STATUS_OKAY(safety_thresholds, THRESHOLD_WRITE_PROP)
 };
 
+bool safety_dt_limits(sensor_t sensor, float32_t *low, float32_t *high)
+{
+    for(uint8_t i = 0; i < DT_THRESHOLDS_NUMBER; i++)
+    {
+        if (dt_threshold_props[i].sensor == sensor)
+        {
+            memcpy(low, &dt_threshold_props[i].threshold_min, sizeof(*low));
+            memcpy(high, &dt_threshold_props[i].threshold_max, sizeof(*high));
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * @brief Initializes the threshold min and max for all the sensors with
  *        the default value from the device tree if values not found
@@ -71,7 +86,11 @@ void safety_init_shield(bool watch_all)
 
         if(rc != 0)
         {
-            printk("%s value not found in static storage. \
+            if (rc == (uint8_t)-5)
+                printk("%s: stored thresholds are looser than the board limit and are ignored (ADR 0009). "
+                       "Default value will be used\n", dt_threshold_props[i].name);
+            else
+                printk("%s value not found in static storage. \
                     Default value will be used \n", dt_threshold_props[i].name);
 
             safety_set_sensor_threshold_max(

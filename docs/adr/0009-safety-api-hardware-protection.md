@@ -241,4 +241,21 @@ It makes "fault at any point of the program sequence" (60730-1 H.13.2.5.1) repea
 - *Run time*, every 10 ms in the system work queue (CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST, default on): CPU registers, one RAM block of the image's .data/.bss, 1 KiB of flash CRC, the clock every second; longest slice 509 µs. Found: the MPU guards each thread's stack bottom inside .bss, so a block is tested with the MPU off (interrupts off, about 1 µs); DMA keeps writing during a block test, so blocks within 4 KiB above any enabled DMA channel's memory address are skipped (data acquisition's buffers come from the kernel heap, in .bss).
 - *Control task*: two program-flow checkpoints per period gate the watchdog feed (thresholds read back, application task returned); three periods in a row shorter than half the declared one latch an interrupt-rate fault.
 - *Plausibility*: at data-acquisition start (PWM off), a current sensor watched by an ADC watchdog must read within its `idle-band` (default a quarter of its larger limit) or arming is refused; with the PWM on, a current reading unchanged for CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS (2000) periods latches a frozen-sensor fault. The frozen check needs dispatched data: it is inactive when the Safety API started acquisition itself (the application then reads no sensor; the hardware trips still protect). It runs in the control interrupt, so it uses DataAPI::peekAdcChannel and never the shield sensor API, which may read NVS on first use (found: it panicked).
-- *Reaction*: any self-test failure latches SAFETY_FAULT_SELFTEST and stops through the emergency stop; only a reboot clears it, and the start-up tests run again. The legacy software path (`safety_task()` → `_open_circuit()`) still reconfigures PWM pins through the GPIO API, which takes a mutex: it is reworked with the API consolidation (#22).
+- *Reaction*: any self-test failure latches SAFETY_FAULT_SELFTEST and stops through the emergency stop; only a reboot clears it, and the start-up tests run again. The legacy software path reconfigured PWM pins through the GPIO API, which takes a mutex: reworked in #22, below.
+
+**2026-11-14, one Safety API and development mode (luizvilla/Core#22), tested on a bare Spin (L0-API).**
+- *The software check reacts like every other trip.* `safety_action()` latches `SAFETY_FAULT_TRIP` with detail `SAFETY_TRIP_SOFTWARE | sensor` (bit 7 for the high bound) and the reading, then calls `safety_emergency_stop()`. Every leg takes its safe state through a forced HRTIM fault, and safe outputs drop. There is no GPIO reconfiguration and no mutex in the control interrupt. Measured: about 430 µs from release to stop, with a 100 µs control task (5 periods declared).
+- *Found: an arm/latch/enable race.* The first output enable arms the hardware trips, which takes milliseconds. A software trip latched in that window, and the HRTIM driver then enabled the unit anyway, because the gate had already said yes. Fix: `hrtim_out_en()` and `hrtim_out_en_single()` ask the gate again with interrupts locked before writing the enable.
+- *Found: the legacy loop checked sensor indices 0..N-1*, while `sensor_t` runs 1..N. It checked UNDEFINED_SENSOR and skipped the last sensor. Fixed. On the shields in the tree, the last sensor's threshold node is disabled.
+- *Wrappers:*
+  - `setChannelReaction()` sets every leg's safe state, and is refused (with a message) once a leg's timer runs.
+  - `setChannelThresholdMax/Min()` refuse a value looser than the devicetree limit (-2), all or nothing for the whole list.
+  - `retrieveThreshold()` ignores looser stored values (-5).
+  - `disableSafetyApi()` is ignored outside development mode, with a message.
+- *Development mode* comes from a `safety-config` node (`safety-mode = "development"`), read with devicetree macros in `safety_mode.h`. The protection manifest records it too.
+  - `safety.disarm()` is a template that fails a `static_assert` in production, with a message naming `safety-mode`.
+  - `CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST=n` is an `#error` in production.
+  - A development build prints a boot banner. `g_safety_development_mode` (SWD), `safety.isDevelopmentMode()` and the boot line report the mode.
+  - `disarm()` only skips arming the trips; once armed they stay locked until a reset (-1).
+- *Fault texts end with how to clear*: "clear: PWM off, clearFault()" for trips, "clear: reboot" for self-tests.
+- `nvs_storage_delete_data()` was added so the test can remove its own NVS entry without erasing the board's calibration.

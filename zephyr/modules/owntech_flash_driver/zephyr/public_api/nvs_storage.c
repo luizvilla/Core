@@ -241,6 +241,17 @@ int8_t nvs_storage_retrieve_data(uint16_t data_id,
 	return rc;
 }
 
+int8_t nvs_storage_delete_data(uint16_t data_id)
+{
+	if (initialized == false)
+	{
+		int8_t error = _nvs_storage_init();
+		if (error != 0) return error;
+	}
+
+	return nvs_delete(&fs, data_id);
+}
+
 int8_t nvs_storage_clear_all_stored_data()
 {
 	if (initialized == false)

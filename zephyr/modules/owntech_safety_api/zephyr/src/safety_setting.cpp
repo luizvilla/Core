@@ -29,9 +29,11 @@
 
 /* Includes */
 
-/* LL libraries */
-#include "stm32_ll_gpio.h"
-#include "stm32_ll_bus.h"
+/* Safety API (ADR 0009): the software check reacts like every other trip */
+#include "safety_supervision.h"
+#include "safety_states.h"
+#include "safety_mode.h"
+#include "safety_shield.h"
 
 /* OWNTECH APIs */
 #include "nvs_storage.h"
@@ -39,6 +41,7 @@
 #include "ShieldAPI.h"
 
 /* Zephyr */
+#include <string.h>
 #include "zephyr/kernel.h"
 
 /* Defines */
@@ -48,20 +51,6 @@
  */
 #define SENSOR_COUNTER(node_id) +1
 #define DT_SENSORS_NUMBER DT_FOREACH_STATUS_OKAY(shield_sensors, SENSOR_COUNTER)
-
-/**
- * Counts the number of LEGs
- * (i.e. the converters that need to be stopped for safety)
- */
-#define POWER_SHIELD_ID DT_NODELABEL(powershield)
-#define LEG_COUNTER(node_id) +1
-#define DT_LEG_NUMBER DT_FOREACH_CHILD_STATUS_OKAY(POWER_SHIELD_ID, LEG_COUNTER)
-
-/**
- * Retrieves PWM GPIO pin number
- */
-#define LEG_PWM_PIN_HIGH(node_id)	DT_PROP_BY_IDX(node_id, pwm_pin_num, 0),
-#define LEG_PWM_PIN_LOW(node_id)	DT_PROP_BY_IDX(node_id, pwm_pin_num, 1),
 
 /* Global variables */
 
@@ -80,14 +69,6 @@ static safety_reaction_t sensor_reaction = Open_Circuit;
 /* sensor that went over/below the threshold (true) */
 static bool sensor_errors[DT_SENSORS_NUMBER + 1];
 
-/* Pin number of the gpio driving high side switch */
-static uint8_t dt_pin_high_side[] =
-        { DT_FOREACH_CHILD_STATUS_OKAY(POWER_SHIELD_ID, LEG_PWM_PIN_HIGH) };
-
-/* Pin number of the gpio driving low side switch */
-static uint8_t dt_pin_low_side[] =
-        { DT_FOREACH_CHILD_STATUS_OKAY(POWER_SHIELD_ID, LEG_PWM_PIN_LOW) };
-
 /**
  * The purpose of safety_alert_counter is to have a delay when we detect a problem.
  * For example here we wait that safety_alert_counter = 5 before triggering
@@ -98,51 +79,17 @@ static uint8_t dt_pin_low_side[] =
  */
 static uint8_t safety_alert_counter = 0;
 
+/* The first sensor found out of its limits, for the fault record */
+static uint8_t trip_sensor;
+static bool trip_high;
+static float32_t trip_value;
+
 /* enable the safety API watch and action task */
 static bool safety_enable = true;
 
 /**
  * Private Functions
  */
-
-/**
- * @brief This function enables the short-circuit mode
- *        i.e. the high-side switch is left open and
- *        the low-side switch is closed. Can be used to
- *        brake DC motor for example.
- */
-void _short_circuit(void)
-{
-    if(DT_LEG_NUMBER == 0) return;
-
-    for(uint8_t i = 0; i < DT_LEG_NUMBER; i++)
-    {
-        spin.gpio.configurePin(dt_pin_high_side[i], OUTPUT);
-        spin.gpio.configurePin(dt_pin_low_side[i], OUTPUT);
-        spin.gpio.resetPin(dt_pin_high_side[i]);
-        spin.gpio.setPin(dt_pin_low_side[i]);
-
-    }
-}
-
-/**
- * @brief This function enables the open-circuit mode
- *        i.e. the high-side switch is opened and
- *        the low-side switch is opened.
- */
-void _open_circuit(void)
-{
-    if(DT_LEG_NUMBER == 0) return;
-
-    for(uint8_t i = 0; i < DT_LEG_NUMBER; i++)
-    {
-        spin.gpio.configurePin(dt_pin_high_side[i], OUTPUT);
-        spin.gpio.configurePin(dt_pin_low_side[i], OUTPUT);
-        spin.gpio.resetPin(dt_pin_high_side[i]);
-        spin.gpio.resetPin(dt_pin_low_side[i]);
-
-    }
-}
 
 /**
  * Public Functions
@@ -162,6 +109,10 @@ int8_t safety_set_sensor_watch(sensor_t * safety_sensors,
         return -1;
     }
 
+    for (uint8_t i = 0; i < sensors_number; i++)
+    {
+        if (safety_sensors[i] < 1 || safety_sensors[i] > DT_SENSORS_NUMBER) return -1;
+    }
     for (uint8_t i = 0; i < sensors_number; i++)
     {
         sensor_watch[safety_sensors[i]] = true;
@@ -194,6 +145,10 @@ int8_t safety_unset_sensor_watch(sensor_t * safety_sensors,
 
     for (uint8_t i = 0; i < sensors_number; i++)
     {
+        if (safety_sensors[i] < 1 || safety_sensors[i] > DT_SENSORS_NUMBER) return -1;
+    }
+    for (uint8_t i = 0; i < sensors_number; i++)
+    {
         sensor_watch[safety_sensors[i]] = false;
     }
 
@@ -205,7 +160,21 @@ int8_t safety_unset_sensor_watch(sensor_t * safety_sensors,
  */
 void safety_set_sensor_reaction(safety_reaction_t reaction)
 {
-
+    /* Compatibility wrapper (ADR 0009): the reaction is the safe state of
+     * every leg, taken by the HRTIM on any trip. The HRTIM fixes it once the
+     * leg's timer runs, so call this before the PWM is initialised. */
+    safety_safe_state_t state = (reaction == Short_Circuit) ? SAFETY_SAFE_SHORT_LOW : SAFETY_SAFE_OPEN;
+    bool late = false;
+    for (int leg = 0; leg < safety_leg_count(); leg++)
+    {
+        if (safety_set_leg_safe_state(leg, state) == -1) late = true;
+    }
+    if (late)
+    {
+        printk("safety: setChannelReaction() too late: a leg's PWM timer already runs, its safe state "
+               "is kept. Call it before the PWM is initialised, or use safe-state in the devicetree.\n");
+        return;
+    }
     sensor_reaction = reaction;
 }
 
@@ -218,6 +187,41 @@ safety_reaction_t safety_get_sensor_reaction()
     return sensor_reaction;
 }
 
+/* Tighten-only rule (ADR 0009): a software threshold may be tighter than the
+ * shield's devicetree limit, never looser, except in development mode. All or
+ * nothing: a refused value leaves every threshold of the call unchanged. */
+static bool looser_than_devicetree(sensor_t sensor, float32_t value, bool high)
+{
+    float32_t lo, hi;
+    if (!safety_dt_limits(sensor, &lo, &hi)) return false;   /* no board limit for this sensor */
+    return high ? (value > hi) : (value < lo);
+}
+
+static int8_t safety_set_thresholds(sensor_t *sensors, float32_t *values, uint8_t number, bool high)
+{
+    if (number > DT_SENSORS_NUMBER)
+    {
+        printk("ERROR: number of sensors superior to number of sensors defined in device tree\n");
+        return -1;
+    }
+    for (uint8_t i = 0; i < number; i++)
+    {
+        if (sensors[i] < 1 || sensors[i] > DT_SENSORS_NUMBER) return -1;
+        if (!SAFETY_DEVELOPMENT_MODE && looser_than_devicetree(sensors[i], values[i], high))
+        {
+            printk("safety: %s threshold of sensor %d refused: looser than the board limit in the devicetree. "
+                   "Limits can only be tightened (ADR 0009).\n", high ? "max" : "min", (int)sensors[i]);
+            return -2;
+        }
+    }
+    for (uint8_t i = 0; i < number; i++)
+    {
+        if (high) sensor_threshold_max[sensors[i]] = values[i];
+        else      sensor_threshold_min[sensors[i]] = values[i];
+    }
+    return 0;
+}
+
 /**
  * @brief Sets sensor threshold
  */
@@ -225,20 +229,7 @@ int8_t safety_set_sensor_threshold_max(sensor_t *safety_sensors,
                                        float32_t *threshold,
                                        uint8_t sensors_number)
 {
-    if (sensors_number > DT_SENSORS_NUMBER)
-    {
-        printk("ERROR: number of sensors superior to number of sensors defined \
-                in device tree");
-
-        return -1;
-    }
-
-    for (uint8_t i = 0; i < sensors_number; i++)
-    {
-        sensor_threshold_max[safety_sensors[i]] = threshold[i];
-    }
-
-    return 0;
+    return safety_set_thresholds(safety_sensors, threshold, sensors_number, true);
 }
 
 /**
@@ -248,20 +239,7 @@ int8_t safety_set_sensor_threshold_min(sensor_t *safety_sensors,
                                        float32_t *threshold,
                                        uint8_t sensors_number)
 {
-    if (sensors_number > DT_SENSORS_NUMBER)
-    {
-        printk("ERROR: number of sensors superior to number of sensors defined \
-                in device tree");
-
-        return -1;
-    }
-
-    for (uint8_t i = 0; i < sensors_number; i++)
-    {
-        sensor_threshold_min[safety_sensors[i]] = threshold[i];
-    }
-
-    return 0;
+    return safety_set_thresholds(safety_sensors, threshold, sensors_number, false);
 }
 
 /**
@@ -293,9 +271,10 @@ bool safety_get_sensor_error(sensor_t safety_sensor)
  */
 int8_t safety_watch()
 {
-    uint8_t status = 0;
+    int8_t status = 0;
 
-    for (uint8_t i = 0; i < DT_SENSORS_NUMBER; i++)
+    /* sensor_t starts at 1 (0 is UNDEFINED_SENSOR) */
+    for (uint8_t i = 1; i <= DT_SENSORS_NUMBER; i++)
     {
         if (sensor_watch[i])
         {
@@ -303,11 +282,14 @@ int8_t safety_watch()
                     shield.sensors.peekLatestValue(static_cast<sensor_t>(i));
 
             if (measure != -10000){
-                sensor_errors[i] =
-                    (measure > sensor_threshold_max[i] ||
-                     measure < sensor_threshold_min[i])
-                     ? true
-                     : false;
+                bool high = measure > sensor_threshold_max[i];
+                sensor_errors[i] = high || measure < sensor_threshold_min[i];
+                if (sensor_errors[i] && status == 0)
+                {
+                    trip_sensor = i;   /* first sensor out of its limits, for the fault record */
+                    trip_high = high;
+                    trip_value = measure;
+                }
             }
             if (sensor_errors[i])
                 status = -1;
@@ -322,16 +304,19 @@ int8_t safety_watch()
  */
 void safety_action()
 {
-    /* shield.power.stopAll(); */
-    shield.power.stop(ALL);
-    if (sensor_reaction == Open_Circuit)
-    {
-        _open_circuit();
-    }
-    else if (sensor_reaction == Short_Circuit)
-    {
-        _short_circuit();
-    }
+    /* Same reaction as any other trip (ADR 0009): latch the fault, so the PWM
+     * stays refused until clearFault(), and stop through the HRTIM fault
+     * levels so every leg takes its safe state. Register-only: this runs in
+     * the control-task interrupt (no GPIO API, no mutex). Once latched, the
+     * outputs are already stopped. */
+    if (safety_supervision_get_fault() != SAFETY_FAULT_NONE) return;
+    uint32_t bits;
+    memcpy(&bits, &trip_value, sizeof(bits));
+    safety_supervision_latch_value(SAFETY_FAULT_TRIP,
+                                   SAFETY_TRIP_SOFTWARE | (trip_high ? SAFETY_TRIP_SOFTWARE_HIGH : 0U)
+                                   | (trip_sensor & 0x7FU),
+                                   bits);
+    safety_emergency_stop();
 }
 
 /**
@@ -347,7 +332,13 @@ void safety_enable_task()
  */
 void safety_disable_task()
 {
+#if SAFETY_DEVELOPMENT_MODE
+    printk("safety: DEVELOPMENT MODE: software check disabled; hardware trips and CPU supervision unchanged.\n");
     safety_enable = false;
+#else
+    printk("safety: disableSafetyApi() ignored: the software check can be disabled only in development mode "
+           "(safety-mode = \"development\" in app.overlay, ADR 0009).\n");
+#endif
 }
 
 /**
@@ -445,11 +436,21 @@ int8_t  safety_retrieve_threshold_in_nvs(sensor_t sensor)
 		}
 		else
 		{
-            sensor_threshold_min[sensor] =
-                                    *((float32_t*)&buffer[string_len + 2]);
-
-            sensor_threshold_max[sensor] =
-                                    *((float32_t*)&buffer[string_len + 2 + 4]);
+            float32_t lo, hi;
+            memcpy(&lo, &buffer[string_len + 2], sizeof(lo));
+            memcpy(&hi, &buffer[string_len + 2 + 4], sizeof(hi));
+            /* Tighten-only (ADR 0009): stored values looser than the
+             * devicetree limit (an older firmware, another board) are ignored */
+            if (!SAFETY_DEVELOPMENT_MODE &&
+                (looser_than_devicetree(sensor, lo, false) || looser_than_devicetree(sensor, hi, true)))
+            {
+                ret = -5;
+            }
+            else
+            {
+                sensor_threshold_min[sensor] = lo;
+                sensor_threshold_max[sensor] = hi;
+            }
 		}
 	}
 	else

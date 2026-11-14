@@ -194,6 +194,15 @@ def safe_output_table(alloc):
             + '\n'.join(rows) + '\n\n')
 
 
+def safety_mode(edt):
+    """safety-mode of the app's safety-config node: "production" when absent (ADR 0009, #22)."""
+    nodes = edt.compat2okay.get('safety-config', [])
+    if not nodes:
+        return 'production'
+    p = nodes[0].props.get('safety-mode')
+    return p.val if p is not None else 'production'
+
+
 def plan_text(alloc):
     """One-line plan for the boot line: LIMIT low/high path kinds."""
     short = {'comparator': 'comp', 'adc_watchdog': 'awd', 'software': 'sw'}
@@ -223,12 +232,15 @@ def main():
         sn = model['sensors'].get(l['sensor'], {})
         l['gain'], l['offset'] = sn.get('gain'), sn.get('offset')
         l['idle_band'] = by_sensor.get(l['sensor'], {}).get('idle_band')
+    mode = safety_mode(edt)
     os.makedirs(a.out_dir, exist_ok=True)
-    manifest = {'layout': 1, 'shield': shield, 'model': model, **alloc}
+    manifest = {'layout': 1, 'shield': shield, 'safety_mode': mode, 'model': model, **alloc}
     with open(os.path.join(a.out_dir, 'protection-manifest.json'), 'w') as f:
         json.dump(manifest, f, indent=1)
     with open(os.path.join(a.out_dir, 'protection-table.md'), 'w') as f:
         f.write(markdown_table(shield, alloc))
+        if mode == 'development':
+            f.write('\n**Development mode** (`safety-mode = "development"`): not for a deployed converter.\n')
     if a.header:
         os.makedirs(os.path.dirname(a.header), exist_ok=True)
         text = plan_text(alloc).replace('"', "'")
@@ -238,9 +250,13 @@ def main():
                     f'#define SAFETY_PROTECTION_SHIELD "{shield}"\n'
                     f'#define SAFETY_PROTECTION_PLAN "{text}"\n'
                     f'#define SAFETY_PROTECTION_LIMITS {len(alloc["limits"])}\n'
+                    f'#define SAFETY_PROTECTION_MODE "{mode}"\n'
                     + comparator_table(alloc) + watchdog_table(alloc) + leg_table(alloc)
                     + safe_output_table(alloc) + '#endif\n')
-    print(f'safety: protection plan for {shield}: {plan_text(alloc)}')
+    print(f'safety: protection plan for {shield} ({mode}): {plan_text(alloc)}')
+    if mode == 'development':
+        print('WARNING: safety-mode = "development": disarm() and loosened software limits are possible. '
+              'Never flash this build on a deployed converter.')
     for l in alloc['limits']:
         print(f'safety:   {l["sensor"]:12s} low {path_text(l["paths"]["low"]):24s} high {path_text(l["paths"]["high"])}')
     for w in alloc['warnings']:

@@ -1,0 +1,10 @@
+/* One Safety API test firmware (ADR 0009, #22), development build: the same
+ * devicetree as the production build, plus development mode. */
+#include "../safety_api/app.overlay"
+
+/ {
+	safety-config {
+		compatible = "safety-config";
+		safety-mode = "development";
+	};
+};

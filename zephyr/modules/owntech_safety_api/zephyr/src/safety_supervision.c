@@ -27,6 +27,7 @@
  * backup registers, not affected by a system reset).
  */
 
+#include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
 #include <zephyr/fatal.h>
@@ -38,6 +39,41 @@
 #include "safety_trips.h"
 #include "safety_states.h"
 #include "safety_selftest.h"
+#include "safety_mode.h"
+
+/* ---- Production or development mode (ADR 0009, #22) ---------------------- */
+
+const volatile unsigned char g_safety_development_mode = SAFETY_DEVELOPMENT_MODE;
+static bool disarmed;
+
+bool safety_development_mode(void)
+{
+	return SAFETY_DEVELOPMENT_MODE != 0;
+}
+
+bool safety_disarmed(void)
+{
+	return disarmed;
+}
+
+#if SAFETY_DEVELOPMENT_MODE
+int safety_disarm(void)
+{
+	if (safety_trips_armed()) {
+		return -1;   /* the fault inputs are locked until the next reset */
+	}
+	disarmed = true;
+	printk("safety: DEVELOPMENT MODE: comparator and ADC-watchdog trips DISARMED. Nothing but the CPU "
+	       "supervision and the software check protects the converter.\n");
+	return 0;
+}
+#endif
+
+/* Sensor names for the software-trip text, indexed by sensor_t (0 is undefined). */
+#define SAFETY_SENSOR_NAME(node_id) DT_PROP(node_id, sensor_name),
+static const char *const sensor_names[] = {
+	"?", DT_FOREACH_STATUS_OKAY(shield_sensors, SAFETY_SENSOR_NAME)
+};
 
 /* ---- Backup-register record (TAMP_BKPxR survive a system reset) -------- */
 
@@ -265,17 +301,36 @@ void safety_supervision_get_record(safety_fault_record_t *record)
 	record->lr = BKP_LR;
 }
 
-void safety_supervision_latch(safety_fault_t fault, uint32_t detail)
+void safety_supervision_latch_value(safety_fault_t fault, uint32_t detail, uint32_t value)
 {
 	backup_access_enable();
 	if (record_fault() == SAFETY_FAULT_NONE) {   /* keep the first cause */
 		BKP_FAULT = BKP_MAGIC | (uint32_t)fault;
 		BKP_REASON = detail;
+		BKP_PC = value;
 		BKP_DISABLE_CYC = DWT->CYCCNT;
 		BKP_OUTPUTS = pwm_pin_levels();
 	}
 	latched = record_fault();
 	latched_reported = false;
+}
+
+void safety_supervision_latch(safety_fault_t fault, uint32_t detail)
+{
+	safety_supervision_latch_value(fault, detail, 0U);
+}
+
+/* "52.3" from float bits, without the printk float support. */
+static int value_text(uint32_t bits, char *buf, size_t size)
+{
+	float v;
+	memcpy(&v, &bits, sizeof(v));
+	if (!(v == v) || v > 1e6f || v < -1e6f) {
+		return snprintk(buf, size, "?");
+	}
+	int32_t t = (int32_t)(v * 10.0f + (v < 0.0f ? -0.5f : 0.5f));
+	uint32_t a = (uint32_t)(t < 0 ? -t : t);
+	return snprintk(buf, size, "%s%u.%u", t < 0 ? "-" : "", a / 10U, a % 10U);
 }
 
 static int64_t last_clear_ms;
@@ -318,19 +373,35 @@ int safety_supervision_describe(char *buf, size_t size)
 	case SAFETY_FAULT_NONE:
 		return snprintk(buf, size, "no fault");
 	case SAFETY_FAULT_WATCHDOG:
-		return snprintk(buf, size, "watchdog: the control task stopped");
+		return snprintk(buf, size, "watchdog: the control task stopped; clear: clearFault()");
 	case SAFETY_FAULT_FATAL_ERROR:
-		return snprintk(buf, size, "fatal error %u at pc 0x%08x", BKP_REASON, BKP_PC);
+		return snprintk(buf, size, "fatal error %u at pc 0x%08x; clear: clearFault()", BKP_REASON, BKP_PC);
 	case SAFETY_FAULT_TRIP: {
-		int n = snprintk(buf, size, "hardware trip: ");
-		return n + safety_trips_describe(BKP_REASON, buf + n, size - n);
+		int n;
+		if (BKP_REASON & SAFETY_TRIP_SOFTWARE) {
+			uint32_t s = BKP_REASON & 0x7FU;
+			char v[16];
+			value_text(BKP_PC, v, sizeof(v));
+			n = snprintk(buf, size, "software trip: %s %s %s limit",
+				     s < ARRAY_SIZE(sensor_names) ? sensor_names[s] : "?", v,
+				     (BKP_REASON & SAFETY_TRIP_SOFTWARE_HIGH) ? "above high" : "below low");
+		} else {
+			n = snprintk(buf, size, "hardware trip: ");
+			if (n < (int)size) {
+				n += safety_trips_describe(BKP_REASON, buf + n, size - n);
+			}
+		}
+		if (n < (int)size) {
+			n += snprintk(buf + n, size - n, "; clear: PWM off, clearFault()");
+		}
+		return n;
 	}
 	case SAFETY_FAULT_SELFTEST: {
 		static const char *const names[] = {"?", "CPU registers", "RAM", "flash CRC", "system clock",
 						    "VREFINT", "control interrupt rate", "frozen current sensor",
 						    "current sensor offset at idle"};
 		uint32_t id = BKP_REASON & 0xFFU;
-		return snprintk(buf, size, "self-test failed: %s%s", id < ARRAY_SIZE(names) ? names[id] : "?",
+		return snprintk(buf, size, "self-test failed: %s%s; clear: reboot", id < ARRAY_SIZE(names) ? names[id] : "?",
 				(BKP_REASON >> 8) ? " (sensor index in detail)" : "");
 	}
 	default:
@@ -389,6 +460,9 @@ bool hrtim_safety_output_enable_allowed(void)
 	}
 	if (!armed) {
 		arm();
+	}
+	if (disarmed) {
+		return true;   /* development mode: safety_disarm() was called (CPU supervision stays armed) */
 	}
 	if (!safety_trips_armed() && safety_trips_arm() != 0) {
 		return false;   /* safety_trips_arm() printed why */
@@ -497,7 +571,18 @@ static int safety_supervision_boot(void)
 	/* The protection plan the build derived from the shield devicetree (ADR 0009).
 	 * Comparator and ADC-watchdog trips are armed by #18/#19; until then the plan
 	 * is printed so a user sees which path each limit will get. */
-	printk("safety: %s: %s\n", SAFETY_PROTECTION_SHIELD, SAFETY_PROTECTION_PLAN);
+	printk("safety: %s (%s): %s\n", SAFETY_PROTECTION_SHIELD,
+	       SAFETY_DEVELOPMENT_MODE ? "DEVELOPMENT" : "production", SAFETY_PROTECTION_PLAN);
+#if SAFETY_DEVELOPMENT_MODE
+	printk("\n"
+	       "safety: ************************************************************\n"
+	       "safety: *  DEVELOPMENT MODE (safety-mode = \"development\", app.overlay) *\n"
+	       "safety: *  For bench bring-up only, never on a deployed converter.     *\n"
+	       "safety: *  safety.disarm() can leave the hardware trips unarmed and    *\n"
+	       "safety: *  software limits may be loosened beyond the board limits.    *\n"
+	       "safety: *  CPU supervision stays on.                                   *\n"
+	       "safety: ************************************************************\n\n");
+#endif
 
 	latched = record_fault();
 	if (latched != SAFETY_FAULT_NONE) {

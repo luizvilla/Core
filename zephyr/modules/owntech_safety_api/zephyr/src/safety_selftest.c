@@ -350,6 +350,10 @@ SYS_INIT(safety_selftest_boot, APPLICATION, 1);
 
 /* ---- run time ------------------------------------------------------------------ */
 
+#include "safety_mode.h"
+#if !defined(CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST) && !SAFETY_DEVELOPMENT_MODE
+#error "CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST=n is allowed only in development mode: add safety-mode = \"development\" to a safety-config node in app.overlay (ADR 0009), or remove the line from app.conf."
+#endif
 #if defined(CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST)
 static void runtime_fn(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(runtime_work, runtime_fn);

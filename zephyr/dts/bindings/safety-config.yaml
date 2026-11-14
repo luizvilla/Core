@@ -1,0 +1,27 @@
+description: |
+  Safety API configuration of the application (ADR 0009). Declared in app.overlay, at most once:
+
+    / {
+        safety-config {
+            compatible = "safety-config";
+            safety-mode = "development";
+        };
+    };
+
+compatible: "safety-config"
+
+properties:
+  safety-mode:
+    type: string
+    required: false
+    default: "production"
+    enum:
+      - "production"
+      - "development"
+    description: |
+      "production" (default, also when the node is absent): every protection is on and can only be tightened.
+      "development": for bring-up on a bench only. safety.disarm() compiles (it leaves the comparator and
+      ADC-watchdog trips unarmed), the software thresholds may be loosened beyond the devicetree limit,
+      disableSafetyApi() stops the software check, and CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST may be turned off.
+      CPU supervision (watchdog, fatal-error handler, system fault) stays on. The firmware prints a banner at
+      boot and reports the mode (safety.isDevelopmentMode(), the boot line, the protection manifest).

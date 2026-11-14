@@ -35,6 +35,7 @@
 #include "safety_supervision.h"
 #include "safety_trips.h"
 #include "safety_states.h"
+#include "safety_mode.h"
 
 
 class SafetyAPI{
@@ -133,6 +134,11 @@ class SafetyAPI{
      *                    closed maintaining the output in short-circuit.
      *                    Useful in motor control.
      *
+     * Compatibility wrapper (ADR 0009): sets the safe state of every leg,
+     * which the HRTIM applies on any trip, hardware or software. Call it
+     * before the PWM is initialised: once a leg's timer runs, its safe state
+     * is fixed and the call is ignored (with a message). setSafeState() sets
+     * one leg; the devicetree property safe-state is the usual way.
      */
     void setChannelReaction(safety_reaction_t sensors_reaction);
 
@@ -156,10 +162,16 @@ class SafetyAPI{
      * @param threshold_max A list of the maximum threshold to apply
      *                      to the sensors in safety_sensors.
      * 
-     * @param sensors_threshold_number the number of sensors present
+     * @param sensors_threshold_number The number of sensors present
      *                                 in the list sensor_threshold
      *
-     * @return `0` if successful, or `-1` if not.
+     * Software check only (5 control periods). A threshold can be tighter
+     * than the board limit in the devicetree, never looser, except in
+     * development mode (ADR 0009). All or nothing: when one value is
+     * refused, no threshold of the call changes.
+     *
+     * @return `0` if successful, `-1` for a bad sensor or count, `-2` when a
+     *         value is looser than the board limit.
      */
     int8_t setChannelThresholdMax(sensor_t *sensors_threshold,
                                   float32_t *threshold_max,
@@ -181,7 +193,13 @@ class SafetyAPI{
      * @param sensors_threshold_number The number of sensors present
      *                                 in the list sensor_threshold
      *
-     * @return `0` if successful, or `-1` if not.
+     * Software check only (5 control periods). A threshold can be tighter
+     * than the board limit in the devicetree, never looser, except in
+     * development mode (ADR 0009). All or nothing: when one value is
+     * refused, no threshold of the call changes.
+     *
+     * @return `0` if successful, `-1` for a bad sensor or count, `-2` when a
+     *         value is looser than the board limit.
      */
     int8_t setChannelThresholdMin(sensor_t *sensors_threshold,
                                   float32_t *threshold_min,
@@ -225,12 +243,14 @@ class SafetyAPI{
 
 
     /**
-     * @brief Enables the safety API fault detection task
+     * @brief Enables the software check (the default).
      */
     void enableSafetyApi();
 
     /**
-     * @brief Disables the safety API fault detection task
+     * @brief Disables the software check, in development mode only (ADR 0009).
+     *        In any other build the call is ignored with a message. The
+     *        hardware trips and CPU supervision are never affected.
      */
     void disableSafetyApi();
     /**
@@ -272,6 +292,9 @@ class SafetyAPI{
      * - `-3`: NVS data is corrupted
      * 
      * - `-4`: NVS contains data, but not for the requested sensor
+     *
+     * - `-5`: the stored thresholds are looser than the board limit in the
+     *         devicetree: ignored, the current thresholds are kept (ADR 0009)
      * 
      */
     int8_t retrieveThreshold(sensor_t sensor_threshold_retrieve);
@@ -281,14 +304,17 @@ class SafetyAPI{
      *        error, ADR 0009). While a fault is latched, PWM outputs cannot
      *        be enabled, even after a reset.
      *
-     * @return SAFETY_FAULT_NONE, SAFETY_FAULT_FATAL_ERROR or SAFETY_FAULT_WATCHDOG.
+     * @return SAFETY_FAULT_NONE, SAFETY_FAULT_FATAL_ERROR, SAFETY_FAULT_WATCHDOG,
+     *         SAFETY_FAULT_TRIP (hardware trip or software check) or SAFETY_FAULT_SELFTEST.
      */
     safety_fault_t getFault();
 
     /**
-     * @brief Clears the latched fault. Refused while any PWM output is enabled.
+     * @brief Clears the latched fault. Refused while any PWM output is enabled
+     *        or a limit is still exceeded.
      *
-     * @return 0 when cleared, -1 when refused.
+     * @return 0 when cleared, -1 when refused, -2 when only a reboot clears it
+     *         (a self-test failure, or a second fault soon after a clear).
      */
     int8_t clearFault();
 
@@ -321,10 +347,37 @@ class SafetyAPI{
 
     /**
      * @brief Writes the text of the latched fault into buf, e.g.
-     *        "hardware trip: I1_LOW high limit (COMP1->FLT4)".
+     *        "hardware trip: I1_LOW high limit (COMP1->FLT4); clear: PWM off, clearFault()"
+     *        or "software trip: V_HIGH 52.3 above high limit; clear: ...".
      * @return the text length.
      */
     int getFaultDescription(char *buf, size_t size);
+
+    /**
+     * @brief @return true in a development build (safety-mode = "development"
+     *        in app.overlay, ADR 0009).
+     */
+    bool isDevelopmentMode() { return SAFETY_DEVELOPMENT_MODE != 0; }
+
+#if SAFETY_DEVELOPMENT_MODE
+    /**
+     * @brief Development mode only: the comparator and ADC-watchdog trips are
+     *        not armed when the PWM starts. CPU supervision stays on. Call it
+     *        before the first PWM output is enabled.
+     * @return 0; -1 too late (armed trips stay locked until the next reset).
+     */
+    int8_t disarm() { return (int8_t)safety_disarm(); }
+#else
+    /* In a production build disarm() does not compile (ADR 0009). */
+    template <typename T = void>
+    int8_t disarm()
+    {
+        static_assert(sizeof(T) == 0,
+                      "safety.disarm() exists only in development mode: add a safety-config node with "
+                      "safety-mode = \"development\" to app.overlay (ADR 0009). Never on a deployed converter.");
+        return -1;
+    }
+#endif
 
 
 };

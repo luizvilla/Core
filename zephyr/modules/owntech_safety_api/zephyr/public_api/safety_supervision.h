@@ -74,7 +74,7 @@ typedef struct
 {
     safety_fault_t fault;     /**< Cause of the fault */
     uint32_t reason;          /**< Zephyr fatal reason (K_ERR_*), for a fatal error */
-    uint32_t pc;              /**< Program counter of the fault, 0 if unknown */
+    uint32_t pc;              /**< Program counter of the fault, 0 if unknown; for a software trip, the reading (float bits) */
     uint32_t disable_cycles;  /**< DWT cycle counter when the outputs were disabled */
     uint32_t outputs_after;   /**< PWM pin levels read right after disabling (bit n = HRTIM output n, TA1..TF2) */
     uint32_t thread;          /**< Current thread (struct k_thread *) at the fault */
@@ -132,10 +132,19 @@ int safety_supervision_clear_fault(void);
 
 /**
  * @brief Latches a fault so that it survives a reset (any context, register-only).
- * @param detail for SAFETY_FAULT_TRIP: the HRTIM fault inputs that tripped (bit n = FLTn+1), or 0x100 | index for
- *        a threshold read-back mismatch.
+ * @param detail for SAFETY_FAULT_TRIP: the HRTIM fault inputs that tripped (bit n = FLTn+1), 0x100 | index for
+ *        a comparator threshold read-back mismatch, 0x200 | index for an ADC watchdog, SAFETY_TRIP_SOFTWARE | ...
+ *        for the software check.
  */
 void safety_supervision_latch(safety_fault_t fault, uint32_t detail);
+
+/** Detail of a SAFETY_FAULT_TRIP raised by the software check: SAFETY_TRIP_SOFTWARE | sensor_t
+ *  (| SAFETY_TRIP_SOFTWARE_HIGH for the high limit). */
+#define SAFETY_TRIP_SOFTWARE       0x400U
+#define SAFETY_TRIP_SOFTWARE_HIGH  0x080U
+
+/** @brief As safety_supervision_latch(), and records a value with it (the reading, as float bits). */
+void safety_supervision_latch_value(safety_fault_t fault, uint32_t detail, uint32_t value);
 
 /** @brief Disables every HRTIM output at once (emergency path, any context). */
 void safety_outputs_disable_all(void);

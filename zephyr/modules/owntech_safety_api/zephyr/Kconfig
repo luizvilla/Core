@@ -27,7 +27,8 @@ config OWNTECH_SAFETY_RUNTIME_SELFTEST
 	help
 		CPU registers, RAM, flash CRC and clock checked in slices every
 		10 ms by the system work queue. The start-up self-tests always run.
-		Turn off only for development measurements.
+		Can be turned off only in development mode (safety-mode =
+		"development" in app.overlay): any other build fails.
 
 config OWNTECH_SAFETY_FROZEN_PERIODS
 	int "Control periods with an unchanged current reading before a sensor counts as frozen"

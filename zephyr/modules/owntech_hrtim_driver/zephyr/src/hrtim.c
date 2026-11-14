@@ -30,6 +30,7 @@
 
 /* include */
 #include <stm32_ll_rcc.h>
+#include <zephyr/irq.h>
 #include "assert.h"
 #include "hrtim.h"
 
@@ -847,11 +848,21 @@ __attribute__((weak)) bool hrtim_safety_output_enable_allowed(void)
     return true;
 }
 
+/* The safety gate may arm the protection first, which takes milliseconds
+ * during which an interrupt (the software check in the control task) can
+ * latch a fault and stop every output. The gate is therefore asked again with
+ * interrupts locked, so that no fault latched after the answer is followed by
+ * an enable (ADR 0009). The second call is short: everything is armed. */
 void hrtim_out_en(hrtim_tu_number_t tu_number)
 {
     if (!hrtim_safety_output_enable_allowed()) return;
-    LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
-    LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
+    unsigned int key = irq_lock();
+    if (hrtim_safety_output_enable_allowed())
+    {
+        LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
+        LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
+    }
+    irq_unlock(key);
 }
 
 void hrtim_out_dis_single(hrtim_output_units_t PWM_OUT)
@@ -862,7 +873,12 @@ void hrtim_out_dis_single(hrtim_output_units_t PWM_OUT)
 void hrtim_out_en_single(hrtim_output_units_t PWM_OUT)
 {
     if (!hrtim_safety_output_enable_allowed()) return;
-    LL_HRTIM_EnableOutput(HRTIM1, PWM_OUT);
+    unsigned int key = irq_lock();   /* see hrtim_out_en() */
+    if (hrtim_safety_output_enable_allowed())
+    {
+        LL_HRTIM_EnableOutput(HRTIM1, PWM_OUT);
+    }
+    irq_unlock(key);
 }
 
 void hrtim_set_modulation(hrtim_tu_number_t tu_number, hrtim_cnt_t modulation)

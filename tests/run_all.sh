@@ -55,6 +55,7 @@ object_code() {
         safety_supervision) echo SUP-00 ;;
         safety_allocation) echo ALC-00 ;;
         safety_comparator) echo CMP-00 ;;
+        safety_api) echo API-00 ;;
         l1) echo INT-00 ;;
         *) echo "$1" | tr '[:lower:]' '[:upper:]' ;;
     esac

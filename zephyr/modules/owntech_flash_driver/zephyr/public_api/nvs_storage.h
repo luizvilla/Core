@@ -93,6 +93,15 @@ int8_t nvs_storage_retrieve_data(uint16_t data_id,
 								 uint8_t data_buffer_size);
 
 /**
+ * @brief Delete one entry from the NVS partition (the others are kept).
+ *
+ * @param data_id Identifier of the stored data.
+ *
+ * @return 0 on success (also when the entry did not exist), negative value on error.
+ */
+int8_t nvs_storage_delete_data(uint16_t data_id);
+
+/**
  * @brief Clear all data stored in the NVS partition.
  *
  * Erases all key-value entries in the configured NVS area. Use with caution.

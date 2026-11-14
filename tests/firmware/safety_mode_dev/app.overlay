@@ -1,0 +1,6 @@
+/ {
+	safety-config {
+		compatible = "safety-config";
+		safety-mode = "development";
+	};
+};

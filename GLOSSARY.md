@@ -57,7 +57,7 @@ The declared time from a fault occurring to the outputs reaching the safe state,
 _Avoid_: latency (when meaning the declared value), trip time
 
 **Development mode**:
-A build selected by `safety-mode = "development"` in `app.overlay`, in which limits may be loosened and the hardware paths disarmed. CPU supervision stays on.
+A build selected by `safety-mode = "development"` in a `safety-config` node of `app.overlay`, in which software limits may be loosened, the software check disabled and the hardware paths disarmed (`safety.disarm()`, which does not compile in any other build). CPU supervision stays on.
 _Avoid_: debug mode, unsafe mode
 
 **Bench file**:

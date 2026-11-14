@@ -1,0 +1,27 @@
+/* One Safety API test firmware (ADR 0009, #22), production build.
+ * Bare Spin: with no shield the current sensor pins float near 0 V, which the
+ * Twist scaling reads as -10 A, below the -7 A low limit. The test lowers the two
+ * low limits to -11 A so a floating pin sits inside the ADC-watchdog window. */
+&i1lowtd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+	idle-band = <0x41400000>;     /* 12.0: a floating pin reads -10 A at idle */
+};
+
+&i2lowtd {
+	threshold-low = <0xc1300000>; /* -11.0 */
+	idle-band = <0x41400000>;     /* 12.0 */
+};
+
+/* A safe output on Spin pin 21 (PB9, free on a bare Spin) stands for a relay
+ * that opens when low: the software check must drive it like any trip. */
+/ {
+	safety-outputs {
+		compatible = "safety-outputs";
+		test_relay: test-relay {
+			gpios = <&spin_header 21 0>;
+			output-name = "TEST_RELAY";
+			safe-level = <0>;
+			reset-state-safe;
+		};
+	};
+};

@@ -44,4 +44,13 @@
  */
 void safety_init_shield(bool watch_all);
 
+#include "ShieldAPI.h"
+#include "arm_math.h"
+
+/**
+ * @brief The board limits of a sensor, from its safety-thresholds node.
+ * @return false if the devicetree declares no limit for this sensor.
+ */
+bool safety_dt_limits(sensor_t sensor, float32_t *low, float32_t *high);
+
 #endif /* SHIELD_SAFETY_H_ */
