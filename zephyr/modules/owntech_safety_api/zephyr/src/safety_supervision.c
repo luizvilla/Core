@@ -40,6 +40,11 @@
 #include "safety_states.h"
 #include "safety_selftest.h"
 #include "safety_mode.h"
+#include "safety_timing.h"
+
+#ifdef CONFIG_OWNTECH_SAFETY_TIMING_PROBES
+volatile struct safety_timing g_safety_timing = { .magic = SAFETY_TIMING_MAGIC };
+#endif
 
 /* ---- Production or development mode (ADR 0009, #22) ---------------------- */
 

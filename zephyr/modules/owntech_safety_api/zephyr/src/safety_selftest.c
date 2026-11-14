@@ -95,6 +95,7 @@ static bool march_block(volatile uint32_t *p, size_t n)
 	bool ok = true;
 
 	__disable_irq();
+	uint32_t c_off = DWT->CYCCNT;
 	/* The MPU guards each thread's stack bottom (CONFIG_MPU_STACK_GUARD), in
 	 * .bss: off for this block only, interrupts off. */
 	uint32_t mpu = MPU->CTRL;
@@ -132,7 +133,11 @@ static bool march_block(volatile uint32_t *p, size_t n)
 	MPU->CTRL = mpu;
 	__DSB();
 	__ISB();
+	uint32_t off = DWT->CYCCNT - c_off;
 	__set_PRIMASK(primask);
+	if (off > g_safety_selftest.runtime_irqoff_max_cycles) {
+		g_safety_selftest.runtime_irqoff_max_cycles = off;   /* timing record (#27) */
+	}
 	return ok && !(inject & SAFETY_SELFTEST_INJECT_RAM);
 }
 
@@ -358,6 +363,7 @@ SYS_INIT(safety_selftest_boot, APPLICATION, 1);
 static void runtime_fn(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(runtime_work, runtime_fn);
 static uintptr_t ram_cursor;
+static uint32_t ram_pass_start_ms;
 static size_t flash_cursor;
 static uint32_t flash_state = 0xFFFFFFFFU;
 static uint32_t ticks;
@@ -376,9 +382,12 @@ static void runtime_fn(struct k_work *work)
 	/* One block of the image's .data/.bss. */
 	uintptr_t start = (uintptr_t)_image_ram_start & ~3U, end = (uintptr_t)_image_ram_end & ~3U;
 	if (ram_cursor < start || ram_cursor + 4U * BLOCK_WORDS > end) {
+		uint32_t now_ms = k_uptime_get_32();
 		if (ram_cursor != 0U) {
 			g_safety_selftest.runtime_ram_passes++;
+			g_safety_selftest.runtime_ram_pass_ms = now_ms - ram_pass_start_ms;
 		}
+		ram_pass_start_ms = now_ms;
 		ram_cursor = start;
 	}
 	uint32_t bytes;

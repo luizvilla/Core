@@ -843,6 +843,17 @@ __attribute__((weak)) void hrtim_safety_fault_levels(hrtim_tu_number_t tu_number
     *out2 = LL_HRTIM_OUT_FAULTSTATE_INACTIVE;
 }
 
+#ifdef CONFIG_OWNTECH_SAFETY_TIMING_PROBES
+/* Timing tests only (issue #27): the interrupt-locked window of the gate. */
+#include "safety_timing.h"
+#define GATE_LOCK_START() uint32_t gate_c0 = DWT->CYCCNT
+#define GATE_LOCK_END() do { uint32_t d = DWT->CYCCNT - gate_c0; \
+        if (d > g_safety_timing.gate_lock_max) g_safety_timing.gate_lock_max = d; } while (0)
+#else
+#define GATE_LOCK_START() ((void)0)
+#define GATE_LOCK_END() ((void)0)
+#endif
+
 __attribute__((weak)) bool hrtim_safety_output_enable_allowed(void)
 {
     return true;
@@ -857,11 +868,13 @@ void hrtim_out_en(hrtim_tu_number_t tu_number)
 {
     if (!hrtim_safety_output_enable_allowed()) return;
     unsigned int key = irq_lock();
+    GATE_LOCK_START();
     if (hrtim_safety_output_enable_allowed())
     {
         LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_H);
         LL_HRTIM_EnableOutput(HRTIM1, tu_channel[tu_number]->gpio_conf.OUT_L);
     }
+    GATE_LOCK_END();
     irq_unlock(key);
 }
 
@@ -873,11 +886,13 @@ void hrtim_out_dis_single(hrtim_output_units_t PWM_OUT)
 void hrtim_out_en_single(hrtim_output_units_t PWM_OUT)
 {
     if (!hrtim_safety_output_enable_allowed()) return;
-    unsigned int key = irq_lock();   /* see hrtim_out_en() */
+    unsigned int key = irq_lock();
+    GATE_LOCK_START();   /* see hrtim_out_en() */
     if (hrtim_safety_output_enable_allowed())
     {
         LL_HRTIM_EnableOutput(HRTIM1, PWM_OUT);
     }
+    GATE_LOCK_END();
     irq_unlock(key);
 }
 

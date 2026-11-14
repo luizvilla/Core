@@ -50,6 +50,8 @@ struct safety_selftest_status
     uint32_t runtime_clock;
     uint32_t runtime_max_us;    /**< longest run-time slice */
     uint32_t last_failure;
+    uint32_t runtime_irqoff_max_cycles; /**< longest RAM-test block with every interrupt off (start-up or run time), core cycles */
+    uint32_t runtime_ram_pass_ms;       /**< duration of the last complete run-time RAM pass */
 };
 
 extern volatile struct safety_selftest_status g_safety_selftest;

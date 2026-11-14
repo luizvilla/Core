@@ -40,3 +40,14 @@ config OWNTECH_SAFETY_TEST_HOOKS
 	bool "Fault injection hooks for the safety L0 tests (never in an application)"
 	default n
 	depends on OWNTECH_SAFETY_SUPERVISION
+
+config OWNTECH_SAFETY_TIMING_PROBES
+	bool "Cycle-counter probes in the control interrupt (timing tests only)"
+	default n
+	depends on OWNTECH_SAFETY_SUPERVISION
+	help
+		Times each block of the control interrupt (software check, data
+		dispatch, user task, threshold read-back, plausibility, watchdog
+		feed) and the HRTIM gate's interrupt-locked window into
+		g_safety_timing (safety_timing.h). For the L0-TOV timing tests
+		(issue #27); adds about 50 cycles per period. Never in a product.

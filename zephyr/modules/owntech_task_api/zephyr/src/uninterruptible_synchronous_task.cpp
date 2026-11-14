@@ -110,13 +110,47 @@ void thread_error(void *, void *, void *)
 }
 #endif
 
+#ifdef CONFIG_OWNTECH_SAFETY_TIMING_PROBES
+/* Timing tests only (issue #27): cycle counter between the blocks of the
+ * control interrupt, accumulated into g_safety_timing. */
+#include "safety_timing.h"
+#define TB_MARK(i) (tb[(i)] = DWT->CYCCNT)
+static void tb_record(const uint32_t *tb)
+{
+	volatile struct safety_timing *t = &g_safety_timing;
+	if (t->reset) {
+		for (int b = 0; b < SAFETY_TB_COUNT; b++) {
+			t->max[b] = 0U;
+			t->sum[b] = 0U;
+		}
+		t->periods = 0U;
+		t->gate_lock_max = 0U;
+		t->reset = 0U;
+		return;
+	}
+	for (int b = 0; b < SAFETY_TB_COUNT; b++) {
+		uint32_t d = tb[b + 1] - tb[b];
+		if (d > t->max[b]) t->max[b] = d;
+		t->sum[b] += d;
+	}
+	t->periods++;
+}
+#else
+#define TB_MARK(i) ((void)0)
+#endif
+
 void user_task_proxy()
 {
+#ifdef CONFIG_OWNTECH_SAFETY_TIMING_PROBES
+	uint32_t tb[SAFETY_TB_COUNT + 1];
+#endif
+	TB_MARK(0);
 #ifdef CONFIG_OWNTECH_SAFETY_API
 
 	if (safety_task() != 0) safety_alert = true;
 
 #endif
+	TB_MARK(1);
 
 	if (user_periodic_task != NULL)
 	{
@@ -124,9 +158,15 @@ void user_task_proxy()
 		{
 			spin.data.doFullDispatch();
 		}
+		TB_MARK(2);
 
 		user_periodic_task();
 	}
+	else
+	{
+		TB_MARK(2);
+	}
+	TB_MARK(3);
 
 #ifdef CONFIG_OWNTECH_SAFETY_SUPERVISION
 	/* Program-flow checkpoints (ADR 0009, #21): the application's task
@@ -135,8 +175,14 @@ void user_task_proxy()
 	safety_supervision_checkpoint(SAFETY_CP_USER_TASK);
 	(void)safety_trips_check();
 	safety_supervision_checkpoint(SAFETY_CP_TRIPS_CHECKED);
+	TB_MARK(4);
 	safety_plausibility_period();
+	TB_MARK(5);
 	safety_supervision_feed();
+	TB_MARK(6);
+#ifdef CONFIG_OWNTECH_SAFETY_TIMING_PROBES
+	tb_record(tb);
+#endif
 #endif
 }
 
