@@ -700,13 +700,24 @@ void safety_trips_clear(void)
 	HRTIM1->sCommonRegs.IER |= flt_to_hw(m);
 }
 
+/* One trip path per control period, in turn: a threshold changed behind the
+ * API is caught within SAFETY_WATCHDOG_TRIPS + SAFETY_COMPARATOR_TRIPS periods
+ * (6 on Twist). Reading every path each period cost 2.6 us at 50 us (#27):
+ * peripheral registers are slow to read. */
 int safety_trips_check(void)
 {
+	static size_t turn;
 	if (!armed) {
 		return 0;
 	}
+	size_t total = (size_t)SAFETY_WATCHDOG_TRIPS + (size_t)SAFETY_COMPARATOR_TRIPS;
+	if (total == 0U) {
+		return 0;
+	}
+	size_t k = turn;
+	turn = (turn + 1U) % total;
 #if SAFETY_WATCHDOG_TRIPS > 0
-	for (size_t i = 0; i < SAFETY_WATCHDOG_TRIPS; i++) {
+	for (size_t i = k; i < SAFETY_WATCHDOG_TRIPS && i == k; i++) {
 		const struct watchdog_trip *w = &awds[i];
 		ADC_TypeDef *a = adc_of(w->adc);
 		uint32_t tr = (w->awd == 1U) ? (a->TR1 & (ADC_TR1_HT1 | ADC_TR1_LT1)) :
@@ -725,7 +736,8 @@ int safety_trips_check(void)
 	}
 #endif
 #if SAFETY_COMPARATOR_TRIPS > 0
-	for (size_t i = 0; i < SAFETY_COMPARATOR_TRIPS; i++) {
+	for (size_t i = k - (size_t)SAFETY_WATCHDOG_TRIPS; k >= (size_t)SAFETY_WATCHDOG_TRIPS && i < SAFETY_COMPARATOR_TRIPS &&
+	     i == k - (size_t)SAFETY_WATCHDOG_TRIPS; i++) {
 		const struct comparator_trip *t = &trips[i];
 		if (!(armed_flt_mask & (1U << (t->flt - 1U)))) {
 			continue;
