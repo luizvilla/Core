@@ -239,6 +239,21 @@ public:
 	float32_t peekAdcChannel(adc_t adc_number, uint8_t channel_num);
 
 	/**
+	 * @brief Rank of a channel in its ADC's acquisition sequence, for
+	 *        peekAdcRaw(). Constant once acquisition has started.
+	 * @return the rank (1 or more), 0 if the channel is not acquired.
+	 */
+	uint8_t getAdcChannelRank(adc_t adc_number, uint8_t channel_num);
+
+	/**
+	 * @brief Latest raw sample at a sequence rank, without lock or conversion
+	 *        (safe in an interrupt, a few cycles). Used by the Safety API's
+	 *        frozen-sensor check, which only compares samples.
+	 * @return the raw ADC value, or 0xFFFF if none was acquired.
+	 */
+	uint16_t peekAdcRaw(adc_t adc_number, uint8_t rank);
+
+	/**
 	 * @brief Stops the module if it is started.
 	 *
 	 * @return `0` if everything went well, `-1` if there was an error.

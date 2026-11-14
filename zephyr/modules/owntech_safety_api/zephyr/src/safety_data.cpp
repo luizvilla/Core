@@ -62,41 +62,63 @@ extern "C" int safety_data_start(void)
  * stuck (a real current sensor always shows a little noise). No value: skipped. */
 
 #define MAX_WATCHED 8
-static float last_value[MAX_WATCHED];
+static uint16_t last_raw[MAX_WATCHED];
 static uint32_t same_count[MAX_WATCHED];
+static uint8_t rank_of[MAX_WATCHED];
+static int next_sensor;
 
+/* One current sensor per period, in turn, on its raw sample (an unchanged
+ * reading needs no conversion): about 0.5 us instead of 2.5 us per sensor
+ * every period (#27). Each check counts as many periods as there are sensors
+ * in the turn, so CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS stays in periods. */
 extern "C" void safety_plausibility_period(void)
 {
-    bool running = (HRTIM1->sCommonRegs.OENR & 0xFFFU) != 0U;
-    int n = safety_trips_watchdog_count();
-    for (int i = 0; i < n && i < MAX_WATCHED; i++)
+    static int8_t currents = -1;   /* current sensors watched by an ADC watchdog */
+    static int8_t index_of[MAX_WATCHED];
+    if (currents < 0)
     {
-        if (!safety_trips_watchdog_is_current(i))
+        int n = safety_trips_watchdog_count();
+        currents = 0;
+        for (int i = 0; i < n && i < MAX_WATCHED; i++)
         {
-            continue;
+            if (safety_trips_watchdog_is_current(i)) index_of[currents++] = (int8_t)i;
         }
-        uint8_t adc, channel;
-        safety_trips_watchdog_channel(i, &adc, &channel);
-        float v = spin.data.peekAdcChannel(static_cast<adc_t>(adc), channel);
-        if (!running || v == NO_VALUE)
+    }
+    if (currents == 0)
+    {
+        return;
+    }
+    bool running = (HRTIM1->sCommonRegs.OENR & 0xFFFU) != 0U;
+    int k = next_sensor;
+    next_sensor = (next_sensor + 1) % currents;
+    int i = index_of[k];
+    uint8_t adc, channel;
+    safety_trips_watchdog_channel(i, &adc, &channel);
+    if (rank_of[k] == 0)
+    {
+        rank_of[k] = spin.data.getAdcChannelRank(static_cast<adc_t>(adc), channel);
+    }
+    uint16_t v = spin.data.peekAdcRaw(static_cast<adc_t>(adc), rank_of[k]);
+    if (!running || v == 0xFFFFU)
+    {
+        same_count[k] = 0;
+        last_raw[k] = v;
+        return;
+    }
+    if (v == last_raw[k])
+    {
+        uint32_t before = same_count[k];
+        same_count[k] += (uint32_t)currents;
+        if (before < CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS && same_count[k] >= CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS &&
+            safety_supervision_get_fault() == SAFETY_FAULT_NONE)
         {
-            same_count[i] = 0;
-            last_value[i] = v;
-            continue;
+            safety_supervision_latch(SAFETY_FAULT_SELFTEST, SAFETY_SELFTEST_FROZEN | ((uint32_t)i << 8));
+            safety_emergency_stop();
         }
-        if (v == last_value[i])
-        {
-            if (++same_count[i] == CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS &&
-                safety_supervision_get_fault() == SAFETY_FAULT_NONE)
-            {
-                safety_supervision_latch(SAFETY_FAULT_SELFTEST, SAFETY_SELFTEST_FROZEN | ((uint32_t)i << 8));
-                safety_emergency_stop();
-            }
-        }
-        else
-        {
-            same_count[i] = 0;
-            last_value[i] = v;
-        }
+    }
+    else
+    {
+        same_count[k] = 0;
+        last_raw[k] = v;
     }
 }

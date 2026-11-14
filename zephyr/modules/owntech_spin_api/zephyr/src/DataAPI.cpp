@@ -108,6 +108,20 @@ float32_t DataAPI::peekAdcChannel(adc_t adc_number, uint8_t channel_num)
 	return DataAPI::peekChannel(adc_number, channel_num);
 }
 
+uint8_t DataAPI::getAdcChannelRank(adc_t adc_number, uint8_t channel_num)
+{
+	return DataAPI::getChannelRank(adc_number, channel_num);
+}
+
+uint16_t DataAPI::peekAdcRaw(adc_t adc_number, uint8_t rank)
+{
+	if (DataAPI::is_started == false || rank == 0)
+	{
+		return PEEK_NO_VALUE;
+	}
+	return data_dispatch_peek_acquired_value(adc_number, rank);
+}
+
 int8_t DataAPI::startUnattended()
 {
 	if (DataAPI::is_started == true)
