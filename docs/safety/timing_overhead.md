@@ -88,10 +88,10 @@ B0 is built in a temporary git worktree at `main` (which has no `OWNTECH_APP_DIR
 
 | # | Commit | Status |
 |---|---|---|
-| 1.1 | `feat(safety): timing probes and interrupts-off record` | planned |
-| 1.2 | `test(safety): L0-TOV timing firmware and envs` | planned |
-| 1.3 | `test(safety): L0-TOV harness, report, catalogue` | planned |
-| 1.4 | `perf(safety): …` one commit per fix, if the numbers call for it | planned |
+| 1.1 | `feat(safety): timing probes and interrupts-off record` | done |
+| 1.2 | `test(safety): L0-TOV timing firmware and envs` | done |
+| 1.3 | `test(safety): L0-TOV harness, report, catalogue` | done (`d19b352`, test fixes `3e814b5`, `da48d77`) |
+| 1.4 | `perf(safety): …` one commit per fix, if the numbers call for it | done: 1.4a–e; S1's old software check left for a later session |
 | 1.5 | `docs(safety): declared overhead` | planned |
 
 ## Step 2: the micro-inverter (branch `usolarverter-safety`, from `apf_quadrature`)
@@ -175,6 +175,8 @@ Optimisations, one commit each, re-measured after each:
 | `2026-11-14_c7b7fca-dirty_233430` | 1.4a + 1.4b (feeder timer, RAM blocks) | interrupts off 7.42 → 1.87 µs; B1 jitter at 50 µs 20.8 → 9.1 µs; B1 CPU 73.8 → 67.0 % | dirty: measured both fixes together; same B0 caveats |
 | `2026-11-14_3e814b5_234539` | + ADC triggers in the test firmware | B0 now dispatches data like an application | B0's S1 still with stale V1/V2 limits (incremental worktree build) |
 | `2026-11-14_da48d77_235337` | + clean builds | **first like-for-like campaign**, after 1.4a and 1.4b | — |
+| `2026-11-15_a2d1ce9_000222` | + 1.4c, 1.4d, 1.4e | safety cost at 50 µs 10.04 → 4.52 µs mean; B1 CPU 67.3 → 56.2 % | judged against 5 % of the period |
+| `2026-11-15_8276ed6-dirty_090549` | same code, limits of 2026-11-15 | **reference after step 1.4**: verdicts below | dirty: `zephyr/CMakeLists.txt` names shield v1.4.2, whose overlay differs from v1.4.1 only by its version string |
 
 Like for like (`da48d77`), what the Safety API adds over Core `main`:
 
@@ -195,3 +197,18 @@ Fixes 1.4c–e, committed separately (each touches its own probed block):
 - 1.4c (`6fa34e1`): the frozen-sensor check compares raw samples and checks one sensor per period.
 - 1.4d (`6086d17`): the software check returns at once when no sensor is watched.
 - 1.4e (`a2d1ce9`): the read-back reads one trip path per period. **Declared detection time of a threshold changed behind the API: from 1 control period to N periods** (N = armed trip paths, 6 on Twist). Needs Luiz Villa's review.
+
+### 2026-11-15, after step 1.4 (campaign `8276ed6-dirty_090549`)
+
+| 50 µs task | B0 before | B1 after | Limit | Verdict |
+|---|---|---|---|---|
+| safety cost per period, S0 (worst; mean) | — | 4.65 µs; 4.51 µs | ≤ 5 µs | PASS |
+| interrupts off (RAM block) | — | 1.88 µs | ≤ 2 µs | PASS |
+| worst task-start deviation, S0 | 6.88 µs | 10.81 µs (+3.9) | ≤ +2 µs | FAIL |
+| CPU taken from the main thread, S0 | 49.3 % | 56.2 % (+6.9 pts) | ≤ +5 pts | FAIL |
+| software trip under load | — | 222 µs | ≤ 350 µs | PASS |
+
+- At 100 µs every S0 criterion passes (4.65 µs; jitter 7.89 → 7.54 µs; CPU 32.3 → 36.0 %).
+- Per block, mean: plausibility 1.98 µs, read-back 1.31 µs, feed 0.91 µs, old software check (no sensor watched) 0.44 µs. From step 1.3 to here: 10.0 → 4.5 µs.
+- S1 (information): the old software check on six sensors costs 10.5 µs per period (14.5 µs safety in total), B1 CPU +8.6 pts and jitter +5.2 µs at 50 µs. It is the next speed-up, in a later session.
+- Still open at 50 µs: task-start jitter and CPU load in S0 exceed their provisional limits.
