@@ -259,3 +259,12 @@ It makes "fault at any point of the program sequence" (60730-1 H.13.2.5.1) repea
   - `disarm()` only skips arming the trips; once armed they stay locked until a reset (-1).
 - *Fault texts end with how to clear*: "clear: PWM off, clearFault()" for trips, "clear: reboot" for self-tests.
 - `nvs_storage_delete_data()` was added so the test can remove its own NVS entry without erasing the board's calibration.
+
+**2026-11-15, declared timing overhead (luizvilla/Core#27), measured on a bare Spin (L0-TOV, campaign `8276ed6-dirty_090549`).** Core `main` (B0) against `safety-hw` production (B1), same test firmware, 170 MHz, flash at 4 wait states in both builds, 10 µs load, data dispatch and PWM running. Declared for the Safety API (H.8, H.11):
+- *Per control period:* ≤ 5 µs at every rate, with no software check watched (4.65 µs worst, 4.51 µs mean: plausibility 1.98, read-back 1.31, feed 0.91, empty software check 0.44). The old software check on the six Twist sensors adds 10.0 µs.
+- *Interrupts off:* ≤ 2 µs (RAM self-test block of 4 words, 1.88 µs).
+- *Against B0, 50 µs task:* CPU load +6.9 points, worst task-start deviation +3.9 µs (both above their provisional limits, open). With a 100 µs task: no measurable change.
+- *Outside the control task:* a run-time self-test slice every 10 ms, longest 558 µs; arming at the first output enable 1.5 ms.
+- *Threshold read-back:* one trip path per period, so a threshold changed behind the API is detected within N control periods (N = armed trip paths, 6 on Twist), not 1. To be investigated (open item in docs/safety/timing_overhead.md).
+- *Software trip under load:* 222 µs from watch to outputs stopped, within the declared 5 control periods.
+Step 1.4 fixes behind these numbers: no kernel feeder timer while the control task feeds; RAM self-test in 4-word blocks; frozen-sensor check on raw samples, one sensor per period; empty software check returns at once; read-back of one trip path per period.

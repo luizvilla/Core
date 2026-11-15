@@ -24,6 +24,18 @@ Your code does not need any safety call. To make a limit stricter, use:
 safety.setTripThreshold(I1_LOW, -5.0, 5.0);   // can only tighten a limit
 ```
 
+## What it costs the control task
+
+Measured on a bare Spin at 170 MHz (L0-TOV, [timing_overhead.md](safety/timing_overhead.md)), with no safety call in your code:
+
+- **at most 5 µs per control period**, whatever the period (4.65 µs worst case, 4.5 µs on average): plausibility checks, threshold read-back, watchdog feed;
+- **interrupts off for at most 2 µs** at a time (one RAM self-test block, 1.88 µs);
+- against Core without the Safety API: about +7 points of CPU load and +4 µs of task-start jitter with a 50 µs task; nothing measurable with a 100 µs task;
+- a run-time self-test slice every 10 ms in the system work queue (up to about 0.6 ms, outside the control task);
+- the first PWM output enable arms the protection: about 1.5 ms, once.
+
+The old software check (`safety.setChannelWatch()`) adds about 10 µs per period when it watches the six Twist sensors. Watch only the sensors that need it.
+
 ## When a trip happens
 
 On any trip, hardware or software:

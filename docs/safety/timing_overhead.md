@@ -92,7 +92,7 @@ B0 is built in a temporary git worktree at `main` (which has no `OWNTECH_APP_DIR
 | 1.2 | `test(safety): L0-TOV timing firmware and envs` | done |
 | 1.3 | `test(safety): L0-TOV harness, report, catalogue` | done (`d19b352`, test fixes `3e814b5`, `da48d77`) |
 | 1.4 | `perf(safety): …` one commit per fix, if the numbers call for it | done: 1.4a–e; S1's old software check left for a later session |
-| 1.5 | `docs(safety): declared overhead` | planned |
+| 1.5 | `docs(safety): declared overhead` | done: `docs/safety_introduction.md` ("What it costs the control task"), ADR 0009 implementation note of 2026-11-15 |
 
 ## Step 2: the micro-inverter (branch `usolarverter-safety`, from `apf_quadrature`)
 
