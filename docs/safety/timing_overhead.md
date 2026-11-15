@@ -196,7 +196,7 @@ Further findings:
 Fixes 1.4c–e, committed separately (each touches its own probed block):
 - 1.4c (`6fa34e1`): the frozen-sensor check compares raw samples and checks one sensor per period.
 - 1.4d (`6086d17`): the software check returns at once when no sensor is watched.
-- 1.4e (`a2d1ce9`): the read-back reads one trip path per period. **Declared detection time of a threshold changed behind the API: from 1 control period to N periods** (N = armed trip paths, 6 on Twist). Needs Luiz Villa's review.
+- 1.4e (`a2d1ce9`): the read-back reads one trip path per period. **Declared detection time of a threshold changed behind the API: from 1 control period to N periods** (N = armed trip paths, 6 on Twist). **To investigate later** (Luiz Villa, 2026-11-15), see "Open items".
 
 ### 2026-11-15, after step 1.4 (campaign `8276ed6-dirty_090549`)
 
@@ -212,3 +212,9 @@ Fixes 1.4c–e, committed separately (each touches its own probed block):
 - Per block, mean: plausibility 1.98 µs, read-back 1.31 µs, feed 0.91 µs, old software check (no sensor watched) 0.44 µs. From step 1.3 to here: 10.0 → 4.5 µs.
 - S1 (information): the old software check on six sensors costs 10.5 µs per period (14.5 µs safety in total), B1 CPU +8.6 pts and jitter +5.2 µs at 50 µs. It is the next speed-up, in a later session.
 - Still open at 50 µs: task-start jitter and CPU load in S0 exceed their provisional limits.
+
+### Open items (to investigate later)
+
+- **Read-back detection time (1.4e, `a2d1ce9`).** A threshold changed behind the API is now caught within N control periods instead of 1 (N = armed trip paths: 6 on Twist, 300 µs at 50 µs). To decide whether N periods is acceptable as the declared detection time, or whether the read-back needs another scheme (for example all paths in one period at a lower rate, or a cheaper register read). Until then the declared value is N periods.
+- **Old software check on six sensors (S1):** 10.5 µs per period; speed-up planned for a later session.
+- **Task-start jitter and CPU load at 50 µs (S0):** +3.9 µs and +6.9 points against B0, above their provisional limits.
