@@ -40,11 +40,13 @@ BUILDS = [('B0', 'TOV_BEFORE', SCEN), ('B1', 'SAFETY_TIME', SCEN + [('REACT', 5)
 BLOCKS = ['software check', 'dispatch', 'user task', 'read-back', 'plausibility', 'feed']
 SAFETY_BLOCKS = [0, 3, 4, 5]
 # Provisional limits (docs/safety/timing_overhead.md, "measure first"), to be confirmed with the numbers.
-OVERHEAD_SHARE = 0.05      # safety code per period, share of the period
+OVERHEAD_US = 5.0          # safety code per period, fixed (Luiz Villa, 2026-11-15)
 IRQ_OFF_US = 2.0           # longest interrupts-off window caused by the Safety API
 JITTER_EXTRA_US = 2.0      # worst task-start deviation, B1 beyond B0
 LOAD_EXTRA = 0.05          # CPU taken from the main thread, B1 beyond B0 (share of the CPU)
 REACT_PERIODS = 7          # software trip: 5 periods declared, +1 in progress, +1 margin
+# S1 (old software check on six sensors) is information only until that check is sped up (2026-11-15).
+INFO_SCEN = ('S1_50', 'S1_100')
 
 
 def flash(name, env, out):
@@ -139,17 +141,16 @@ def main():
     # L0-TOV-01 safety cost per period (B1p)
     for cname, _ in SCEN:
         pr = get('B1p', cname, 'probes')
-        per = 50 if cname.endswith('50') else 100
         if not pr:
             L(f'L0-TOV-01.{cname}', 'FAIL', f'{cname}: safety cost per control period', 'probe record', 'missing')
             continue
         worst = sum(pr['max_us'][i] for i in SAFETY_BLOCKS)
         mean = sum(pr['mean_us'][i] for i in SAFETY_BLOCKS)
-        lim = OVERHEAD_SHARE * per
+        lim = OVERHEAD_US
         parts = ', '.join(f'{BLOCKS[i]} {pr["max_us"][i]:.2f}' for i in SAFETY_BLOCKS)
-        L(f'L0-TOV-01.{cname}', J(worst <= lim),
+        L(f'L0-TOV-01.{cname}', 'INFO' if cname in INFO_SCEN else J(worst <= lim),
           f'{cname}: safety code in the control interrupt per period, worst case (sum of the block maxima; '
-          f'provisional limit {OVERHEAD_SHARE:.0%} of the period)', f'<= {lim:.2f} us',
+          f'limit {OVERHEAD_US:.0f} us at every rate)', f'<= {lim:.2f} us',
           f'{worst:.2f} us, mean {mean:.2f} us ({parts})')
     # L0-TOV-02 longest interrupts-off window
     st = get('B1', 'S0_50', 'selftest') or {}
@@ -166,13 +167,13 @@ def main():
             L(f'L0-TOV-03.{cname}', 'FAIL', f'{cname}: task-start jitter, after against before', 'both builds ran',
               f'B0 {get("B0", cname, "error")}, B1 {get("B1", cname, "error")}')
         else:
-            L(f'L0-TOV-03.{cname}', J(j1 - j0 <= JITTER_EXTRA_US),
+            L(f'L0-TOV-03.{cname}', 'INFO' if cname in INFO_SCEN else J(j1 - j0 <= JITTER_EXTRA_US),
               f'{cname}: worst task-start deviation from the period, B1 beyond B0 (B2 for reference)',
               f'<= {JITTER_EXTRA_US:.2f} us more than B0',
               f'B0 {j0:.2f} us, B1 {j1:.2f} us, B2 {j2:.2f} us' if j2 is not None else f'B0 {j0:.2f} us, B1 {j1:.2f} us')
         l0, l1, l2 = (get(b, cname, 'load') for b in ('B0', 'B1', 'B2'))
         if l0 is not None and l1 is not None:
-            L(f'L0-TOV-05.{cname}', J(l1 - l0 <= LOAD_EXTRA),
+            L(f'L0-TOV-05.{cname}', 'INFO' if cname in INFO_SCEN else J(l1 - l0 <= LOAD_EXTRA),
               f'{cname}: CPU taken from the main thread (interrupts and work queue), B1 beyond B0 (B2 for reference)',
               f'<= {LOAD_EXTRA:.0%} more than B0',
               f'B0 {l0:.1%}, B1 {l1:.1%}, B2 {l2:.1%}' if l2 is not None else f'B0 {l0:.1%}, B1 {l1:.1%}')
@@ -230,8 +231,9 @@ def main():
                        'the HRTIM, 10 us busy load, data dispatch, PWM A, C, D, E, F at 200 kHz; 4 s per scenario'],
          ['Measures', 'DWT cycles: gap between task starts, cycles left to a main-thread loop, probes between the '
                       'blocks of the control interrupt (B1p only), interrupts-off window of the RAM self-test block'],
-         ['Limits', 'provisional, "measure first": safety per period <= 5 % of the period, interrupts off <= 2 us, '
-                    'jitter <= +2 us and CPU <= +5 % against B0'],
+         ['Limits', 'safety per period <= 5 us at every rate; provisional: interrupts off <= 2 us, '
+                    'jitter <= +2 us and CPU <= +5 % against B0; S1 cases information only until the old '
+                    'software check is sped up'],
          ['Flash', '4 wait states in every build (RM0440 Table 9; Zephyr\'s clock driver sets 8): safety-hw carries '
                    'the perf(spin) fix, B0 gets the same patch (flash_ws4.patch)']],
         'B0 + SAFETY_TIME + SAFETY_TIME_PROBE + SAFETY_TIME_DEV', 'supervision')

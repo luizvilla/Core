@@ -31,6 +31,10 @@ IEC 60730-1 Annex H sets no number for this, but the self-tests must not impair 
   - longest interrupts-off window caused by the Safety API ≤ 2 µs;
   - both at 20 kHz (50 µs).
 - **Step 2 branch:** `usolarverter-safety`, from `apf_quadrature`.
+- **2026-11-15, limits after step 1.4** (Luiz Villa):
+  - safety cost per control period ≤ **5 µs**, fixed at every rate (it replaces 5 % of the period: 2.5 µs at 50 µs was out of reach);
+  - S1, the old software check on six sensors (about 10.5 µs per period), is **information only** for L0-TOV-01, -03 and -05. Speeding that check up is left for a later session;
+  - the other limits stay provisional: interrupts off ≤ 2 µs, jitter ≤ +2 µs and CPU ≤ +5 points against B0.
 
 ## Step 1: the Safety API alone (branch `safety-hw`)
 
@@ -162,3 +166,32 @@ Optimisations, one commit each, re-measured after each:
 - 1.4a: stop the feeder timer while the control task feeds;
 - 1.4b: RAM self-test in 4-word blocks with interrupts re-enabled between them, same work per slice;
 - then the frozen-sensor check, the old software check and the read-back.
+
+### Campaign history (step 1)
+
+| Campaign | Code | What it shows | Caveat |
+|---|---|---|---|
+| `2026-11-14_d19b352_232824` | harness (1.3), no optimisation | reference before the fixes | B0 converted nothing (no ADC trigger) and B0's S1 ran with stale V1/V2 limits: B0 is not like for like |
+| `2026-11-14_c7b7fca-dirty_233430` | 1.4a + 1.4b (feeder timer, RAM blocks) | interrupts off 7.42 → 1.87 µs; B1 jitter at 50 µs 20.8 → 9.1 µs; B1 CPU 73.8 → 67.0 % | dirty: measured both fixes together; same B0 caveats |
+| `2026-11-14_3e814b5_234539` | + ADC triggers in the test firmware | B0 now dispatches data like an application | B0's S1 still with stale V1/V2 limits (incremental worktree build) |
+| `2026-11-14_da48d77_235337` | + clean builds | **first like-for-like campaign**, after 1.4a and 1.4b | — |
+
+Like for like (`da48d77`), what the Safety API adds over Core `main`:
+
+| | 50 µs | 100 µs |
+|---|---|---|
+| CPU, S0 | B0 49.3 % → B1 67.3 % (+18.0 pts, ≈ 9 µs per period) | 32.3 % → 41.6 % (+9.3 pts) |
+| worst task-start deviation, S0 | 7.89 → 9.61 µs | 7.89 → 7.93 µs |
+| CPU, S1 (old check on six sensors) | 67.1 % → 84.4 % | 41.2 % → 50.2 % |
+| interrupts off (RAM block) | 1.88 µs | |
+| software trip under load | 208 µs (≤ 350 µs) | |
+
+Further findings:
+- **The old API's reaction repeats every period, forever.** With a stale devicetree, B0's old software check tripped on the floating V1/V2 pins. PC sampling then showed `_open_circuit()`, `gpio_pin_configure`, `resetPin` and `PowerAPI::stop` running in the control interrupt on every period, about 13 µs each time and 98 % CPU at 50 µs. The old reaction never latches, and it takes the GPIO API's mutex in an interrupt every period. #22 replaced it with one latch and one emergency stop.
+- **PlatformIO's stale-devicetree trap hit the test itself:** the B0 worktree built incrementally. The harness now clean-builds every env.
+- **Without ADC triggers, Core `main` converts nothing,** while the Safety API's watchdog path adds its own trigger. The test firmware now sets ADC1 on PWMA and ADC2 on PWMC, as `docs/spin_dataAPI.md` shows.
+
+Fixes 1.4c–e, committed separately (each touches its own probed block):
+- 1.4c (`6fa34e1`): the frozen-sensor check compares raw samples and checks one sensor per period.
+- 1.4d (`6086d17`): the software check returns at once when no sensor is watched.
+- 1.4e (`a2d1ce9`): the read-back reads one trip path per period. **Declared detection time of a threshold changed behind the API: from 1 control period to N periods** (N = armed trip paths, 6 on Twist). Needs Luiz Villa's review.
