@@ -4,6 +4,8 @@ Goal: one self-contained HTML page per bench session or evening of work, to send
 
 ## Current state
 
+**Kept for safe keeping only.** The script below is a reference for a future export tool and will be removed once that tool exists. It reads raw bench data that is not in git, so it only runs on the machine that recorded the session, and it stops with a "raw bench data is missing" message anywhere else. The page it built is committed and works on its own.
+
 | File | What |
 |---|---|
 | `recap_2026-11-13_evening.py` | First instance, written by hand: the 2026-11-13 evening (L2-INV-09 to L2-INV-13, the bridge incident, the L0-TIM-03 stack-overflow freeze). Output: `docs/testing/recaps/2026-11-13_evening_recap.html` (about 6 MB, works offline) |

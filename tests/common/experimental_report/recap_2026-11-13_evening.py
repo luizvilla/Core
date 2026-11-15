@@ -5,8 +5,11 @@
 ##   HTML page (summary table, uPlot figures, MSO54 screenshots, console excerpts, ST-Link reproduction)
 ##   to send to someone who was not there.
 ## @par Status
-##   First hand-written instance, kept as the prototype for an "export experimental report" tool
-##   (see README.md in this folder). The session narrative, the campaigns and the numbers are hard-coded.
+##   KEPT FOR SAFE KEEPING ONLY. First hand-written instance, kept as a reference for a future
+##   "export experimental report" tool (see README.md in this folder); it will be removed once that
+##   tool exists. The session narrative, the campaigns and the numbers are hard-coded, and it reads raw
+##   bench data that is not in git: it only runs on the machine that recorded the session. The page it
+##   built is committed and self-contained (docs/testing/recaps/2026-11-13_evening_recap.html).
 ## @par Usage
 ##   python3 tests/common/experimental_report/recap_2026-11-13_evening.py [output.html]
 ##   Needs the campaigns under tests/out/2026-11-13_* (local, not in git). Default output:
@@ -20,6 +23,18 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 OUT = ROOT / 'tests/out'
 DEST = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / 'docs/testing/recaps/2026-11-13_evening_recap.html'
+
+# raw campaigns this page is built from (tests/out/ is not in git)
+NEEDED = ['2026-11-13_175f50e_204629_bench', '2026-11-13_24e7c97_205616_bench', '2026-11-13_cb36de1_212700_bench',
+          '2026-11-13_e5884e2_215115_bench', '2026-11-13_c862597_222057_bench', '2026-11-13_019d33c_223503_bench',
+          '2026-11-13_cd277eb_225411_Go83KY']
+missing = [c for c in NEEDED if not (OUT / c).is_dir()]
+if missing:
+    sys.exit('recap_2026-11-13_evening: the raw bench data is missing, so the page cannot be rebuilt here.\n'
+             'This script is kept for safe keeping only; it reads campaigns under tests/out/ that are not in git\n'
+             'and exist only on the machine that recorded the session. Missing:\n  '
+             + '\n  '.join(str(OUT / c) for c in missing)
+             + '\nThe finished page is committed: docs/testing/recaps/2026-11-13_evening_recap.html')
 
 # uPlot (MIT), vendored, inlined so the page works offline
 VENDOR = HERE.parent / 'vendor'
