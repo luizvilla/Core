@@ -13,6 +13,7 @@ Shared code for every host test. Nothing here is compiled into the firmware.
 | [`catalogue.py`](catalogue.py) | Loads and checks [`../catalogue.json`](../catalogue.json); `--procedure` writes procedure §6 |
 | [`control_center.py`](control_center.py) | Writes `tests/out/control-center.html`: where the validation stands, one tab per stage |
 | [`scope.py`](scope.py) | Tektronix MSO54 over USB: screenshot, measurements, setup, waveforms (`capture()`, used by `tests/l2/bench.py`; standalone captures go to `tests/out/scope/`) |
+| [`experimental_report/`](experimental_report/) | Prototype of an "export experimental report" tool: one self-contained page across several campaigns (first instance: the 2026-11-13 evening, `docs/testing/recaps/`) |
 | [`udev/`](udev/) | udev rule giving USB access to the MSO54 without root |
 | [`shim/`](shim/) | Host stand-ins for hardware-specific headers |
 
