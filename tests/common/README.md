@@ -15,6 +15,8 @@ Shared code for every host test. Nothing here is compiled into the firmware.
 | [`control_center.py`](control_center.py) | Writes `tests/out/control-center.html`: where the validation stands, one tab per stage |
 | [`scope.py`](scope.py) | Tektronix MSO54 over USB: screenshot, measurements, setup, waveforms (`capture()`, used by `tests/l2/bench.py`; standalone captures go to `tests/out/scope/`) |
 | [`rigol_mho.py`](rigol_mho.py) | Rigol MHO984 over Linux usbtmc (SPOC bench): setup, single acquisition, the scope's own measurements, screen waveforms; ported from Core4 `tests/twt_bnc/rigol_scope.py`. Standalone: `python3 tests/common/rigol_mho.py` prints `*IDN?` and CH1..CH4 measurements. Quirks: [docs/safety/spoc_bench.md](../../docs/safety/spoc_bench.md) |
+| [`spoc/`](spoc/) | SPOC bench host side: `boards.py` finds the CUT (2fe3:01ff) and MUX (2fe3:0102) shell ports by USB ID (interface 2; interface 0 is the console); `thingset.py`, `mux_controller.py` copied from SPOC_Software (`MuxController.route('ch1', 'PA8')`) |
+| [`spoc_preflight.sh`](spoc_preflight.sh) | What the SPOC bench needs: both Spins, scope access, scope answering `*IDN?` |
 | [`udev/`](udev/) | udev rules giving USB access without root: MSO54, and `99-rigol-usbtmc.rules` for the MHO984 (`sudo cp tests/common/udev/99-rigol-usbtmc.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger`, then replug the scope) |
 | [`shim/`](shim/) | Host stand-ins for hardware-specific headers |
 

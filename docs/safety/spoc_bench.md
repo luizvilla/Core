@@ -71,4 +71,7 @@ Each test from C7 on is in `tests/catalogue.json` and is done only when it shows
 ### 2026-11-18, bench seen from the host
 
 - Both Spins and the scope enumerate (IDs above).
-- The scope does not answer `*IDN?`: the first probes put the usbtmc driver out of step (see "Scope link"). Needs a USB replug before C2 can be checked on hardware.
+- The first probes (plain writes and reads on `/dev/usbtmc0`) got no answer. A few minutes later the ported driver (C2), which repeats `*IDN?` until a reply comes, got one without a replug: `RIGOL TECHNOLOGIES,MHO984,MHO9B280300263,00.01.00`.
+- Both Spins already run the stock SPOC firmware: the MUX exposes `Mux`, the CUT `Cut`. The ThingSet shell is on USB interface 2 of each board (MUX `/dev/ttyACM1`, CUT `/dev/ttyACM3` here); interface 0 is the Zephyr console.
+- MUX routing from Core2 (C3): PA8 → CH1 reads back `mux1`, input 8, enabled; `disable_all()` clears it.
+- `tests/common/spoc_preflight.sh`: all OK.
