@@ -151,11 +151,12 @@ All tests are generated from the protection manifest, with one hand-written inpu
   - interrupts masked;
   - watchdog starved;
   - wild write to the DAC/COMP/HRTIM registers after locking.
-- **L0 (bare Spin on the SPOC bench, Rigol MHO84):**
+- **L0 (bare Spin on the SPOC bench, Rigol MHO984):**
   - one case per (limit × sign × path), plus CPU-supervision cases;
   - edge cases: just below the threshold; a glitch shorter and one longer than the filter; a fault while arming; a fault during clear; two faults at once; a fault during dead time.
-  - Injection, self-injection: CH1 selects a CUT DAC pin, CH2 the target, and one wire joins test points TP1 and TP2 (before the 9 MΩ dividers).
-  - Injection, independent: a third "injector" Spin wired to a test point, for faults while the CUT's CPU is dead.
+  - Injection, self-injection: CH1 selects a CUT DAC pin, CH2 the target, and one wire joins the two channels' signal test points TP1 and TP3 (on the mux side, before the 9 MΩ dividers).
+  - Injection, independent: the SPOC's MUX Spin drives CH3's signal test point (TP5) from free pins, with DAC4 through OPAMP4 for levels and ramps and a GPIO for fast steps; it is a separate MCU, so it still injects while the CUT's CPU is dead. No third Spin.
+  - CH4 watches the PWM pins. Wiring, pins and rules: implementation note of 2026-11-17.
   - Routes are set with the PWM stopped.
   - Each campaign starts with a **skew and gain calibration**: one CUT pin routed to all four channels.
   - The comparator latency verdict (31 ns) uses direct probes. The SPOC mux path adds an estimated tens of ns.
@@ -177,7 +178,7 @@ All tests are generated from the protection manifest, with one hand-written inpu
   - backfeed with the bridge stopped (4.4.4.6).
 
   Three Spins measure the trip value and time spread, before and after thermal cycling and endurance (60730-1 H.17). Powered tests start at 50 V behind the series bulb and step up to rated voltage case by case.
-- **Scope**: one interface, with the Rigol MHO84 as the first backend.
+- **Scope**: one interface, with the Rigol MHO984 as the first backend.
 - **Coverage**:
   - every campaign build-checks every shield devicetree (Twist 1.2.0–1.4.2, Ownverter 0.9.0–1.1.0, uSolarVerter 0.9.0, O2 1.1.2);
   - on-target L0 runs for the newest board of each family;
@@ -210,7 +211,7 @@ EMC immunity (IEC 60730-1 H.25, level 3 for a protective control) is left for it
 IEC 62109-1 4.4.4.1 asks for faults applied "using a switching device" with low impedance while the converter runs. The proposed fixture:
 - a power MOSFET pair connected back to back (bidirectional for AC), with its own isolated driver;
 - placed across the AC output, the DC bus, or one bridge switch;
-- closed by the injector Spin at a programmed or random phase of the PWM.
+- closed by an injector output (a free GPIO of the SPOC's MUX Spin) at a programmed or random phase of the PWM.
 
 It makes "fault at any point of the program sequence" (60730-1 H.13.2.5.1) repeatable and keeps the operator's hands away from short-circuit tests. Ratings, layout and the current-limited first runs are to be agreed with the hardware team before anything is built.
 
@@ -268,3 +269,21 @@ It makes "fault at any point of the program sequence" (60730-1 H.13.2.5.1) repea
 - *Threshold read-back:* one trip path per period, so a threshold changed behind the API is detected within N control periods (N = armed trip paths, 6 on Twist), not 1. To be investigated (open item in docs/safety/timing_overhead.md).
 - *Software trip under load:* 222 µs from watch to outputs stopped, within the declared 5 control periods.
 Step 1.4 fixes behind these numbers: no kernel feeder timer while the control task feeds; RAM self-test in 4-word blocks; frozen-sensor check on raw samples, one sensor per period; empty software check returns at once; read-back of one trip path per period.
+
+**2026-11-17, SPOC bench wiring for L0 (luizvilla/Core#26), decided with Luiz Villa from the SPOC schematic, its netlist and RM0440.**
+- *Test points.* Each of the four mux channels has a signal test point on the mux side of its 9 MΩ divider and a ground test point. Signal: TP1 (CH1), TP3 (CH2), TP5 (CH3), TP7 (CH4); ground: TP2, TP4, TP6, TP8. Channel to BNC, checked on the board: BNC1 = CH1 = sheet "Mux channel", BNC2 = CH2 = "Mux channel1", BNC3 = CH3 = "Mux channel2", BNC4 = CH4 = "Mux channel3". A wire from a signal test point to its own ground test point shorts the channel: the earlier "TP1 to TP2" wording was wrong.
+- *No free DAC pin on the MUX Spin.* The G474's only DAC pins (PA4, PA5, PA6) address the muxes. DAC3 and DAC4 are internal, but OPAMP4/5/6 (present on the G474) take them as input (RM0440 Table 201, `VP_SEL = 11`) and, as followers, put them on free pins: PB12 (OPAMP4 ← DAC4_CH1), PA8 (OPAMP5 ← DAC4_CH2), PB11 (OPAMP6 ← DAC3_CH1).
+- *Wiring:*
+
+  | Wire | From | To | Scope | Purpose |
+  |---|---|---|---|---|
+  | 1 | TP1 | TP3 | CH1, CH2 | self-injection: CUT DAC pin (Spin 45/32/34) → target pin |
+  | 2 | MUX Spin pin 2 (PB12, OPAMP4), through 220–470 Ω | TP5 | CH3 | levels and ramps, independent of the CUT |
+  | 3 | MUX Spin pin 4 (PB13, GPIO), through ~100 Ω | TP5 | CH3 | fast step for latency cases |
+  | — | TP7 | — | CH4 | watches one PWM pin |
+
+  No ground wire: both Spins sit on the SPOC and share its ground.
+- *Why the resistors.* The OPAMP drives at most 500 µA into at most 50 pF (datasheet); the mux node (switch, trimmer, wire) can exceed 50 pF, and the series resistor keeps it stable. Both resistors also limit the current if both sources drive at once: 3.3 V / 430 Ω ≈ 8 mA, safe for both pins.
+- *Why a GPIO step as well.* OPAMP slew is 6.5 V/µs (45 V/µs in high-speed mode): enough for levels, ramps and filter glitches, too slow for latency verdicts. Free GPIOs on the MUX Spin, should more be needed: pins 5, 6 (PB14, PB15), 14, 15 (PA9, PA10), 19 (PC12), 21 (PB9), 22 (PC13), 41 (PB10), 58 (PB8); not 46–48 (SWD/JTAG).
+- *Rules for the `Core-MUX` firmware:* one source enabled at a time, the idle one in analog mode (OPAMP off, GPIO analog: high impedance, Schmitt trigger off); the source changes only while CH3's mux is disabled; CH3's mux stays disabled whenever the MUX Spin is not injecting. Both pins come out of reset in analog mode, so nothing drives TP5 before configuration.
+- *Consequences.* While TP1 and TP3 are joined, CH1 and CH2 both show the stimulus. One PWM channel means one PWM pin per trip, so "every PWM pin goes inactive" repeats the trip per pin. The 31 ns comparator latency verdict still uses direct probes.
