@@ -14,7 +14,8 @@ Shared code for every host test. Nothing here is compiled into the firmware.
 | [`catalogue.py`](catalogue.py) | Loads and checks [`../catalogue.json`](../catalogue.json); `--procedure` writes procedure §6 |
 | [`control_center.py`](control_center.py) | Writes `tests/out/control-center.html`: where the validation stands, one tab per stage |
 | [`scope.py`](scope.py) | Tektronix MSO54 over USB: screenshot, measurements, setup, waveforms (`capture()`, used by `tests/l2/bench.py`; standalone captures go to `tests/out/scope/`) |
-| [`udev/`](udev/) | udev rule giving USB access to the MSO54 without root |
+| [`rigol_mho.py`](rigol_mho.py) | Rigol MHO984 over Linux usbtmc (SPOC bench): setup, single acquisition, the scope's own measurements, screen waveforms; ported from Core4 `tests/twt_bnc/rigol_scope.py`. Standalone: `python3 tests/common/rigol_mho.py` prints `*IDN?` and CH1..CH4 measurements. Quirks: [docs/safety/spoc_bench.md](../../docs/safety/spoc_bench.md) |
+| [`udev/`](udev/) | udev rules giving USB access without root: MSO54, and `99-rigol-usbtmc.rules` for the MHO984 (`sudo cp tests/common/udev/99-rigol-usbtmc.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger`, then replug the scope) |
 | [`shim/`](shim/) | Host stand-ins for hardware-specific headers |
 
 ## check.h

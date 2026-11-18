@@ -1,0 +1,5 @@
+# Rigol oscilloscopes (USB vendor 1ab1) over usbtmc: readable/writable by the
+# plugdev group, so the SPOC bench tests can talk to /dev/usbtmcN without sudo.
+#   sudo cp tests/common/udev/99-rigol-usbtmc.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+SUBSYSTEM=="usbmisc", KERNEL=="usbtmc[0-9]*", ATTRS{idVendor}=="1ab1", MODE="0660", GROUP="plugdev"
