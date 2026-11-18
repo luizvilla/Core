@@ -22,6 +22,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 - Once the kernel driver is out of step with the scope, every query times out until the USB cable is replugged.
 - A screenshot (~130 kB) puts the driver out of step: screenshots are off by default.
 - The scope never answers `:SYSTem:ERRor?` or `*ESR?`: setups are checked by reading them back.
+- A query the scope does not know (seen with `:SYSTem:BANDwidth?`) gets no answer and leaves the link out of step: the next connection fails until a replug or a few minutes' wait. Send only queries from the MHO900 programming guide.
 - pyvisa-py does not list the scope while the kernel `usbtmc` driver holds it: the driver talks to `/dev/usbtmc0` directly.
 
 ## Decisions
@@ -75,3 +76,19 @@ Each test from C7 on is in `tests/catalogue.json` and is done only when it shows
 - Both Spins already run the stock SPOC firmware: the MUX exposes `Mux`, the CUT `Cut`. The ThingSet shell is on USB interface 2 of each board (MUX `/dev/ttyACM1`, CUT `/dev/ttyACM3` here); interface 0 is the Zephyr console.
 - MUX routing from Core2 (C3): PA8 → CH1 reads back `mux1`, input 8, enabled; `disable_all()` clears it.
 - `tests/common/spoc_preflight.sh`: all OK.
+
+### 2026-11-18, first smoke test of the chain (C4, not finished)
+
+Stock Core-CUT drives PA8 at 1 kHz, duty 0.5; the MUX routes PA8 to CH1; CH1 is set ×10 (the SPOC 9 MΩ divider into 1 MΩ), 1 V/div, 200 µs/div, edge trigger 1.65 V. The scope's measurements:
+
+| Item | Measured | Expected |
+|---|---|---|
+| Frequency | 8.10 kHz | 1 kHz |
+| Duty | no valid value | 50 % |
+| VTOP / VBASE | 2.95 V / 2.26 V | ~3.3 V / 0 V |
+| Rise / fall time | 3.2 µs / 38 µs | edges of a few ns behind an untrimmed divider |
+| Sample rate at that timebase | 5 MSa/s | — |
+
+The chain answers end to end, but CH1 does not show the PWM. To check next, in this order: CH1's BNC cable goes to SPOC BNC1; CH1 with the mux disabled, then with PA8 routed and the PWM off, then on; `CutPwmController.read_state()` after the command; the channel's divider trim (Core4 trimming flow). The diagnostic run that would have done this failed: the scope stopped answering after the unknown query above.
+
+The scope's bandwidth and maximum sample rate against the 31 ns verdict are still to read (programming guide or the scope's About page).
