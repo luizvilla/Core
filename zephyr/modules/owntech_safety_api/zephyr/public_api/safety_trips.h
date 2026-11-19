@@ -69,6 +69,22 @@ void safety_trips_restore_thresholds(void);
  *         @return length written. */
 int safety_trips_describe(uint32_t detail, char *buf, size_t size);
 
+/** Registers of one trip, for the fault-injection tests (CONFIG_OWNTECH_SAFETY_TEST_HOOKS only). */
+struct safety_trip_regs {
+    uint8_t flt;                 /**< HRTIM fault input, 1-6 */
+    uint8_t comp;                /**< COMPx (comparator trip), 0 otherwise */
+    volatile uint32_t *dac_dhr;  /**< comparator threshold: DAC DHR12Rx */
+    volatile uint32_t *awd_tr;   /**< watchdog window: ADC TRx (AWD1: HT1|LT1 fields only) */
+    uint32_t awd_tr_mask;        /**< bits of *awd_tr that hold the window */
+    uint8_t awd;                 /**< watchdog number, 1-3 (watchdog trip) */
+    volatile uint32_t *adc_cr;   /**< ADC CR (watchdog trip) */
+    volatile uint32_t *adc_cfgr; /**< ADC CFGR (watchdog trip) */
+};
+
+/** @brief Registers of comparator trip @p index (@p watchdog false) or watchdog trip @p index (true).
+ *  @return 0, or -1 (no such trip, or built without the test hooks). */
+int safety_trips_test_regs(bool watchdog, int index, struct safety_trip_regs *out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -25,7 +25,7 @@ _cache: dict[str, str] = {}
 def _root_keys(port: str) -> set[str]:
     """ThingSet root keys of the shell on `port` (works whether the shell is in 'select thingset' mode or not)."""
     try:
-        with serial.Serial(port, 115200, timeout=0.3) as ser:
+        with serial.Serial(port, 115200, timeout=0.3, write_timeout=1.0) as ser:  # a hung Spin blocks writes
             ser.reset_input_buffer()
             for cmd in (b"\r\n?\r\n", b"thingset ?\r\n"):
                 ser.write(cmd)

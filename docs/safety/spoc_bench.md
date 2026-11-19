@@ -238,3 +238,28 @@ C8: photographs of the board and the bench in `tests/l0/spoc_cal/README.md` (two
 Board discovery now asks each Spin's ThingSet root (`Mux` → MUX; `Cut` or `Safety` → CUT): the CUT on this firmware reports 2fe3:0100 like the MUX.
 
 Twist pins for the trips: I1 on PA1 (Spin 30, mux1 input 1), I2 on PC1 (Spin 25, mux3 input 1); 0 A at 1.000 V, window 0.300–1.700 V (−7…7 A).
+
+### 2026-11-19, C10: software fault injection
+
+`/Fault` in the generic firmware (cases in the header of `tests/firmware/safety_l0/main.cpp`). A 100 µs control task (TIM6) now starts with the first PWM start, after arming: it feeds the watchdog and runs the threshold read-back, as in an application. Safety API: `safety_trips_test_regs()` (test hooks only) gives the firmware each trip's registers. Bring-up on Twist 1.4.2, production thresholds, I1/I2 held at 1.0 V (as C9); results read over ThingSet, those that end in a reset after the reboot.
+
+| Case | Result |
+|---|---|
+| 1 thread stack overflow | reset; fatal error latched, reason 2 (`K_ERR_STACK_CHK_FAIL`) |
+| 2 undefined instruction | reset; fatal error latched, reason 36 (`K_ERR_ARM_USAGE_UNDEFINED_INSTRUCTION`), PC in the app |
+| 3 every interrupt masked (PRIMASK) | watchdog reset; watchdog fault latched |
+| 4 control task never returns | watchdog reset; watchdog fault latched |
+| 5 lockup (FAULTMASK + fault) | watchdog reset; watchdog fault latched |
+| 6 wild writes to the locked set-up (COMP CSR, FLTINR1/2, FLTxR, CFGR2 locks) | none took effect; no fault |
+| 7 comparator DAC ±1 count (I1, I2) | caught by the read-back: 0.19–0.55 ms |
+| 8 watchdog window ±1 count (V1_LOW, I1_LOW, I2_LOW) | caught: 0.02–0.29 ms |
+| 9 watchdog's external event rerouted (EECR1/2) | **was not caught** (10 ms, write took effect); read-back extended: caught on all four watchdogs, 0.04–0.38 ms |
+| 10 timer A OUTxR fault state, outputs on | write did not take effect |
+| 11 AWD1 channel changed (CFGR AWD1CH) | **was not caught**; read-back extended: caught, 0.12 ms |
+| 12 ADC conversions stopped (ADSTP) | **not caught** (10 ms); open, decision pending |
+| 13 a thread spins with `irq_lock()` | **no reset, no fault** after 20 s and over minutes in an earlier run: the zero-latency control task keeps feeding the watchdog while the kernel, USB and the run-time self-tests are stopped; open, decision pending |
+
+The first case 3 used `irq_lock()` and hung the board this way; it became case 13, and case 3 now masks with PRIMASK. Board discovery (`spoc/boards.py`) now has a write timeout: a hung Spin used to block it.
+
+The scope checks (outputs low within 1 µs of the lockup, L0-SUP-08.c) come with C12/C13; the verdicts with the L0 runner (C11).
+

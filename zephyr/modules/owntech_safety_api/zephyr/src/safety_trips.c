@@ -304,6 +304,17 @@ struct watchdog_trip {
 #if SAFETY_WATCHDOG_TRIPS > 0
 static const struct watchdog_trip awds[] = { SAFETY_WATCHDOG_TABLE };
 static volatile uint8_t awd_state[SAFETY_WATCHDOG_TRIPS];   /* 0 none, 1 self-test passed, 2 failed */
+static uint8_t awd_eev[SAFETY_WATCHDOG_TRIPS];               /* EEV set-up at arming (read-back) */
+#endif
+
+/* External event n (1-10): its 6-bit set-up field (EExSRC, EExPOL, EExSNS, EExFAST) in EECR1/EECR2. */
+static uint32_t eev_field(uint8_t n)
+{
+	uint32_t r = (n <= 5U) ? HRTIM1->sCommonRegs.EECR1 : HRTIM1->sCommonRegs.EECR2;
+	return (r >> (6U * ((n <= 5U) ? n - 1U : n - 6U))) & 0x3FU;
+}
+
+#if SAFETY_WATCHDOG_TRIPS > 0
 #endif
 
 #define AWDFILT_TWO   (1U << ADC_TR1_AWDFILT_Pos)   /* AWD1: two consecutive conversions out of the window */
@@ -570,6 +581,7 @@ int safety_trips_arm(void)
 			return -1;
 		}
 		mask |= 1U << (awds[i].flt - 1U);
+		awd_eev[i] = (uint8_t)eev_field(awds[i].flt);   /* EEVn feeds FLTn (eev_fault_config) */
 		len += snprintk(text + len, sizeof(text) - len, "%s%s awd", len ? ", " : "", awds[i].sensor);
 	}
 	/* The AWD flag is sticky: clear it, let fresh conversions come, and refuse
@@ -723,10 +735,15 @@ int safety_trips_check(void)
 		uint32_t tr = (w->awd == 1U) ? (a->TR1 & (ADC_TR1_HT1 | ADC_TR1_LT1)) :
 			      (w->awd == 2U) ? a->TR2 : a->TR3;
 		uint32_t hshift = (w->awd == 1U) ? ADC_TR1_HT1_Pos : ADC_TR2_HT2_Pos;
-		bool en = (w->awd == 1U) ? ((a->CFGR & ADC_CFGR_AWD1EN) != 0U) :
+		/* AWD1 watches one channel, selected in CFGR: the selection is part of the set-up. */
+		const uint32_t awd1 = ADC_CFGR_AWD1CH | ADC_CFGR_AWD1SGL | ADC_CFGR_AWD1EN;
+		bool en = (w->awd == 1U) ? ((a->CFGR & awd1) ==
+					    (((uint32_t)w->channel << ADC_CFGR_AWD1CH_Pos) | ADC_CFGR_AWD1SGL | ADC_CFGR_AWD1EN)) :
 			  (w->awd == 2U) ? ((a->AWD2CR & (1U << w->channel)) != 0U) :
 			  ((a->AWD3CR & (1U << w->channel)) != 0U);
-		if (!en || tr != (((uint32_t)w->hi << hshift) | w->lo)) {
+		/* The external event carrying the watchdog to its fault input is not lockable (EECR1/2). */
+		bool eev = eev_field(w->flt) == awd_eev[i];
+		if (!en || !eev || tr != (((uint32_t)w->hi << hshift) | w->lo)) {
 			if (safety_supervision_get_fault() == SAFETY_FAULT_NONE) {
 				safety_supervision_latch(SAFETY_FAULT_TRIP, 1U << 9 | i);
 				safety_emergency_stop();
@@ -916,6 +933,43 @@ void safety_trips_restore_thresholds(void)
 	}
 	k_busy_wait(10);
 #endif
+}
+
+int safety_trips_test_regs(bool watchdog, int index, struct safety_trip_regs *out)
+{
+#if defined(CONFIG_OWNTECH_SAFETY_TEST_HOOKS)
+	memset(out, 0, sizeof(*out));
+	if (watchdog) {
+#if SAFETY_WATCHDOG_TRIPS > 0
+		if (index >= 0 && index < SAFETY_WATCHDOG_TRIPS) {
+			const struct watchdog_trip *w = &awds[index];
+			ADC_TypeDef *a = adc_of(w->adc);
+			out->flt = w->flt;
+			out->awd_tr = (w->awd == 1U) ? &a->TR1 : (w->awd == 2U) ? &a->TR2 : &a->TR3;
+			out->awd_tr_mask = (w->awd == 1U) ? (ADC_TR1_HT1 | ADC_TR1_LT1) : 0xFFFFFFFFU;
+			out->awd = w->awd;
+			out->adc_cr = &a->CR;
+			out->adc_cfgr = &a->CFGR;
+			return 0;
+		}
+#endif
+		return -1;
+	}
+#if SAFETY_COMPARATOR_TRIPS > 0
+	if (index >= 0 && index < SAFETY_COMPARATOR_TRIPS) {
+		const struct comparator_trip *t = &trips[index];
+		out->flt = t->flt;
+		out->comp = t->comp;
+		out->dac_dhr = dac_dhr(t->dac, t->dac_channel);
+		return 0;
+	}
+#endif
+#else
+	ARG_UNUSED(watchdog);
+	ARG_UNUSED(index);
+	ARG_UNUSED(out);
+#endif
+	return -1;
 }
 
 int safety_trips_describe(uint32_t detail, char *buf, size_t size)
