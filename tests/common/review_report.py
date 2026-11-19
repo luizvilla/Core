@@ -1059,6 +1059,63 @@ def supervision_cases_table(rep):
     return ''.join(out)
 
 
+def spoc_cal_section(folder, rep):
+    """@brief L0-CAL: calibration table (calibration.json) and two interactive figures from report.json."""
+    import numpy as np
+    e = html.escape
+    out = []
+    cal_p = folder / 'calibration.json'
+    cal = json.loads(cal_p.read_text()) if cal_p.exists() else None
+    if cal:
+        out.append('<h3>Calibration record</h3><p class="sub">Stored with the campaign in calibration.json; later cases '
+                   'on this bench read their channel gains and skews from it.</p><table><tr><th>Channel</th>'
+                   '<th>Compensation</th><th>Amplitude</th><th>Gain vs CH1</th><th>Skew from CH1, rising</th>'
+                   '<th>falling</th></tr>')
+        for name, ch in cal['channels'].items():
+            sk = cal['skew_s'].get(f'ch1_{name}', {})
+            f = lambda v, k=1e9, u='ns': '' if v is None else f'{v * k:.2f} {u}'
+            gain = '' if ch['gain_vs_ch1'] is None else f"{ch['gain_vs_ch1']:.4f}"
+            out.append(f'<tr><td>{e(name.upper())}</td><td>{f(ch["compensation_pct"], 1, "%")}</td>'
+                       f'<td>{f(ch["amplitude_V"], 1, "V")}</td><td>{gain}</td>'
+                       f'<td>{f(sk.get("rising"))}</td><td>{f(sk.get("falling"))}</td></tr>')
+        out.append('</table>')
+    out.append('<h3>4 · Figures</h3>')
+    if not rep:
+        out.append(f'<p class="sub">No report in {e(folder.name)}/.</p>')
+        return ''.join(out)
+    fig = Figure('µs')
+    main = fig.chart('V', 300)
+    for i, ch in enumerate(rep['channels']):
+        t = np.asarray(ch['wave']['t'], float) * 1e6
+        fig.line(main, f'CH{ch["channel"]}', t, np.asarray(ch['wave']['v'], float), SERIES[i % len(SERIES)], 1.5)
+    out.append('<figure><div><b>The four channels, each routed alone (200 µs/div)</b></div>'
+               + fig.html('spoc-cal-channels', 'SPOC channels CH1 to CH4 on the 1 kHz PA8 signal')
+               + '<figcaption>PA8 at 1 kHz routed to one channel at a time; one colour per scope channel. A trimmed '
+                 'divider gives a flat top and bottom: a spike after each edge that decays is over-compensated, a '
+                 'rounded corner under-compensated (L0-CAL-02). The scope\'s own measurements (L0-CAL-03 to 05) were '
+                 'read on these settings.</figcaption></figure>')
+    fig = Figure('ns')
+    main = fig.chart('V', 300)
+    drawn = False
+    for i, sk in enumerate(rep.get('skews', [])):
+        edge = sk.get('edge') or {}
+        for name, w in edge.items():
+            if name == 'ch1' and drawn:
+                continue
+            k = int(name[2:]) - 1
+            fig.line(main, name.upper(), np.asarray(w['t'], float) * 1e9, np.asarray(w['v'], float),
+                     SERIES[k % len(SERIES)], 2 if name == 'ch1' else 1.5)
+        drawn = drawn or bool(edge)
+    if drawn:
+        out.append('<figure><div><b>Rising edge, CH1 against each channel (20 ns/div)</b></div>'
+                   + fig.html('spoc-cal-edges', 'Rising edge of PA8 on CH1 and on CH2 to CH4')
+                   + '<figcaption>One stopped single capture per pair, CH1 (thick) routed together with the other '
+                     'channel; trigger CH1 rising at 1.65 V. Skew is the delay between 50 % crossings (L0-CAL-07, 08); '
+                     'samples are 1 ns apart, so sub-nanosecond values are interpolated. With TP1-TP3 wired, CH1 and CH2 '
+                     'share one node.</figcaption></figure>')
+    return ''.join(out)
+
+
 def supervision_figure(rows):
     """@brief L0-SUP: each declared-time criterion (limit "<= x us") as its measured share of the limit.
 
@@ -1379,6 +1436,10 @@ def main(out):
         if c.get('kind') == 'target':
             # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if c.get('figures') == 'spoc_cal':
+                # L0-CAL (ADR 0009, #26): calibration record, then the waveforms the verdicts came from.
+                p.append(spoc_cal_section(c['folder'], rep_t))
+                continue
             if c.get('figures') == 'supervision':
                 # L0-SUP (ADR 0009): cases as run, then each declared time against its limit.
                 if rep_t:

@@ -762,6 +762,102 @@
    "status": "implemented",
    "status_note": "Implemented 2026-11-14 (issue luizvilla/Core#27); limits provisional",
    "harness": "tests/l0/safety_timing/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-01",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The SPOC bench answers: CUT and MUX over ThingSet, scope over usbtmc",
+   "criterion": "all three answer",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-02",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Each scope channel's divider is trimmed",
+   "criterion": ".a-.d CH1-CH4 compensation 95-105 % (level 5-25 us after each edge against the settled level), channel routed alone",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-03",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The scope's FREQuency is steady on each channel (cable check)",
+   "criterion": ".a-.d 1000 Hz ±0.1 %, spread of 5 readings <= 0.1 %",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-04",
+   "tab": "safety",
+   "level": "L0",
+   "title": "The scope's PDUTy is steady on each channel (cable check)",
+   "criterion": ".a-.d 0.5 ±0.005, spread of 5 readings <= 0.005",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-05",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Each channel reads the 3.3 V swing with steady levels",
+   "criterion": ".a-.d VTOP - VBASe = 3.3 V ±5 %, VTOP and VBASe spreads <= 50 mV",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-06",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Gain of each channel against CH1, recorded for the campaign",
+   "criterion": ".a-.d INFO (calibration.json)",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-07",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Skew CH1 -> CH2, CH3, CH4 on the rising edge, recorded for the campaign",
+   "criterion": ".b-.d INFO: 50 % crossings from the waveforms, 5 single captures at 20 ns/div (calibration.json)",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
+  },
+  {
+   "id": "L0-CAL-08",
+   "tab": "safety",
+   "level": "L0",
+   "title": "Skew CH1 -> CH2, CH3, CH4 on the falling edge, recorded for the campaign",
+   "criterion": ".b-.d INFO, as L0-CAL-07",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
+   "harness": "tests/l0/spoc_cal/run.sh --run"
   }
  ],
  "retired": {}

@@ -50,7 +50,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 | C5 | `feat(mux): injector, OPAMP4 follower and GPIO step` (SPOC_Software branch) | DAC4_CH1 → OPAMP4 → PB12; GPIO step on PB13; one source at a time, the idle one in analog mode, source changed only with CH3's mux disabled |
 | C6 | `test(spoc): pin Core-MUX injector, injector client` | Hash pinned; injector calls in `spoc.py` |
 | — | Wiring (by hand) | TP1–TP3; PB12 through 220–470 Ω to TP5; PB13 through ~100 Ω to TP5; TP7 for CH4 |
-| C7 | `test(safety): L0-CAL, trim and skew/gain calibration` | Trim the four channels (Core4 trimming flow), then one CUT pin on all four: skew and gain stored with the campaign |
+| C7 | `test(safety): L0-CAL, trim and skew/gain calibration` | Trim the four channels (Core4 trimming flow), each routed alone; then gain per channel and skew CH1 → CHn (CH1 + CHn routed together): stored with the campaign |
 | C8 | `docs(safety): SPOC bench README, photo, ADR note` | L0 runner README with the photo; closes #26 |
 
 ### Phase 2: generic firmware and L0 runner (#23)
@@ -190,3 +190,25 @@ Wiring done by Luiz Villa: MUX Spin pin 2 (PB12) and pin 4 (PB13) to TP5 through
 | Status when off | `rLevel_mV` 0, `rGpio` false (fixed in `b500a4e`) |
 
 **Rule relaxed (decision to confirm, Luiz Villa):** ADR 0009 says CH3's mux stays disabled whenever the MUX Spin is not injecting. The firmware forces CH3 off on every change of source, but lets the host route CH3 while the injector is off (both pins high impedance): the C7 calibration routes one CUT pin to all four channels, CH3 included.
+
+### 2026-11-19, C7: trim and L0-CAL
+
+**Trim** (`tests/l0/spoc_cal/trim.py`, Core4's compensation figure, each channel routed alone). Before: CH1 99 %, CH2 no signal (scope CH2 was not cabled to BNC2), CH3 154 % (the over-compensation seen on the injector step), CH4 101 %. Luiz Villa cabled CH2 (a longer cable than the 30 cm ones) and trimmed all four: 99.5, 98.0, 98.3, 100.9 %.
+
+**Findings while building L0-CAL:**
+- `MuxController.route()` (SPOC_Test_Software) disables every other route first: routing several channels takes `route_pair()`. An earlier reading "PA8 on all four channels loads the pin" was wrong: only CH4 was routed.
+- With TP1–TP3 wired (wire 1), SPOC CH1 and CH2 share one node: routing either shows the signal on both scope channels. Rule: never route two different CUT outputs to CH1 and CH2 while the wire is in, except the intended self-injection source and target.
+- The scope's RRDelay read invalid and its FFDelay a constant −0.2 ns at 20 ns/div: skew is taken from the waveforms (50 % crossings, interpolated), as information only.
+
+**Campaign `2026-11-19_f1f2f51-dirty_140237_ugudxj`:** L0-CAL-01 to 05 PASS on all four channels (20 criteria); recorded:
+
+| | CH1 | CH2 | CH3 | CH4 |
+|---|---|---|---|---|
+| Compensation | 99.3 % | 98.0 % | 98.4 % | 101.1 % |
+| VTOP − VBASe | 3.379 V | 3.345 V | 3.362 V | 3.379 V |
+| Gain vs CH1 | 1.0000 | 0.9899 | 0.9950 | 1.0000 |
+| Skew from CH1, rising / falling | — | +0.73 / +0.42 ns | −4.12 / −4.25 ns | −3.92 / −4.02 ns |
+
+Frequency 1000 Hz (spread ≤ 0.2 Hz) and duty 0.5 (spread ≤ 0.0001) on every channel, CH2's longer cable included. CH3 and CH4 lead CH1 by ~4 ns; the cause (CH1's node carries the TP1–TP3 wire and CH2's divider, or cable lengths) is not separated. A latency verdict read across two channels corrects by this skew.
+
+Left for C8: photograph of the bench in the L0-CAL README.
