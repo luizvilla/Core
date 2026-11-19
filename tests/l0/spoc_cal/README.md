@@ -29,6 +29,8 @@ bash tests/l0/spoc_cal/run.sh --run                       # the calibration, as 
 
 While TP1 and TP3 are wired, SPOC CH1 and CH2 share one node: routing either shows the signal on both scope channels. **Never route two different CUT outputs to CH1 and CH2 while the wire is in** (it would short them), except the intended self-injection source and target.
 
+Keep both Spins powered together: a CUT output routed to CH3 while the MUX Spin is off could back-feed its injector pins through TP5 (ADR 0009).
+
 `MuxController.route()` disables every other route first; use `route_pair()` for two channels at once.
 
 ## Criteria

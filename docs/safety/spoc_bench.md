@@ -30,7 +30,8 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 - **2026-11-18** (Luiz Villa):
   - the scope driver is ported from Core4's `rigol_scope.py` (usbtmc), not SPOC_Test_Software's pyvisa client;
   - the `Core-MUX` injector is written on a branch of `owntech-foundation/SPOC_Software` off `Core-MUX`, its hash pinned in Core2;
-  - the existing L0 firmware (`safety_comparator`, `safety_supervision`) stays as it is; the generic firmware is new.
+  - the existing L0 firmware (`safety_comparator`, `safety_supervision`) stays as it is; the generic firmware is new;
+  - CH3 may be routed while the injector is off (both pins high impedance); keep both Spins powered together.
 
 ## Plan and commits
 
@@ -189,7 +190,7 @@ Wiring done by Luiz Villa: MUX Spin pin 2 (PB12) and pin 4 (PB13) to TP5 through
 | CH3 rule | level change on the same source keeps CH3 routed; a change of source disables CH3 (read back) |
 | Status when off | `rLevel_mV` 0, `rGpio` false (fixed in `b500a4e`) |
 
-**Rule relaxed (decision to confirm, Luiz Villa):** ADR 0009 says CH3's mux stays disabled whenever the MUX Spin is not injecting. The firmware forces CH3 off on every change of source, but lets the host route CH3 while the injector is off (both pins high impedance): the C7 calibration routes one CUT pin to all four channels, CH3 included.
+**Rule relaxed (confirmed by Luiz Villa, 2026-11-19; caveat in ADR 0009: keep both Spins powered together):** ADR 0009 says CH3's mux stays disabled whenever the MUX Spin is not injecting. The firmware forces CH3 off on every change of source, but lets the host route CH3 while the injector is off (both pins high impedance): the C7 calibration routes one CUT pin to all four channels, CH3 included.
 
 ### 2026-11-19, C7: trim and L0-CAL
 
