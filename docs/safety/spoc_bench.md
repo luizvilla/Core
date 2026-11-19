@@ -256,8 +256,13 @@ Twist pins for the trips: I1 on PA1 (Spin 30, mux1 input 1), I2 on PC1 (Spin 25,
 | 9 watchdog's external event rerouted (EECR1/2) | **was not caught** (10 ms, write took effect); read-back extended: caught on all four watchdogs, 0.04–0.38 ms |
 | 10 timer A OUTxR fault state, outputs on | write did not take effect |
 | 11 AWD1 channel changed (CFGR AWD1CH) | **was not caught**; read-back extended: caught, 0.12 ms |
-| 12 ADC conversions stopped (ADSTP) | **not caught** (10 ms); open, decision pending |
-| 13 a thread spins with `irq_lock()` | **no reset, no fault** after 20 s and over minutes in an earlier run: the zero-latency control task keeps feeding the watchdog while the kernel, USB and the run-time self-tests are stopped; open, decision pending |
+| 12 ADC conversions stopped (ADSTP) | **was not caught** (10 ms); now the read-back latches "watchdog blind": 29 µs |
+| 13 a thread spins with `irq_lock()` | **was: no reset, no fault** after 20 s and over minutes in an earlier run (the zero-latency control task kept feeding the watchdog while the kernel, USB and the run-time self-tests were stopped); now: reset, "the system work queue did not run for 20 ms" latched |
+| 14 a work item blocks forever on the system work queue | same |
+| 15 a work item spins on the system work queue | same |
+| 16 `data.stop()` with the outputs on | refused (-2); acquisition and outputs untouched |
+
+Decisions on 12 and 13 (Luiz Villa, 2026-11-19): `data.stop()` refused with the outputs on and the read-back checks the ADC converts; a kernel heartbeat from the self-test work with a 20 ms default timeout (a 1 ms thread at 5 ms was tried first and cost 3 CPU points and 3 µs of jitter in L0-TOV). Why 20 ms and the measured gaps (worst 10.63 ms under load): [kernel_liveness.md](kernel_liveness.md). Regression after the change: cases 2, 3, 4 unchanged; 6–12 as above.
 
 The first case 3 used `irq_lock()` and hung the board this way; it became case 13, and case 3 now masks with PRIMASK. Board discovery (`spoc/boards.py`) now has a write timeout: a hung Spin used to block it.
 

@@ -372,9 +372,8 @@ static size_t flash_cursor;
 static uint32_t flash_state = 0xFFFFFFFFU;
 static uint32_t ticks;
 
-static void runtime_fn(struct k_work *work)
+static void runtime_slice(void)
 {
-	ARG_UNUSED(work);
 	uint32_t c0 = DWT->CYCCNT;
 
 	if (safety_cpu_reg_test() != 0 || (inject & SAFETY_SELFTEST_INJECT_CPU)) {
@@ -429,6 +428,19 @@ static void runtime_fn(struct k_work *work)
 	uint32_t us = us_since(c0);
 	if (us > g_safety_selftest.runtime_max_us) {
 		g_safety_selftest.runtime_max_us = us;
+	}
+}
+
+/* Every 10 ms on the system work queue: one slice of the tests, and the kernel
+ * heartbeat the control task's watchdog feed checks (ADR 0009). After a failure
+ * the tests stop but the heartbeat goes on: the latched failure must not turn
+ * into a watchdog reset, whose reboot would clear it. */
+static void runtime_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	safety_supervision_kernel_alive();
+	if (g_safety_selftest.last_failure == 0U) {
+		runtime_slice();
 	}
 	k_work_schedule(&runtime_work, K_MSEC(10));
 }

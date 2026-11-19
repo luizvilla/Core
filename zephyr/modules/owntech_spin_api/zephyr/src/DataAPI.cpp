@@ -175,10 +175,19 @@ bool DataAPI::started()
 	return DataAPI::is_started;
 }
 
+/* Safety API hook (ADR 0009): 0 while an armed ADC watchdog needs the
+ * conversions, the PWM outputs being on. Weak: allowed without the Safety API. */
+extern "C" __attribute__((weak)) int data_safety_stop_allowed(void)
+{
+	return 1;
+}
+
 int8_t DataAPI::stop()
 {
 	if (DataAPI::is_started != true)
 		return -1;
+	if (!data_safety_stop_allowed())
+		return -2;
 
 	adc_stop();
 

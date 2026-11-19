@@ -18,6 +18,7 @@
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
  *   /Fault   wCase wIndex, xInject; rRc rDone rWritten rDetected rDetect_us rLastCase rReason rPc rTask
+ *            rKernelGap_us (longest gap between kernel heartbeats since boot)
  *            software fault injection (cases below); the case that ended in a reset is kept in TAMP BKP29
  *
  * A 100 us control task (TIM6) starts with the first PWM start, after the trips are armed: it feeds the
@@ -38,7 +39,10 @@
  *  11 first watchdog trip on AWD1: watched channel changed (ADC CFGR AWD1CH)
  *  12 first watchdog trip: its ADC's conversions stopped (ADSTP), restarted after 10 ms
  *  13 kernel starved: a thread spins with irq_lock() (BASEPRI); zero-latency interrupts, the control task
- *     among them, still run, while threads and the system workqueue (run-time self-tests) stop
+ *     among them, still run, while threads and the system workqueue (run-time self-tests, heartbeat) stop
+ *  14 a work item blocks forever on the system workqueue: the heartbeat and self-tests stop, threads run
+ *  15 a work item spins forever on the system workqueue (cooperative): no thread runs, interrupts do
+ *  16 data.stop() with the outputs on: rDetect_us holds its return code + 128 (-2 + 128 = refused)
  * Cases 7-12 report whether the change took effect (rWritten bit 0), whether a fault latched within 10 ms
  * (rDetected, rDetect_us) and restore the register. Cases 1-5 end in a reset; /Safety and rReason, rPc
  * then show the latched fault and rLastCase the case.
@@ -260,7 +264,7 @@ static int cal_apply_now(void)
 enum fault_case : uint8_t {
 	F_STACK = 1, F_HARDFAULT, F_IRQ_MASKED, F_TASK_STUCK, F_LOCKUP,
 	F_WILD_LOCKED, F_WILD_DAC, F_WILD_AWD, F_WILD_EEV, F_WILD_OUTR, F_WILD_AWDCH, F_ADC_STOP,
-	F_KERNEL_STARVED, F_LAST = F_KERNEL_STARVED
+	F_KERNEL_STARVED, F_WORK_BLOCKED, F_WORK_SPIN, F_DATA_STOP, F_LAST = F_DATA_STOP
 };
 
 #define BKP_CASE        (TAMP->BKP29R)   /* 0xFA0000nn: case nn was injected; read and wiped at boot */
@@ -270,7 +274,7 @@ static uint8_t fault_case_req, fault_index_req, last_case;
 static bool fault_inject, fault_done, fault_detected;
 static int8_t fault_rc;
 static uint8_t fault_written;
-static uint32_t fault_detect_us, fault_reason, fault_pc;
+static uint32_t fault_detect_us, fault_reason, fault_pc, kernel_gap_us;
 
 static void inject_work_fn(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(inject_work, inject_work_fn);
@@ -397,7 +401,7 @@ static void inject_work_fn(struct k_work *work)
 	struct safety_trip_regs r;
 	uint8_t c = fault_case_req;
 
-	if (c <= F_LOCKUP || c == F_KERNEL_STARVED) {
+	if (c <= F_LOCKUP || (c >= F_KERNEL_STARVED && c <= F_WORK_SPIN)) {
 		BKP_CASE = BKP_CASE_MAGIC | c;
 	}
 	switch (c) {
@@ -405,6 +409,17 @@ static void inject_work_fn(struct k_work *work)
 	case F_HARDFAULT:  run_victim(victim_undefined); return;
 	case F_IRQ_MASKED: __disable_irq(); for (;;) { } break;
 	case F_KERNEL_STARVED: (void)irq_lock(); for (;;) { } break;
+	case F_WORK_BLOCKED: {
+		static K_SEM_DEFINE(never, 0, 1);
+		fault_done = true;
+		(void)k_sem_take(&never, K_FOREVER);
+		return;
+	}
+	case F_WORK_SPIN: for (;;) { } break;
+	case F_DATA_STOP:
+		fault_detect_us = (uint32_t)(spin.data.stop() + 128);
+		fault_written = spin.data.started() ? 0U : 1U;
+		break;
 	case F_TASK_STUCK: task_stuck = true; return;
 	case F_LOCKUP:     __set_FAULTMASK(1U); __builtin_trap(); break;
 	case F_WILD_LOCKED:
@@ -492,6 +507,9 @@ static void fault_cb(enum thingset_callback_reason reason)
 		safety_supervision_get_record(&rec);
 		fault_reason = rec.reason;
 		fault_pc = rec.pc;
+		safety_liveness_t l;
+		safety_supervision_liveness(&l);
+		kernel_gap_us = l.kernel_gap_max_us;
 	} else if (reason == THINGSET_CALLBACK_POST_WRITE && fault_inject) {
 		fault_inject = false;
 		fault_rc = (int8_t)fault_request();
@@ -585,6 +603,7 @@ THINGSET_ADD_ITEM_UINT8(ID_FAULT, 0x9409, "rLastCase", &last_case, THINGSET_ANY_
 THINGSET_ADD_ITEM_UINT32(ID_FAULT, 0x940A, "rReason", &fault_reason, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_UINT32(ID_FAULT, 0x940B, "rPc", &fault_pc, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_BOOL(ID_FAULT, 0x940C, "rTask", &task_running, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT32(ID_FAULT, 0x940D, "rKernelGap_us", &kernel_gap_us, THINGSET_ANY_R, 0);
 
 /* ------------------------------------------------------------------ main */
 

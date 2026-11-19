@@ -712,25 +712,39 @@ void safety_trips_clear(void)
 	HRTIM1->sCommonRegs.IER |= flt_to_hw(m);
 }
 
-/* One trip path per control period, in turn: a threshold changed behind the
- * API is caught within SAFETY_WATCHDOG_TRIPS + SAFETY_COMPARATOR_TRIPS periods
- * (6 on Twist). Reading every path each period cost 2.6 us at 50 us (#27):
- * peripheral registers are slow to read. */
+/* Latches a read-back fault (once) and stops through a hardware fault. */
+static int read_back_fail(uint32_t detail)
+{
+	if (safety_supervision_get_fault() == SAFETY_FAULT_NONE) {
+		safety_supervision_latch(SAFETY_FAULT_TRIP, detail);
+		safety_emergency_stop();
+	}
+	return -1;
+}
+
+/* One check per control period, in turn, each reading two registers: peripheral
+ * registers are slow to read (every path each period cost 2.6 us at 50 us, #27).
+ * Turns, for W watchdog and C comparator trips (W = 4, C = 2 on Twist: a change
+ * behind the API is caught within 2W + C = 10 periods):
+ *   [0, W)       watchdog i: window (TRx) and enable (CFGR AWD1 channel / AWDxCR);
+ *   [W, 2W)      watchdog i: the external event carrying it to its fault input
+ *                (EECR1/2, not lockable) and its ADC converting while the outputs are on;
+ *   [2W, 2W + C) comparator i: DAC threshold (DOR, DHR). */
 int safety_trips_check(void)
 {
 	static size_t turn;
 	if (!armed) {
 		return 0;
 	}
-	size_t total = (size_t)SAFETY_WATCHDOG_TRIPS + (size_t)SAFETY_COMPARATOR_TRIPS;
-	if (total == 0U) {
+	const size_t W = (size_t)SAFETY_WATCHDOG_TRIPS, C = (size_t)SAFETY_COMPARATOR_TRIPS;
+	if (W + C == 0U) {
 		return 0;
 	}
 	size_t k = turn;
-	turn = (turn + 1U) % total;
+	turn = (turn + 1U) % (2U * W + C);
 #if SAFETY_WATCHDOG_TRIPS > 0
-	for (size_t i = k; i < SAFETY_WATCHDOG_TRIPS && i == k; i++) {
-		const struct watchdog_trip *w = &awds[i];
+	if (k < W) {
+		const struct watchdog_trip *w = &awds[k];
 		ADC_TypeDef *a = adc_of(w->adc);
 		uint32_t tr = (w->awd == 1U) ? (a->TR1 & (ADC_TR1_HT1 | ADC_TR1_LT1)) :
 			      (w->awd == 2U) ? a->TR2 : a->TR3;
@@ -741,32 +755,32 @@ int safety_trips_check(void)
 					    (((uint32_t)w->channel << ADC_CFGR_AWD1CH_Pos) | ADC_CFGR_AWD1SGL | ADC_CFGR_AWD1EN)) :
 			  (w->awd == 2U) ? ((a->AWD2CR & (1U << w->channel)) != 0U) :
 			  ((a->AWD3CR & (1U << w->channel)) != 0U);
-		/* The external event carrying the watchdog to its fault input is not lockable (EECR1/2). */
-		bool eev = eev_field(w->flt) == awd_eev[i];
-		if (!en || !eev || tr != (((uint32_t)w->hi << hshift) | w->lo)) {
-			if (safety_supervision_get_fault() == SAFETY_FAULT_NONE) {
-				safety_supervision_latch(SAFETY_FAULT_TRIP, 1U << 9 | i);
-				safety_emergency_stop();
-			}
-			return -1;
+		if (!en || tr != (((uint32_t)w->hi << hshift) | w->lo)) {
+			return read_back_fail(1U << 9 | k);
 		}
+		return 0;
+	}
+	if (k < 2U * W) {
+		size_t i = k - W;
+		const struct watchdog_trip *w = &awds[i];
+		if (eev_field(w->flt) != awd_eev[i]) {
+			return read_back_fail(1U << 9 | i);
+		}
+		/* The watchdog sees only what the ADC converts: with the outputs on, it must be converting.
+		 * OENR is read only when the ADC is stopped. */
+		if ((adc_of(w->adc)->CR & ADC_CR_ADSTART) == 0U && (HRTIM1->sCommonRegs.OENR & 0xFFFU) != 0U) {
+			return read_back_fail(SAFETY_TRIP_ADC_STOPPED | i);
+		}
+		return 0;
 	}
 #endif
 #if SAFETY_COMPARATOR_TRIPS > 0
-	for (size_t i = k - (size_t)SAFETY_WATCHDOG_TRIPS; k >= (size_t)SAFETY_WATCHDOG_TRIPS && i < SAFETY_COMPARATOR_TRIPS &&
-	     i == k - (size_t)SAFETY_WATCHDOG_TRIPS; i++) {
-		const struct comparator_trip *t = &trips[i];
-		if (!(armed_flt_mask & (1U << (t->flt - 1U)))) {
-			continue;
-		}
-		if (dac_dor(t->dac, t->dac_channel) != dac_now[i] || *dac_dhr(t->dac, t->dac_channel) != dac_now[i]) {
-			/* A threshold changed behind the Safety API's back (ADR 0009). */
-			if (safety_supervision_get_fault() == SAFETY_FAULT_NONE) {
-				safety_supervision_latch(SAFETY_FAULT_TRIP, 1U << 8 | i);
-				safety_emergency_stop();
-			}
-			return -1;
-		}
+	size_t i = k - 2U * W;
+	const struct comparator_trip *t = &trips[i];
+	if ((armed_flt_mask & (1U << (t->flt - 1U))) &&
+	    (dac_dor(t->dac, t->dac_channel) != dac_now[i] || *dac_dhr(t->dac, t->dac_channel) != dac_now[i])) {
+		/* A threshold changed behind the Safety API's back (ADR 0009). */
+		return read_back_fail(1U << 8 | i);
 	}
 #endif
 	return 0;
@@ -972,9 +986,25 @@ int safety_trips_test_regs(bool watchdog, int index, struct safety_trip_regs *ou
 	return -1;
 }
 
+/* DataAPI::stop() hook: the ADC watchdogs need the conversions while the outputs are on. */
+int data_safety_stop_allowed(void)
+{
+	return !(armed && SAFETY_WATCHDOG_TRIPS > 0 && (HRTIM1->sCommonRegs.OENR & 0xFFFU) != 0U);
+}
+
 int safety_trips_describe(uint32_t detail, char *buf, size_t size)
 {
 	int n = 0;
+	if (detail & SAFETY_TRIP_ADC_STOPPED) {
+		uint32_t i = detail & 0xFFU;
+		const char *name = "?";
+#if SAFETY_WATCHDOG_TRIPS > 0
+		if (i < SAFETY_WATCHDOG_TRIPS) {
+			name = awds[i].sensor;
+		}
+#endif
+		return snprintk(buf, size, "%s watchdog blind: its ADC stopped converting with the outputs on", name);
+	}
 	if (detail & 0x300U) {
 		uint32_t i = detail & 0xFFU;
 		bool comp = (detail & 0x100U) != 0U;

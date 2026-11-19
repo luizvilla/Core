@@ -142,6 +142,25 @@ void safety_supervision_latch(safety_fault_t fault, uint32_t detail);
  *  (| SAFETY_TRIP_SOFTWARE_HIGH for the high limit). */
 #define SAFETY_TRIP_SOFTWARE       0x400U
 #define SAFETY_TRIP_SOFTWARE_HIGH  0x080U
+/** Detail of a SAFETY_FAULT_TRIP raised by the read-back: a watchdog's ADC stopped with the outputs on (| index). */
+#define SAFETY_TRIP_ADC_STOPPED    0x800U
+/** Detail of a SAFETY_FAULT_WATCHDOG: the system work queue did not run for CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US
+ *  (threads starved, e.g. a thread spinning under irq_lock(), or the work queue blocked). */
+#define SAFETY_WATCHDOG_KERNEL     1U
+
+/** Kernel liveness, measured since boot (ADR 0009). */
+typedef struct
+{
+    uint32_t kernel_gap_max_us;   /**< longest gap between two kernel heartbeats (run-time self-test work, 10 ms) */
+    uint32_t kernel_timeout_us;   /**< CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US */
+} safety_liveness_t;
+
+/** @brief Kernel liveness figures since boot. */
+void safety_supervision_liveness(safety_liveness_t *out);
+
+/** @brief Kernel heartbeat, from the run-time self-test work: the control task feeds the watchdog only while it
+ *         is recent. */
+void safety_supervision_kernel_alive(void);
 
 /** @brief As safety_supervision_latch(), and records a value with it (the reading, as float bits). */
 void safety_supervision_latch_value(safety_fault_t fault, uint32_t detail, uint32_t value);

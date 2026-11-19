@@ -191,6 +191,35 @@ void safety_supervision_checkpoint(uint32_t cp)
 	checkpoints |= cp;
 }
 
+/* ---- Kernel liveness (ADR 0009, #23 C10) ------------------------------------
+ * The control task runs at zero latency: irq_lock() in a thread does not stop
+ * it, so it would feed the watchdog while no thread runs. The run-time
+ * self-test work (system work queue, every 10 ms) stamps the cycle counter;
+ * the feed refuses when the stamp is older than
+ * CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US. A thread of its own at 1 ms cost
+ * about 3 % of the CPU and 3 us of task-start jitter (L0-TOV, 2026-11-19):
+ * the work queue already runs, and its stopping also stops the self-tests.
+ * Without the run-time self-tests (development mode only) nothing stamps and
+ * the check stays off. */
+static volatile uint32_t kernel_stamp;        /* DWT cycles at the last stamp, 0 before the first */
+static volatile uint32_t kernel_gap_max_cyc;
+static uint32_t kernel_timeout_cyc = 0xFFFFFFFFU;   /* set when a control task attaches */
+
+void safety_supervision_kernel_alive(void)
+{
+	uint32_t now = DWT->CYCCNT, last = kernel_stamp;
+	if (last != 0U && now - last > kernel_gap_max_cyc) {
+		kernel_gap_max_cyc = now - last;
+	}
+	kernel_stamp = (now != 0U) ? now : 1U;
+}
+
+void safety_supervision_liveness(safety_liveness_t *out)
+{
+	out->kernel_gap_max_us = kernel_gap_max_cyc / (SystemCoreClock / 1000000U);
+	out->kernel_timeout_us = CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US;
+}
+
 /* Program flow (H.2 1.3): fed only when both checkpoints of the period were
  * passed; a period that skipped one lets the watchdog reset the MCU.
  * Interrupt rate (H.2 2): three periods in a row shorter than half the declared
@@ -199,6 +228,19 @@ void safety_supervision_checkpoint(uint32_t cp)
 void safety_supervision_feed(void)
 {
 	uint32_t now = DWT->CYCCNT;
+
+	if (critical_feeder && kernel_stamp != 0U) {
+		if (now - kernel_stamp > kernel_timeout_cyc) {
+			/* The work queue did not run: record why, stop the outputs, let the watchdog reset. */
+			if (latched == SAFETY_FAULT_NONE) {
+				safety_supervision_latch(SAFETY_FAULT_WATCHDOG, SAFETY_WATCHDOG_KERNEL);
+				safety_emergency_stop();
+			}
+			checkpoints = 0U;
+			last_period_cyc = now;
+			return;
+		}
+	}
 
 	if (critical_feeder && period_cycles != 0U && last_period_cyc != 0U) {
 		if (now - last_period_cyc < period_cycles / 2U) {
@@ -266,6 +308,7 @@ uint32_t safety_supervision_watchdog_timeout_us(void)
 void safety_supervision_feeder_attach(uint32_t period_us)
 {
 	period_cycles = period_us * (SystemCoreClock / 1000000U);
+	kernel_timeout_cyc = CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US * (SystemCoreClock / 1000000U);
 	last_period_cyc = 0U;
 	fast_periods = 0U;
 	iwdg_timing_for_period(period_us);
@@ -386,6 +429,10 @@ int safety_supervision_describe(char *buf, size_t size)
 	case SAFETY_FAULT_NONE:
 		return snprintk(buf, size, "no fault");
 	case SAFETY_FAULT_WATCHDOG:
+		if (BKP_REASON == SAFETY_WATCHDOG_KERNEL) {
+			return snprintk(buf, size, "watchdog: the system work queue did not run for %u ms (threads starved "
+					"or blocked); clear: clearFault()", (unsigned)(CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US / 1000U));
+		}
 		return snprintk(buf, size, "watchdog: the control task stopped; clear: clearFault()");
 	case SAFETY_FAULT_FATAL_ERROR:
 		return snprintk(buf, size, "fatal error %u at pc 0x%08x; clear: clearFault()", BKP_REASON, BKP_PC);

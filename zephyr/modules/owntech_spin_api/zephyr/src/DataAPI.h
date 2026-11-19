@@ -256,10 +256,10 @@ public:
 	/**
 	 * @brief Stops the module if it is started.
 	 *
-	 * @return `0` if everything went well, `-1` if there was an error.
-	 *         
-	 * 		   Error is triggered when trying to stop Data API while it was not 
-	 * 		   started.
+	 * @return `0` if everything went well, `-1` if Data API was not started,
+	 *         `-2` if the Safety API refuses: an armed ADC watchdog protects a
+	 *         limit with the PWM outputs on, and it sees only what the ADC
+	 *         converts. Stop the PWM first (ADR 0009).
 	 */
 	int8_t stop();
 

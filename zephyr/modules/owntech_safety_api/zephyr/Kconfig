@@ -30,6 +30,25 @@ config OWNTECH_SAFETY_RUNTIME_SELFTEST
 		Can be turned off only in development mode (safety-mode =
 		"development" in app.overlay): any other build fails.
 
+config OWNTECH_SAFETY_KERNEL_TIMEOUT_US
+	int "Longest time without the system work queue running before the watchdog resets the board (us)"
+	default 20000
+	range 15000 1000000
+	depends on OWNTECH_SAFETY_SUPERVISION
+	help
+		ADR 0009: the control task runs at zero latency and keeps
+		running when a thread spins with interrupts locked (irq_lock),
+		which stops every thread: communication, the application's
+		background tasks and the run-time self-tests. The run-time
+		self-test work stamps a heartbeat every 10 ms (longest gap
+		measured on the Spin under load: 11 ms); when the stamp is older
+		than this, the control task latches a watchdog fault, stops the
+		outputs and stops feeding the watchdog (reset). Set it from the
+		application's process safety time (docs/safety/kernel_liveness.md)
+		and above the longest gap measured on the target
+		(safety_supervision_liveness()). Off without the run-time
+		self-tests (development mode only).
+
 config OWNTECH_SAFETY_FROZEN_PERIODS
 	int "Control periods with an unchanged current reading before a sensor counts as frozen"
 	default 2000

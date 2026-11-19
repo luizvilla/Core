@@ -213,8 +213,24 @@ Fixes 1.4c–e, committed separately (each touches its own probed block):
 - S1 (information): the old software check on six sensors costs 10.5 µs per period (14.5 µs safety in total), B1 CPU +8.6 pts and jitter +5.2 µs at 50 µs. It is the next speed-up, in a later session.
 - Still open at 50 µs: task-start jitter and CPU load in S0 exceed their provisional limits.
 
+### 2026-11-19, after C10 (#23): read-back extended, kernel heartbeat (campaign `f7ec35f-dirty_191203`)
+
+C10 added to the read-back the watchdogs' event routing (EECR1/2), the AWD1 channel and "ADC converting with the outputs on", and to the feed a kernel heartbeat check. Three campaigns on the CUT Spin of the SPOC bench:
+
+| 100 µs task, S0 | B0 | 11-15 | C10 first (extra reads in each turn, 1 ms heartbeat thread) | C10 final (own turns, work-queue heartbeat) | Limit |
+|---|---|---|---|---|---|
+| safety cost per period, worst | — | 4.65 µs | 5.51 µs FAIL | 4.74 µs PASS | ≤ 5 µs |
+| read-back block, mean | — | 1.31 µs | 1.86 µs | 1.22 µs | |
+| feed block, mean | — | 0.91 µs | 1.22 µs | 1.08 µs | |
+| CPU taken from the main thread | 32.3 % | 36.0 % | 39.3 % FAIL | 35.8 % PASS | ≤ +5 pts |
+| worst task-start deviation | 7.89 µs | 7.54 µs | 11.02 µs FAIL | 10.35 µs FAIL | ≤ +2 µs |
+
+- An experiment build without the heartbeat thread (results in the scratchpad, not a campaign) gave CPU 36.0 % and jitter 7.38 µs: the 1 ms thread cost about 3 points and 3 µs. It was replaced by a stamp from the run-time self-test work.
+- The remaining jitter excess at 100 µs (+2.46 µs) is about the 1.88 µs all-interrupts-off RAM self-test block plus interrupt entry. Whether it lands on the control interrupt within the 4 s window depends on the phase between the 10 ms work and the task: worst-case figures of the same kind swung by 2–3 µs between today's runs (S0 at 50 µs: 13.25, 12.86, 10.39, 10.09 µs). Joins the open item below.
+
 ### Open items (to investigate later)
 
 - **Read-back detection time (1.4e, `a2d1ce9`).** A threshold changed behind the API is now caught within N control periods instead of 1 (N = armed trip paths: 6 on Twist, 300 µs at 50 µs). To decide whether N periods is acceptable as the declared detection time, or whether the read-back needs another scheme (for example all paths in one period at a lower rate, or a cheaper register read). Until then the declared value is N periods.
 - **Old software check on six sensors (S1):** 10.5 µs per period; speed-up planned for a later session.
 - **Task-start jitter and CPU load at 50 µs (S0):** +3.9 µs and +6.9 points against B0, above their provisional limits.
+- **Task-start jitter at 100 µs (2026-11-19):** +2.46 µs in the last two campaigns, passing in the earlier one and in the experiment build; likely the RAM self-test block (all interrupts off, 1.88 µs) meeting the control interrupt. A longer window or a count of late starts would judge it better than one worst case over 4 s; or shorten the block.
