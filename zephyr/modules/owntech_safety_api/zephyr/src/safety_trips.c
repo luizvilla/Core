@@ -317,7 +317,10 @@ static uint32_t eev_field(uint8_t n)
 #if SAFETY_WATCHDOG_TRIPS > 0
 #endif
 
-#define AWDFILT_TWO   (1U << ADC_TR1_AWDFILT_Pos)   /* AWD1: two consecutive conversions out of the window */
+/* No AWD1 filter (AWDFILT = 0). With "two consecutive" (AWDFILT = 1), AWD1 watching one channel of a
+ * multi-channel sequence never flagged: measured on the SPOC bench (L0-TRP, 2026-11-19), I1_LOW at 250 mV
+ * against a 300 mV low bound, ADC1 converting ch2, ch1, ch9; it tripped at once with the filter cleared. The
+ * arming self-test, which converts the one channel alone, passed either way. AWD2 and AWD3 have no filter. */
 #define ADC_WAIT_US   100U
 
 static ADC_TypeDef *adc_of(uint8_t n)
@@ -331,10 +334,10 @@ static uint32_t awd_flag(uint8_t k)
 }
 
 #if SAFETY_WATCHDOG_TRIPS > 0
-static void awd_window(ADC_TypeDef *a, uint8_t k, uint32_t lo, uint32_t hi, bool filter)
+static void awd_window(ADC_TypeDef *a, uint8_t k, uint32_t lo, uint32_t hi)
 {
 	if (k == 1U) {
-		a->TR1 = (hi << ADC_TR1_HT1_Pos) | (filter ? AWDFILT_TWO : 0U) | lo;
+		a->TR1 = (hi << ADC_TR1_HT1_Pos) | lo;   /* AWDFILT = 0, see above */
 	} else if (k == 2U) {
 		a->TR2 = (hi << ADC_TR2_HT2_Pos) | lo;
 	} else {
@@ -372,7 +375,7 @@ static void eev_fault_config(uint8_t flt)
  * off, with the given window; @return the AWD flag after it. */
 static bool convert_once(ADC_TypeDef *a, const struct watchdog_trip *w, uint32_t lo, uint32_t hi)
 {
-	awd_window(a, w->awd, lo, hi, false);
+	awd_window(a, w->awd, lo, hi);
 	a->ISR = awd_flag(w->awd) | ADC_ISR_EOC | ADC_ISR_EOS | ADC_ISR_OVR;
 	a->CR |= ADC_CR_ADSTART;
 	for (uint32_t i = 0; i < ADC_WAIT_US && !(a->ISR & ADC_ISR_EOC); i++) {
@@ -407,7 +410,7 @@ static int awd_self_test(ADC_TypeDef *a, const struct watchdog_trip *w)
 	k_busy_wait(2);
 	bool quiet = !still && wait_flag(w->flt, false, 20);
 
-	awd_window(a, w->awd, w->lo, w->hi, true);
+	awd_window(a, w->awd, w->lo, w->hi);
 	a->SQR1 = sqr1;
 	a->CFGR = cfgr;
 	a->ISR = awd_flag(w->awd) | ADC_ISR_EOC | ADC_ISR_EOS | ADC_ISR_OVR;
@@ -473,7 +476,7 @@ void adc_safety_before_start(uint8_t adc_num)
 		if (armed) {
 			/* Data acquisition restarted with the trips locked (PWM may run):
 			 * reprogram the window only; a self-test would trip for real. */
-			awd_window(a, w->awd, w->lo, w->hi, true);
+			awd_window(a, w->awd, w->lo, w->hi);
 			continue;
 		}
 		eev_fault_config(w->flt);
@@ -746,7 +749,7 @@ int safety_trips_check(void)
 	if (k < W) {
 		const struct watchdog_trip *w = &awds[k];
 		ADC_TypeDef *a = adc_of(w->adc);
-		uint32_t tr = (w->awd == 1U) ? (a->TR1 & (ADC_TR1_HT1 | ADC_TR1_LT1)) :
+		uint32_t tr = (w->awd == 1U) ? (a->TR1 & (ADC_TR1_HT1 | ADC_TR1_LT1 | ADC_TR1_AWDFILT)) :
 			      (w->awd == 2U) ? a->TR2 : a->TR3;
 		uint32_t hshift = (w->awd == 1U) ? ADC_TR1_HT1_Pos : ADC_TR2_HT2_Pos;
 		/* AWD1 watches one channel, selected in CFGR: the selection is part of the set-up. */
@@ -960,7 +963,7 @@ int safety_trips_test_regs(bool watchdog, int index, struct safety_trip_regs *ou
 			ADC_TypeDef *a = adc_of(w->adc);
 			out->flt = w->flt;
 			out->awd_tr = (w->awd == 1U) ? &a->TR1 : (w->awd == 2U) ? &a->TR2 : &a->TR3;
-			out->awd_tr_mask = (w->awd == 1U) ? (ADC_TR1_HT1 | ADC_TR1_LT1) : 0xFFFFFFFFU;
+			out->awd_tr_mask = (w->awd == 1U) ? (ADC_TR1_HT1 | ADC_TR1_LT1 | ADC_TR1_AWDFILT) : 0xFFFFFFFFU;
 			out->awd = w->awd;
 			out->adc_cr = &a->CR;
 			out->adc_cfgr = &a->CFGR;

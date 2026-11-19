@@ -74,7 +74,7 @@ struct safety_trip_regs {
     uint8_t flt;                 /**< HRTIM fault input, 1-6 */
     uint8_t comp;                /**< COMPx (comparator trip), 0 otherwise */
     volatile uint32_t *dac_dhr;  /**< comparator threshold: DAC DHR12Rx */
-    volatile uint32_t *awd_tr;   /**< watchdog window: ADC TRx (AWD1: HT1|LT1 fields only) */
+    volatile uint32_t *awd_tr;   /**< watchdog window: ADC TRx (AWD1: HT1, LT1 and AWDFILT fields) */
     uint32_t awd_tr_mask;        /**< bits of *awd_tr that hold the window */
     uint8_t awd;                 /**< watchdog number, 1-3 (watchdog trip) */
     volatile uint32_t *adc_cr;   /**< ADC CR (watchdog trip) */
