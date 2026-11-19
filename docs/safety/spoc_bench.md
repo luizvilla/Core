@@ -9,7 +9,7 @@ Issues: luizvilla/Core#26 (bench), luizvilla/Core#23 (generic firmware and L0 ru
 | Item | Identification | Role |
 |---|---|---|
 | CUT Spin | USB 2fe3:01ff | Card under test: runs the test firmware |
-| MUX Spin | USB 2fe3:0102 | Routes CUT pins to the four scope channels; also the independent injector (TP5) |
+| MUX Spin | USB 2fe3:0100 (Core-MUX from the branch; 0x0102 before the reflash of 2026-11-19) | Routes CUT pins to the four scope channels; also the independent injector (TP5) |
 | Rigol MHO984 | USB 1ab1:0452, `/dev/usbtmc0` | Measures; verdicts come from its own measurements |
 
 Ports are found by USB product ID, never by a fixed `ttyACM` number. Wiring: ADR 0009, implementation note of 2026-11-17.
@@ -115,3 +115,30 @@ Spectrum of live screen waveforms (1000 points at 1 ms/div, scope running), PA8 
 | PA8 → ch4, PWM on | CH4 | −1.0–1.0 V | 8 / 3 | 100, 200, 300 Hz |
 
 No 1 kHz on any route. The 100 Hz harmonics are mains pickup on a floating input: nothing drives the BNCs, and the path from the CUT pin to the BNC is open somewhere. Driver finding: `single()` followed by `waveform()` returned the same record four times in a row (identical samples); waveforms read while the scope runs do change. To fix in C2 before any capture-based verdict.
+
+### 2026-11-19, probing the board: the MUX firmware was the fault
+
+Hand probe on scope CH2 (×10, DC, 1 MΩ), ground on the SPOC ground. Spin pin numbers from `GpioHAL::getPinNumber()`: pin 12 = PA8; on the MUX Spin pin 24 = PC0 (mux1 enable of CH1, active low), pins 29, 30, 51, 52 = PA0–PA3 (CH1 select S0–S3).
+
+| Step | Point | Reading | Meaning |
+|---|---|---|---|
+| 1 | CUT pin 12, PWM 1 kHz 0.5 | 1000 Hz, 50 %, 0.03–3.32 V | the CUT drives PA8 (a first reading of ±0.35 V was a loose ground clip) |
+| 2 | TP2 | flat 0 V | TP2 is CH1's ground, as in ADR 0009 |
+| 3 | TP1, PA8 routed to CH1 | flat 3.3 V on all 14 inputs of mux1, and with every mux disabled | the mux output does not follow the select |
+| 4 | MUX pin 24, route on/off ×3 | 0 V in both states | the enable is not driven (setup should leave it at 3.3 V when disabled) |
+| 5 | MUX pin 52, input 0/8 ×3 | 0 V in both states | the select is not driven |
+
+The firmware first found on the MUX (USB 2fe3:0102) answered ThingSet and read routes back as set, but drove none of the probed pins. Reflashed with Core-MUX from `owntech-foundation/SPOC_Software` branch `Core-MUX` (`295a3f6`, Spin 1.2.0, built with PlatformIO 6.2 in a scratch worktree, uploaded by board ID 5843500300470031): the board now enumerates as 2fe3:0100.
+
+After the reflash:
+
+| Point | Reading |
+|---|---|
+| MUX pin 52, input 0/8 ×2 | 0 V / 3.39 V |
+| BNC1 (scope CH1), PA8 routed, live waveform | 1 kHz square, 0.29 V / 3.48 V, 50 %; harmonics 3, 5, 7 kHz; overshoot −0.79 / +4.79 V (divider not trimmed) |
+
+**The chain CUT → MUX → BNC → scope works.** Open points:
+- **`:MEASure` is not reliable yet:** on the same signal it gave 250 Hz and 333 Hz (read 1.2 s after each route change), while the waveform shows 1 kHz. To understand before any verdict uses it (settling after a route change, measurement thresholds, the trigger).
+- **CH1 divider trim** (overshoot): C7.
+- `single()` stale record (above).
+- The old 0x0102 build is lost: no binary was kept.
