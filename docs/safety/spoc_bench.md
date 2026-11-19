@@ -162,4 +162,13 @@ The wrong values are exact fractions of the true ones (500 Hz with duty 0.25, 20
 
 Driver (C2 follow-up): `set_acquire()` reads its setting back; `measure_series()` returns median, min and max of n readings, so a verdict can check the spread.
 
-Not decided: trim CH1 first and measure again; set absolute thresholds (needs the MHO900 programming guide: not on this machine); or take timing from the waveform, as Core4's `analysis.py` does, which departs from "verdicts come from the scope's own measurements" (ADR 0009, #23).
+**Cause: the BNC cables.** Luiz Villa changed the cables between SPOC and scope; nothing else changed. Same signal, 500 µs/div:
+
+| Setting | FREQuency (10 readings) | PDUTy | VTOP / VBASe |
+|---|---|---|---|
+| NORMal, running | 1000 Hz (one 999.5) | 0.5 (one 0.50025) | 3.37–3.39 / 0.01 V |
+| NORMal, stopped single captures | 1000 Hz ×10 | 0.5 ×10 | |
+| HRESolution, running | 999.5–1000 Hz | 0.5–0.50025 | 3.39 / −0.01 V |
+| HRESolution, stopped single captures | 999.5–1000 Hz | 0.5–0.50025 | |
+
+The overshoot and the wandering VTOP/VBASe came from the cables, not from the divider trim; the scope's thresholds then missed edges. With good cables the scope's own measurements are usable in either mode, and verdicts stay on them (ADR 0009, #23). The bench README (C8) names the cables to use and the calibration (C7) checks them: a campaign stops if VTOP/VBASe spread or a timing measurement is out of tolerance.

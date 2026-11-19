@@ -190,11 +190,10 @@ class RigolScope:
         """NORMal, or HRESolution: each screen point is the average of the
         raw samples behind it (removes PWM ripple from DC levels).
 
-        Use HRESolution for the scope's own timing measurements: in NORMal
-        mode, on the SPOC bench (1 kHz PWM, 1 ms/div, 2 MSa/s), FREQuency
-        read 250, 333, 500 or 1000 Hz and PDUTy 0.17 to 0.83 from one
-        reading to the next; in HRESolution, 999.5 to 1000.5 Hz and
-        0.499 to 0.500 (docs/safety/spoc_bench.md, 2026-11-19)."""
+        On the SPOC bench, wrong FREQuency/PDUTy readings (edges missed,
+        results an exact fraction of the true value) came from bad BNC
+        cables, not from the acquisition mode: with good cables both modes
+        read 1 kHz / 0.5 every time (docs/safety/spoc_bench.md, 2026-11-19)."""
         self.write(f":ACQuire:TYPE {kind}")
         got = self.query(":ACQuire:TYPE?").strip().upper()
         if not kind.upper().startswith(got):
