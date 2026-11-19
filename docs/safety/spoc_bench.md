@@ -37,6 +37,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
   - self-injection uses DAC2_CH1 on PA6 (Spin pin 34), reserved through the allocation; the test build refuses to run if the reservation changes any trip against the production manifest (then inject from PA5, DAC1_CH2). PA6 is unused on Twist 1.4.2, Ownverter 1.0.0 and 1.1.0;
   - boards: Twist 1.4.2 first, then Ownverter 1.1.0. O2 is deprecated: not tested;
   - the CUT stays on the safety firmware between campaigns; the firmware has a 1 kHz calibration output on PA8 for L0-CAL.
+- **2026-11-19, #23 C11 sources** (Luiz Villa): arming needs the current pins whose low bound is an ADC watchdog held at 0 A (a floating pin fails the self-test); two pins on each board (Twist I1_LOW, I2_LOW; Ownverter 1.1.0 I1_LOW, I3_LOW) and the bench has two independent sources (CUT DAC on CH1/CH2, MUX injector on CH3). Cases on those current limits run on the production build, the two pins held, one of them stepped. Cases on the voltage watchdogs (Twist V_HIGH, V1_LOW high; Ownverter V_HIGH) need a third source and run on a **second build per board**: an overlay widens only the held current limits' low windows so their pins may float; the voltage path under test keeps its production threshold, and the runner refuses to judge unless every other entry of that build's protection manifest matches production. A stated departure, recorded with each such case.
 
 ## Plan and commits
 
@@ -65,7 +66,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 |---|---|---|
 | C9 | `feat(test): generic safety test firmware, ThingSet control` | `tests/firmware/safety_l0`: arm, PWM, report and clear faults, any shield |
 | C10 | `feat(test): software fault injection in the generic firmware` | Stack overflow, hard fault, interrupts masked, watchdog starved, wild register writes after locking |
-| C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped |
+| C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; current-limit cases on the production build (two pins held), voltage-watchdog cases on a second build with the held limits' low windows widened, manifest checked against production |
 | C12 | `test(safety): CPU-dead cases from the MUX injector` | Injection on TP5 while the CUT is dead; unblocks L0-SUP-08.c |
 | C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service |
 | C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once |
