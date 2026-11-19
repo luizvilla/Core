@@ -91,7 +91,7 @@ Stock Core-CUT drives PA8 at 1 kHz, duty 0.5; the MUX routes PA8 to CH1; CH1 is 
 
 The chain answers end to end, but CH1 does not show the PWM. To check next, in this order: CH1's BNC cable goes to SPOC BNC1; CH1 with the mux disabled, then with PA8 routed and the PWM off, then on; `CutPwmController.read_state()` after the command; the channel's divider trim (Core4 trimming flow). The diagnostic run that would have done this failed: the scope stopped answering after the unknown query above.
 
-The scope's bandwidth and maximum sample rate against the 31 ns verdict are still to read (programming guide or the scope's About page).
+The scope's bandwidth and sample rate against the 31 ns verdict: see 2026-11-19, C8.
 
 ### 2026-11-19, smoke test continued: nothing reaches the BNCs
 
@@ -212,3 +212,5 @@ Wiring done by Luiz Villa: MUX Spin pin 2 (PB12) and pin 4 (PB13) to TP5 through
 Frequency 1000 Hz (spread ≤ 0.2 Hz) and duty 0.5 (spread ≤ 0.0001) on every channel, CH2's longer cable included. CH3 and CH4 lead CH1 by ~4 ns; the cause (CH1's node carries the TP1–TP3 wire and CH2's divider, or cable lengths) is not separated. A latency verdict read across two channels corrects by this skew.
 
 C8: photographs of the board and the bench in `tests/l0/spoc_cal/README.md` (two of the three photos taken; the third shows a laptop screen and is left out).
+
+**Scope against the 31 ns comparator verdict (#26).** Front panel (bench photograph): MHO984, 800 MHz, 4 GSa/s, 12-bit. 800 MHz gives a rise time of ~0.44 ns (0.35/BW): enough for a 31 ns verdict. The sample rate in use follows the timebase and memory depth: 1 GSa/s at 20 ns/div with the default 10 k points (1 ns per sample, ~3 % of 31 ns). A latency case sets the timebase so that the record runs at ≥ 1 GSa/s, and corrects by the campaign's skew (L0-CAL-07). The SPOC path adds its own delay (mux, divider): the 31 ns verdict itself still uses direct probes (ADR 0009).
