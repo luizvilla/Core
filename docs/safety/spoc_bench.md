@@ -162,7 +162,7 @@ The wrong values are exact fractions of the true ones (500 Hz with duty 0.25, 20
 
 Driver (C2 follow-up): `set_acquire()` reads its setting back; `measure_series()` returns median, min and max of n readings, so a verdict can check the spread.
 
-**Cause: the BNC cables.** Luiz Villa changed the cables between SPOC and scope; nothing else changed. Same signal, 500 µs/div:
+**Cause: the BNC cables.** Luiz Villa replaced the 1 m BNC cables between SPOC and scope with 30 cm ones; nothing else changed. Use the 30 cm cables. Same signal, 500 µs/div:
 
 | Setting | FREQuency (10 readings) | PDUTy | VTOP / VBASe |
 |---|---|---|---|
@@ -172,3 +172,21 @@ Driver (C2 follow-up): `set_acquire()` reads its setting back; `measure_series()
 | HRESolution, stopped single captures | 999.5–1000 Hz | 0.5–0.50025 | |
 
 The overshoot and the wandering VTOP/VBASe came from the cables, not from the divider trim; the scope's thresholds then missed edges. With good cables the scope's own measurements are usable in either mode, and verdicts stay on them (ADR 0009, #23). The bench README (C8) names the cables to use and the calibration (C7) checks them: a campaign stops if VTOP/VBASe spread or a timing measurement is out of tolerance.
+
+### 2026-11-19, C5 and C6: the injector
+
+Firmware: `owntech-foundation/SPOC_Software`, branch `mux-injector` (from `Core-MUX` `295a3f6`), **pinned at `b500a4e5d37df710018dac232c65e7b8a362d959`**. ThingSet `/Mux/Inj`: `wSource` (0 off, 1 DAC, 2 GPIO), `wLevel_mV`, `wGpio`, `xApply`; read back `rSource`, `rLevel_mV`, `rVref_mV`, `rGpio`. Host side: `tests/common/spoc/injector.py`.
+
+Wiring done by Luiz Villa: MUX Spin pin 2 (PB12) and pin 4 (PB13) to TP5 through their resistors.
+
+| Check | Result |
+|---|---|
+| DAC full scale (`rVref_mV`) | 2048 mV: VREFBUF is on at 2.048 V on the MUX Spin; levels above that need the GPIO step |
+| DAC level at pin 2 / at TP5 (CH3), 0–2000 mV | within ~20 mV of the command (0.52, 1.02, 1.52, 2.02 V for 500…2000 mV) |
+| GPIO at pin 4 / TP5, low and high ×2 | 0.03 / 3.30 V; TP5 0.01 / 3.34 V |
+| Rising edge at pin 4 (1 GSa/s, 20 ns/div) | under ~6 ns (scope RTIMe 1.6 ns, below what 1 GSa/s resolves) |
+| Same edge on CH3 (TP5 through the SPOC divider) | ~20 ns rise, then **5.9 V peak** decaying over tens of µs to 3.34 V: CH3's divider is over-compensated (trimmer too high). TP5 itself is clean (pin 4 on the same node reads 3.3 V). Trim in C7 before any edge is read through CH3 |
+| CH3 rule | level change on the same source keeps CH3 routed; a change of source disables CH3 (read back) |
+| Status when off | `rLevel_mV` 0, `rGpio` false (fixed in `b500a4e`) |
+
+**Rule relaxed (decision to confirm, Luiz Villa):** ADR 0009 says CH3's mux stays disabled whenever the MUX Spin is not injecting. The firmware forces CH3 off on every change of source, but lets the host route CH3 while the injector is off (both pins high impedance): the C7 calibration routes one CUT pin to all four channels, CH3 included.

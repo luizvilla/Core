@@ -287,3 +287,9 @@ Step 1.4 fixes behind these numbers: no kernel feeder timer while the control ta
 - *Why a GPIO step as well.* OPAMP slew is 6.5 V/µs (45 V/µs in high-speed mode): enough for levels, ramps and filter glitches, too slow for latency verdicts. Free GPIOs on the MUX Spin, should more be needed: pins 5, 6 (PB14, PB15), 14, 15 (PA9, PA10), 19 (PC12), 21 (PB9), 22 (PC13), 41 (PB10), 58 (PB8); not 46–48 (SWD/JTAG).
 - *Rules for the `Core-MUX` firmware:* one source enabled at a time, the idle one in analog mode (OPAMP off, GPIO analog: high impedance, Schmitt trigger off); the source changes only while CH3's mux is disabled; CH3's mux stays disabled whenever the MUX Spin is not injecting. Both pins come out of reset in analog mode, so nothing drives TP5 before configuration.
 - *Consequences.* While TP1 and TP3 are joined, CH1 and CH2 both show the stimulus. One PWM channel means one PWM pin per trip, so "every PWM pin goes inactive" repeats the trip per pin. The 31 ns comparator latency verdict still uses direct probes.
+
+**2026-11-19, SPOC injector (luizvilla/Core#26), built and checked on the bench.** `Core-MUX` branch `mux-injector` of `owntech-foundation/SPOC_Software`, pinned at `b500a4e`:
+- *DAC level source:* full scale 2.048 V (the MUX Spin's VREFBUF), within ~20 mV at TP5. Levels above 2.048 V use the GPIO step (3.3 V).
+- *GPIO step:* under ~6 ns at the pin.
+- *CH3 rule as built:* a change of source disables CH3's muxes and leaves them disabled. While the injector is off (both pins high impedance), CH3 may be routed for measurement, so that the campaign calibration can route one CUT pin to all four channels. This relaxes "CH3's mux stays disabled whenever the MUX Spin is not injecting" (note of 2026-11-17).
+- *Scope cables:* 30 cm BNC cables; with 1 m cables the MHO984's own measurements missed edges.
