@@ -211,4 +211,4 @@ Wiring done by Luiz Villa: MUX Spin pin 2 (PB12) and pin 4 (PB13) to TP5 through
 
 Frequency 1000 Hz (spread ≤ 0.2 Hz) and duty 0.5 (spread ≤ 0.0001) on every channel, CH2's longer cable included. CH3 and CH4 lead CH1 by ~4 ns; the cause (CH1's node carries the TP1–TP3 wire and CH2's divider, or cable lengths) is not separated. A latency verdict read across two channels corrects by this skew.
 
-Left for C8: photograph of the bench in the L0-CAL README.
+C8: photographs of the board and the bench in `tests/l0/spoc_cal/README.md` (two of the three photos taken; the third shows a laptop screen and is left out).

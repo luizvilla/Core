@@ -19,6 +19,14 @@ bash tests/l0/spoc_cal/run.sh --run                       # the calibration, as 
 | Cables | **30 cm BNC.** With 1 m cables the scope's own FREQuency and PDUTy missed edges |
 | Injection wiring | TP1–TP3 (self-injection); MUX Spin pins 2 and 4 to TP5 through their resistors |
 
+![SPOC board as wired for L0](images/spoc_board.jpg)
+
+*The SPOC board (2026-11-19).* Top: BNC1–BNC4 to the scope's CH1–CH4, each with its trimmer below it and its signal/ground test points beside it (TP1/TP2 marked CH1/GND, and so on). Short red wire: TP1 to TP3 (wire 1, self-injection). Long red wire: TP5 (CH3's signal test point) down to the two resistors on MUX Spin pins 2 (PB12, DAC level) and 4 (PB13, GPIO step) (wires 2 and 3). Bottom left: MUX Spin; bottom right: CUT Spin; each on its own USB cable. The "0x0102" written on the MUX Spin is the product ID of the firmware first found on it; Core-MUX from the branch reports 0x0100.
+
+![SPOC bench with the MHO984](images/spoc_bench.jpg)
+
+*The bench.* MHO984 CH1–CH4 to SPOC BNC1–BNC4. Use 30 cm BNC cables (CH2 here is longer and still passes L0-CAL).
+
 While TP1 and TP3 are wired, SPOC CH1 and CH2 share one node: routing either shows the signal on both scope channels. **Never route two different CUT outputs to CH1 and CH2 while the wire is in** (it would short them), except the intended self-injection source and target.
 
 `MuxController.route()` disables every other route first; use `route_pair()` for two channels at once.
