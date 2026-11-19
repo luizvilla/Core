@@ -17,6 +17,7 @@
  *   /Pwm     wFreq_Hz wDuty wUnits wRun, xApply                           legs (HRTIM units, bit 0 = A ... 5 = F)
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
+ *   /Sw      wName, xApply; rWatched rRc                                software check on one sensor by name ("" = none)
  *   /Fault   wCase wIndex, xInject; rRc rDone rWritten rDetected rDetect_us rLastCase rReason rPc rTask
  *            rKernelGap_us (longest gap between kernel heartbeats since boot)
  *            software fault injection (cases below); the case that ended in a reset is kept in TAMP BKP29
@@ -68,6 +69,7 @@
 #include "SpinAPI.h"
 #include "TaskAPI.h"
 #include "SafetyAPI.h"
+#include "ShieldAPI.h"
 #include "safety_supervision.h"
 #include "safety_trips.h"
 
@@ -498,7 +500,61 @@ static void fault_boot(void)
 	BKP_CASE = 0U;
 }
 
+/* ------------------------------------------------------------------ software check on one sensor (C11) */
+
+/* The shield's sensors by devicetree name. Watching every sensor would make the floating pins of a bare Spin
+ * trip at once: the L0 runner watches only the sensor under test. */
+#define SENSOR_ENTRY(node_id) {DT_PROP(node_id, sensor_name), DT_STRING_TOKEN(node_id, sensor_name)},
+static const struct {
+	const char *name;
+	sensor_t id;
+} SENSORS[] = {DT_FOREACH_STATUS_OKAY(shield_sensors, SENSOR_ENTRY)};
+
+static char sw_name_req[24] = "";
+static char sw_watched[24] = "";
+static bool sw_apply;
+static int8_t sw_rc;
+static bool sw_init_done;
+
+static int sw_apply_now(void)
+{
+	sensor_t id = UNDEFINED_SENSOR;
+	if (sw_name_req[0] != '\0') {
+		for (const auto &e : SENSORS) {
+			if (strcmp(e.name, sw_name_req) == 0) {
+				id = e.id;
+			}
+		}
+		if (id == UNDEFINED_SENSOR) {
+			return -1;
+		}
+	}
+	if (!sw_init_done && id != UNDEFINED_SENSOR) {
+		safety.initShield(&id, 0);   /* devicetree thresholds, nothing watched yet */
+		sw_init_done = true;
+	}
+	for (const auto &e : SENSORS) {
+		sensor_t other = e.id;
+		if (other != id && safety.getChannelWatch(other)) {
+			(void)safety.unsetChannelWatch(&other, 1);
+		}
+	}
+	if (id != UNDEFINED_SENSOR && safety.setChannelWatch(&id, 1) != 0) {
+		return -2;
+	}
+	strncpy(sw_watched, id == UNDEFINED_SENSOR ? "" : sw_name_req, sizeof(sw_watched) - 1);
+	return 0;
+}
+
 /* ------------------------------------------------------------------ ThingSet */
+
+static void sw_cb(enum thingset_callback_reason reason)
+{
+	if (reason == THINGSET_CALLBACK_POST_WRITE && sw_apply) {
+		sw_apply = false;
+		sw_rc = (int8_t)sw_apply_now();
+	}
+}
 
 static void fault_cb(enum thingset_callback_reason reason)
 {
@@ -556,6 +612,7 @@ static void cal_cb(enum thingset_callback_reason reason)
 #define ID_INJ    0x92
 #define ID_CAL    0x93
 #define ID_FAULT  0x94
+#define ID_SW     0x95
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_SAFETY, "Safety", &safety_cb);
 THINGSET_ADD_ITEM_BOOL(ID_SAFETY, 0x9001, "rArmed", &safety_armed, THINGSET_ANY_R, 0);
@@ -605,6 +662,12 @@ THINGSET_ADD_ITEM_UINT32(ID_FAULT, 0x940B, "rPc", &fault_pc, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_BOOL(ID_FAULT, 0x940C, "rTask", &task_running, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_UINT32(ID_FAULT, 0x940D, "rKernelGap_us", &kernel_gap_us, THINGSET_ANY_R, 0);
 
+THINGSET_ADD_GROUP(TS_ID_ROOT, ID_SW, "Sw", &sw_cb);
+THINGSET_ADD_ITEM_STRING(ID_SW, 0x9501, "wName", sw_name_req, sizeof(sw_name_req), THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_BOOL(ID_SW, 0x9502, "xApply", &sw_apply, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_STRING(ID_SW, 0x9503, "rWatched", sw_watched, sizeof(sw_watched), THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_INT8(ID_SW, 0x9504, "rRc", &sw_rc, THINGSET_ANY_R, 0);
+
 /* ------------------------------------------------------------------ main */
 
 static void background(void)
@@ -617,6 +680,7 @@ int main(void)
 {
 	fault_boot();
 	inj_init();
+	shield.sensors.enableDefaultSensors();   /* as an application: data acquisition converts every shield sensor */
 	refresh_status();
 	uint32_t bg = task.createBackground(background);
 	task.startBackground(bg);

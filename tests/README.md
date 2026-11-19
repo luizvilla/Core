@@ -27,6 +27,7 @@ Each campaign writes `tests/out/<date>_<sha>_<time>_<id>/` with one log per test
 | [`l0/safety_allocation/`](l0/safety_allocation/) | L0-ALC: protection allocation on synthetic boards and on every shield devicetree, committed tables up to date (no hardware), issue luizvilla/Core#17 |
 | [`l0/safety_supervision/`](l0/safety_supervision/README.md) | L0-SUP: CPU supervision on the Spin (watchdog, fatal-error handler, HRTIM system fault), issue luizvilla/Core#16 |
 | [`l0/spoc_cal/`](l0/spoc_cal/README.md) | L0-CAL: SPOC bench calibration (trim, cable check, gain and skew record) on the SPOC bench with the MHO984, issue luizvilla/Core#26 |
+| [`l0/spoc_trip/`](l0/spoc_trip/README.md) | L0-TRP: every protection path of the manifest (comparator, ADC watchdog, software) trips at its threshold on the SPOC bench, issue luizvilla/Core#23 |
 | `catalogue.json` | Every test, defined once |
 | `out/` | Campaigns (git-ignored) and `control-center.html` |
 

@@ -38,6 +38,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
   - boards: Twist 1.4.2 first, then Ownverter 1.1.0. O2 is deprecated: not tested;
   - the CUT stays on the safety firmware between campaigns; the firmware has a 1 kHz calibration output on PA8 for L0-CAL.
 - **2026-11-19, #23 C11 sources** (Luiz Villa): arming needs the current pins whose low bound is an ADC watchdog held at 0 A (a floating pin fails the self-test); two pins on each board (Twist I1_LOW, I2_LOW; Ownverter 1.1.0 I1_LOW, I3_LOW) and the bench has two independent sources (CUT DAC on CH1/CH2, MUX injector on CH3). Cases on those current limits run on the production build, the two pins held, one of them stepped. Cases on the voltage watchdogs (Twist V_HIGH, V1_LOW high; Ownverter V_HIGH) need a third source and run on a **second build per board**: an overlay widens only the held current limits' low windows so their pins may float; the voltage path under test keeps its production threshold, and the runner refuses to judge unless every other entry of that build's protection manifest matches production. A stated departure, recorded with each such case.
+- **2026-11-20, #23 C11 sources, revised** (Luiz Villa): the second build could not run as decided. A floating current pin reads about -4 A at idle and fails the Safety API's idle plausibility check, so arming is refused even with the low windows widened. Instead, **TP5 is wired to TP7**: the MUX injector holds two pins through CH3 and CH4, and every case runs on the production build (no departure, on Twist and Ownverter alike). CH4 then cannot watch a PWM pin; latency checks use a direct probe. The widened build and its overlay were dropped.
 
 ## Plan and commits
 
@@ -66,7 +67,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 |---|---|---|
 | C9 | `feat(test): generic safety test firmware, ThingSet control` | `tests/firmware/safety_l0`: arm, PWM, report and clear faults, any shield |
 | C10 | `feat(test): software fault injection in the generic firmware` | Stack overflow, hard fault, interrupts masked, watchdog starved, wild register writes after locking |
-| C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; current-limit cases on the production build (two pins held), voltage-watchdog cases on a second build with the held limits' low windows widened, manifest checked against production |
+| C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; the current pins with a watchdog low bound held by the injector through CH3 and (TP5–TP7 wired) CH4; production build only, its manifest checked against `tools/safety_check.py` |
 | C12 | `test(safety): CPU-dead cases from the MUX injector` | Injection on TP5 while the CUT is dead; unblocks L0-SUP-08.c |
 | C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service |
 | C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once |
@@ -267,4 +268,24 @@ Decisions on 12 and 13 (Luiz Villa, 2026-11-19): `data.stop()` refused with the 
 The first case 3 used `irq_lock()` and hung the board this way; it became case 13, and case 3 now masks with PRIMASK. Board discovery (`spoc/boards.py`) now has a write timeout: a hung Spin used to block it.
 
 The scope checks (outputs low within 1 µs of the lockup, L0-SUP-08.c) come with C12/C13; the verdicts with the L0 runner (C11).
+
+### 2026-11-20, C11: L0-TRP, the runner from the manifest
+
+`tests/l0/spoc_trip` (README there). Cases are generated from the test build's protection manifest: one per limit, bound and path. The CUT DAC drives the pin under test through CH1 → TP1–TP3 → CH2; the injector holds the other current pins at 0 A. Each case: arm at 150 mV inside the threshold, quiet 200 ms, 10 mV ramp to the trip, recover, 1 mV ramp; verdict on the fault, the path's FLT, outputs off and the trip level within ±25 mV of the threshold from the manifest counts (DAC, ADCs and comparator DACs share the CUT's VREFBUF).
+
+First campaign (`2026-11-20_99ff3bf-dirty_001306`), TP5–TP7 not wired yet:
+
+| Case | Path | Threshold | Trip | Result |
+|---|---|---|---|---|
+| L0-TRP-01.a | test build manifest vs production Twist 1.4.2 | | identical but for reserved DAC2_CH1 | PASS |
+| L0-TRP-01.b | first arming, I1/I2 held at 1.0 V | | armed, quiet | PASS |
+| I1_LOW high | COMP1 → FLT4 | 1700.0 mV | 1698 mV (−2.0) | PASS |
+| I1_LOW low | ADC1 AWD1 → FLT1 | 299.8 mV | 316 mV (+16.0) | PASS (after the fix below) |
+| I2_LOW high | COMP3 → FLT5 | 1700.0 mV | 1698 mV (−2.0) | PASS |
+| I2_LOW low | ADC2 AWD3 (8-bit) → FLT6 | 296.0 mV | 307 mV (+11.0) | PASS |
+| V1_LOW high, V_HIGH high (watchdogs); V1_LOW low, V2_LOW both, V_HIGH low, I_HIGH both (software) | | | | BLOCKED: need TP5–TP7 |
+
+**Finding: AWD1 never tripped in service.** The first runs found no I1_LOW low trip even at 200 mV. ADC1 converts a 3-channel sequence (ch2, ch1, ch9); AWD1 watches ch2 alone with its filter at "two consecutive detections" (`TR1.AWDFILT = 1`), and in that sequence it never flagged. With the filter cleared (by SWD, at 250 mV) it tripped at once. The arming self-test converts the channel alone and passed either way, so nothing showed it before. On the Twist, I1_LOW's watchdog bound (low, and high behind COMP1) protected nothing in service. Fixed: no AWD1 filter (AWD2 and AWD3 have none); the read-back now includes the filter bits.
+
+Runner notes: the arming self-tests run once per boot, at the first data start, with the idle plausibility of the current sensors; so the runner resets the CUT and arms first with the held pins at 0 A (driving a current pin to its start level before that fails the idle check). The test firmware now enables the shield's sensors at boot (`enableDefaultSensors()`, as an application) and watches one sensor by name for the software-path cases (`/Sw`). After a flash or reset, board discovery waits up to 60 s for both Spins.
 

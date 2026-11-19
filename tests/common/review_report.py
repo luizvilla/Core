@@ -1116,6 +1116,72 @@ def spoc_cal_section(folder, rep):
     return ''.join(out)
 
 
+def spoc_trip_section(folder, rep):
+    """@brief L0-TRP: the cases as run (from the manifest), then each trip level against its threshold."""
+    e = html.escape
+    out = ['<h3>4 · Figures</h3>']
+    if not rep:
+        out.append(f'<p class="sub">No report in {e(folder.name)}/.</p>')
+        return ''.join(out)
+    tol = rep.get('tolerance_mV', 25.0)
+    cases = rep.get('cases', [])
+    out.append(f'<p class="sub">CUT VREFBUF {rep.get("vref_mV", 0):.0f} mV; TP5-TP7 wired: '
+               f'{"yes" if rep.get("tp5_tp7_wired") else "no"}. One row per limit, bound and path of the manifest.</p>'
+               '<table><tr><th>Sensor</th><th>Bound</th><th>Path</th><th>Pin</th><th>Held</th><th>Threshold</th>'
+               '<th>Coarse trip</th><th>Fine trip</th><th>Error</th><th>Result</th></tr>')
+    for c in cases:
+        p = c['path']
+        path = ('software' if c['kind'] == 'software' else
+                f"COMP{p['comp']} → FLT{p['flt']}" if c['kind'] == 'comparator' else
+                f"{p['adc'].upper()} AWD{p['awd']} → FLT{p['flt']}")
+        f = lambda v: '' if v is None else f'{v:.0f} mV'
+        res = c.get('verdict') or ('BLOCKED' if c.get('blocked') else 'FAIL')
+        why = c.get('blocked') or c.get('error') or ''
+        err = '' if c.get('error_mV') is None else f"{c['error_mV']:+.1f} mV"
+        out.append(f"<tr><td>{e(c['sensor'])}</td><td>{e(c['bound'])}</td><td>{e(path)}</td><td>{e(c['pin'])}</td>"
+                   f"<td>{e(', '.join(c.get('holds', [])))}</td><td>{c['threshold_mV']:.1f} mV</td>"
+                   f"<td>{f(c.get('coarse_mV'))}</td><td>{f(c.get('fine_mV'))}</td><td>{err}</td>"
+                   f"<td>{e(res)}{(' · ' + e(why)) if why else ''}</td></tr>")
+    out.append('</table>')
+    rows = [c for c in cases if c.get('error_mV') is not None]
+    if not rows:
+        out.append('<p class="sub">No case reached a fine trip level.</p>')
+        return ''.join(out)
+    span = max(2 * tol, max(abs(c['error_mV']) for c in rows) * 1.2)
+    W, label_w, row_h, top = 960, 260, 30, 26
+    plot_w = W - label_w - 40
+    H = top + row_h * len(rows) + 34
+    x = lambda v: label_w + plot_w * (v + span) / (2 * span)
+    svg = [f'<svg viewBox="0 0 {W} {H}" width="100%" role="img" aria-label="Trip level minus threshold per case" '
+           f'font-family="system-ui,sans-serif" font-size="12">',
+           f'<rect x="{x(-tol):.1f}" y="{top - 6}" width="{x(tol) - x(-tol):.1f}" height="{H - top - 24}" '
+           f'fill="{WINDOW_FILL}"/>']
+    step = 10 if span <= 60 else 20
+    t = -int(span // step) * step
+    while t <= span:
+        svg.append(f'<line x1="{x(t):.1f}" y1="{top - 6}" x2="{x(t):.1f}" y2="{H - 24}" stroke="{GRID}"/>'
+                   f'<text x="{x(t):.1f}" y="{H - 8}" fill="{MUTED}" text-anchor="middle">{t:+d} mV</text>')
+        t += step
+    svg.append(f'<line x1="{x(0):.1f}" y1="{top - 10}" x2="{x(0):.1f}" y2="{H - 24}" stroke="{INK2}"/>'
+               f'<text x="{x(tol) - 4:.1f}" y="{top - 12}" fill="{MUTED}" text-anchor="end">±{tol:g} mV</text>')
+    for i, c in enumerate(rows):
+        y = top + i * row_h + 12
+        ok = c.get('verdict') == 'PASS'
+        kind = c['kind'].replace('_', ' ')
+        svg.append(f'<text x="{label_w - 8}" y="{y + 4}" fill="{INK}" text-anchor="end">'
+                   f"{e(c['sensor'])} {e(c['bound'])} · {e(kind)}</text>")
+        svg.append(f'<circle cx="{x(c["error_mV"]):.1f}" cy="{y}" r="5" fill="{SERIES[0] if ok else CRITICAL}">'
+                   f"<title>{e(c['sensor'])} {e(c['bound'])}: trip {c['fine_mV']:.0f} mV, threshold "
+                   f"{c['threshold_mV']:.1f} mV ({c['error_mV']:+.1f} mV)</title></circle>")
+        svg.append(f'<text x="{x(c["error_mV"]) + 9:.1f}" y="{y + 4}" fill="{INK2}">{c["error_mV"]:+.1f}</text>')
+    svg.append('</svg>')
+    out.append('<figure><div><b>Fine trip level minus threshold, per case</b></div>' + ''.join(svg) +
+               '<figcaption>The shaded band is the tolerance. A dot right of zero tripped above the threshold. The '
+               'threshold is computed from the manifest counts on the CUT\'s VREFBUF; the stimulus is the CUT\'s own '
+               'DAC on the same reference, 1 mV steps of 30 ms (L0-TRP-02, 03).</figcaption></figure>')
+    return ''.join(out)
+
+
 def supervision_figure(rows):
     """@brief L0-SUP: each declared-time criterion (limit "<= x us") as its measured share of the limit.
 
@@ -1436,6 +1502,10 @@ def main(out):
         if c.get('kind') == 'target':
             # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if c.get('figures') == 'spoc_trip':
+                # L0-TRP (ADR 0009, #23): the cases from the manifest, then each trip against its threshold.
+                p.append(spoc_trip_section(c['folder'], rep_t))
+                continue
             if c.get('figures') == 'spoc_cal':
                 # L0-CAL (ADR 0009, #26): calibration record, then the waveforms the verdicts came from.
                 p.append(spoc_cal_section(c['folder'], rep_t))
