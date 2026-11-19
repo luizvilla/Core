@@ -42,14 +42,19 @@ def setup(scope, mux, cut):
 
 
 def cut_pwm_on(port):
-    """1 kHz, 0.5 on PA8 through Core-CUT's /Cut/PwmOut (unit A, output 1)."""
+    """1 kHz, 0.5 on PA8: /Cal of the safety test firmware (TIM1), or Core-CUT's /Cut/PwmOut (HRTIM unit A)."""
     import serial
     ser = serial.Serial(port, 115200, timeout=0.2)
     sh = ThingSetShell(ser)
     sh.enter_thingset()
-    for path, value in (('wFreq_Hz', '1000'), ('wMinFreq_Hz', '1000'), ('wA1', 'true'), ('wADuty', '0.5'),
-                        ('wEnable', 'true'), ('xApply', 'true')):
-        ok, resp = sh.set_value(f'Cut/PwmOut/{path}', value)
+    root = sh.send_cmd('?', read_timeout=1.0).decode(errors='replace')
+    if '"Cal"' in root:
+        writes = (('Cal/wOn', 'true'), ('Cal/xApply', 'true'))
+    else:
+        writes = tuple((f'Cut/PwmOut/{k}', v) for k, v in (('wFreq_Hz', '1000'), ('wMinFreq_Hz', '1000'), ('wA1', 'true'),
+                                                           ('wADuty', '0.5'), ('wEnable', 'true'), ('xApply', 'true')))
+    for path, value in writes:
+        ok, resp = sh.set_value(path, value)
         if not ok:
             raise RuntimeError(f'CUT write failed for {path}: {resp}')
     ser.close()

@@ -25,3 +25,11 @@ properties:
       disableSafetyApi() stops the software check, and CONFIG_OWNTECH_SAFETY_RUNTIME_SELFTEST may be turned off.
       CPU supervision (watchdog, fatal-error handler, system fault) stays on. The firmware prints a banner at
       boot and reports the mode (safety.isDevelopmentMode(), the boot line, the protection manifest).
+
+  reserved-dacs:
+    type: string-array
+    required: false
+    description: |
+      DAC channels the application drives itself, which the protection allocation must not give to a comparator
+      threshold, e.g. reserved-dacs = "DAC2_CH1"; (names as in the allocation: DAC1_CH1 ... DAC4_CH2). A comparator
+      whose only free DAC options are reserved is not allocated (the build reports it).

@@ -1,0 +1,19 @@
+/* Generic safety test firmware (ADR 0009, #23): production thresholds of the shield, unchanged.
+ * DAC2_CH1 drives PA6 (Spin pin 34) for self-injection: kept out of the protection allocation.
+ * Shell (ThingSet) on a second USB CDC ACM port, console on the first: as SPOC's Core-CUT. */
+/ {
+	chosen {
+		zephyr,shell-uart = &cdc_acm_uart1;
+	};
+
+	safety-config {
+		compatible = "safety-config";
+		reserved-dacs = "DAC2_CH1";
+	};
+};
+
+&zephyr_udc0 {
+	cdc_acm_uart1: cdc_acm_uart1 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};

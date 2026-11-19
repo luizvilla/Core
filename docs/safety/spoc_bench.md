@@ -220,3 +220,20 @@ Frequency 1000 Hz (spread ≤ 0.2 Hz) and duty 0.5 (spread ≤ 0.0001) on every 
 C8: photographs of the board and the bench in `tests/l0/spoc_cal/README.md` (two of the three photos taken; the third shows a laptop screen and is left out).
 
 **Scope against the 31 ns comparator verdict (#26).** Front panel (bench photograph): MHO984, 800 MHz, 4 GSa/s, 12-bit. 800 MHz gives a rise time of ~0.44 ns (0.35/BW): enough for a 31 ns verdict. The sample rate in use follows the timebase and memory depth: 1 GSa/s at 20 ns/div with the default 10 k points (1 ns per sample, ~3 % of 31 ns). A latency case sets the timebase so that the record runs at ≥ 1 GSa/s, and corrects by the campaign's skew (L0-CAL-07). The SPOC path adds its own delay (mux, divider): the 31 ns verdict itself still uses direct probes (ADR 0009).
+
+### 2026-11-19, C9: generic safety test firmware
+
+`tests/firmware/safety_l0`, env `SAFETY_L0_TWIST` (Twist 1.4.2, production thresholds), flashed through the ST-Link on the CUT. ThingSet on a second USB CDC ACM port (`cdc_acm_uart1`, as Core-CUT; Core2's board has only the console otherwise): `/Safety` (armed, fault, tripped FLTs, outputs, text, clear), `/Pwm` (frequency, duty, units, run), `/Inj` (DAC2_CH1 on PA6), `/Cal` (1 kHz on PA8 from TIM1). Safety API: new `safety-config` property `reserved-dacs`, read into the allocation model (L0-ALC 34/34 PASS after the change).
+
+| Check | Result |
+|---|---|
+| Protection manifest of the test build against production Twist 1.4.2 | limits, paths, comparator DACs, legs and resources identical; only `reserved: DAC2_CH1` added |
+| Boot line | `TWIST v1.4.2 (production): V1_LOW sw-/awd+, V2_LOW sw-/sw+, V_HIGH sw-/awd+, I1_LOW awd-/comp+, I2_LOW awd-/comp+, I_HIGH sw-/sw+` |
+| `/Cal` through the four channels | compensation 99.4 / 98.1 / 98.4 / 100.9 % (as with Core-CUT) |
+| `/Inj` at PA6, through CH1/CH2 (TP1–TP3) | 0.51, 1.03, 1.54, 2.06 V for 500…2000 mV; full scale 2.048 V |
+| PWM start, sensor pins floating | **refused**: `arming failed: ADC2 AWD3 (I2_LOW) not configured` (the watchdog self-test with the real window fails: a floating pin reads −10 A, outside −7…7 A; the message says "not configured" for any failed state) |
+| PWM start, I1 (PA1) held at 1.0 V by the CUT DAC (CH1/CH2), I2 (PC1) by the MUX injector (CH3) | **armed** with production thresholds: `armed V1_LOW awd, V_HIGH awd, I1_LOW awd, I2_LOW awd, I1_LOW comp+, I2_LOW comp+ · self-test OK`; outputs TA1, TA2, TC1, TC2 on; stopped cleanly |
+
+Board discovery now asks each Spin's ThingSet root (`Mux` → MUX; `Cut` or `Safety` → CUT): the CUT on this firmware reports 2fe3:0100 like the MUX.
+
+Twist pins for the trips: I1 on PA1 (Spin 30, mux1 input 1), I2 on PC1 (Spin 25, mux3 input 1); 0 A at 1.000 V, window 0.300–1.700 V (−7…7 A).

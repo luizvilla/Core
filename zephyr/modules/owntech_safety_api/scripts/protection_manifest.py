@@ -110,7 +110,13 @@ def build_model(edt):
     shield = None
     for node in edt.compat2okay.get('shield-pcb', []):
         shield = f'{prop(node, "shield-name")} {prop(node, "shield-version")}'
-    return shield or 'no shield', {'sensors': sensors, 'limits': limits, 'legs': legs, 'safe_outputs': outputs}
+    reserved = {}
+    for node in edt.compat2okay.get('safety-config', []):
+        dacs = prop(node, 'reserved-dacs') or []
+        if dacs:
+            reserved['dacs'] = list(dacs)
+    return shield or 'no shield', {'sensors': sensors, 'limits': limits, 'legs': legs, 'safe_outputs': outputs,
+                                   'reserved': reserved}
 
 
 def comparator_table(alloc):
