@@ -138,7 +138,28 @@ After the reflash:
 | BNC1 (scope CH1), PA8 routed, live waveform | 1 kHz square, 0.29 V / 3.48 V, 50 %; harmonics 3, 5, 7 kHz; overshoot −0.79 / +4.79 V (divider not trimmed) |
 
 **The chain CUT → MUX → BNC → scope works.** Open points:
-- **`:MEASure` is not reliable yet:** on the same signal it gave 250 Hz and 333 Hz (read 1.2 s after each route change), while the waveform shows 1 kHz. To understand before any verdict uses it (settling after a route change, measurement thresholds, the trigger).
+- **`:MEASure` is not reliable yet:** see the next section.
 - **CH1 divider trim** (overshoot): C7.
-- `single()` stale record (above).
+- `single()` stale record (above): not reproduced after the reflash (three captures across route changes differ as they should).
 - The old 0x0102 build is lost: no binary was kept.
+
+### 2026-11-19, the scope's own measurements on the SPOC signal
+
+Signal: PA8 at 1 kHz, 0.5, routed to CH1 (×10, DC, untrimmed divider), 1 ms/div, 2 MSa/s, 10 k points, edge trigger on CH1.
+
+The screen waveform is right: 1000 points, 20 crossings of 1.65 V, every 500 µs; noise 0.2 V rms on each level. The scope's measurement engine is not:
+
+| Setting | FREQuency (10 readings) | PDUTy | VTOP / VBASe |
+|---|---|---|---|
+| NORMal, running | 250–1000 Hz | 0.17–0.83 | 3.05–5.12 / −1.03–0.34 V |
+| NORMal, BW limit 20 MHz | 333–1000 Hz | 0.50–0.75 | 3.05–3.93 / −0.70–0.35 V |
+| HRESolution, BW off, running | 999.5–1000.5 Hz | 0.499–0.500 | 3.12–3.81 / −0.53–0.35 V |
+| HRESolution, 3 × 7 readings | outliers 166.67 Hz; 0.083, 0.917 | | |
+| HRESolution, stopped single captures | 8 of 10 right; 500 Hz with 0.25, 200 Hz with 0.10 | | |
+| NORMal, stopped single captures | 2 of 10 right; 142.86, 125 Hz, invalid | | |
+
+The wrong values are exact fractions of the true ones (500 Hz with duty 0.25, 200 Hz with 0.10): the engine misses edges and takes 2 or 5 periods for one. Its thresholds follow VTOP and VBASe (percent of the amplitude), which move by ~0.7 V with the overshoot of the untrimmed divider: likely cause, not proven. HRESolution helps a lot, but does not remove the outliers. Measuring on a stopped acquisition does not help.
+
+Driver (C2 follow-up): `set_acquire()` reads its setting back; `measure_series()` returns median, min and max of n readings, so a verdict can check the spread.
+
+Not decided: trim CH1 first and measure again; set absolute thresholds (needs the MHO900 programming guide: not on this machine); or take timing from the waveform, as Core4's `analysis.py` does, which departs from "verdicts come from the scope's own measurements" (ADR 0009, #23).

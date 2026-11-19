@@ -188,8 +188,17 @@ class RigolScope:
 
     def set_acquire(self, kind):
         """NORMal, or HRESolution: each screen point is the average of the
-        raw samples behind it (removes PWM ripple from DC levels)."""
+        raw samples behind it (removes PWM ripple from DC levels).
+
+        Use HRESolution for the scope's own timing measurements: in NORMal
+        mode, on the SPOC bench (1 kHz PWM, 1 ms/div, 2 MSa/s), FREQuency
+        read 250, 333, 500 or 1000 Hz and PDUTy 0.17 to 0.83 from one
+        reading to the next; in HRESolution, 999.5 to 1000.5 Hz and
+        0.499 to 0.500 (docs/safety/spoc_bench.md, 2026-11-19)."""
         self.write(f":ACQuire:TYPE {kind}")
+        got = self.query(":ACQuire:TYPE?").strip().upper()
+        if not kind.upper().startswith(got):
+            raise ScopeError(f":ACQuire:TYPE {kind} not applied (scope reads {got})")
 
     def set_timebase(self, scale_s, offset_s=0.0):
         self._timebase = scale_s
@@ -262,6 +271,24 @@ class RigolScope:
         except (ValueError, ScopeError):
             return None
         return None if abs(value) >= INVALID_MEASUREMENT else value
+
+    def measure_series(self, item, channel, n=5, wait_s=0.5, channel2=None):
+        """Read a measurement n times while the scope runs.
+
+        Returns {"median", "min", "max", "n"}, or None if any reading is
+        invalid. A verdict uses the median and checks the spread (max - min)
+        against its own tolerance: one reading alone can be off."""
+        values = []
+        for _ in range(n):
+            time.sleep(wait_s)
+            value = self.measure(item, channel, channel2)
+            if value is None:
+                return None
+            values.append(value)
+        values.sort()
+        mid = n // 2
+        median = values[mid] if n % 2 else (values[mid - 1] + values[mid]) / 2
+        return {"median": median, "min": values[0], "max": values[-1], "n": n}
 
     def screenshot(self):
         """PNG of the screen as bytes (None if the scope refuses)."""
