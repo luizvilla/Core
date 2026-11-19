@@ -92,3 +92,15 @@ Stock Core-CUT drives PA8 at 1 kHz, duty 0.5; the MUX routes PA8 to CH1; CH1 is 
 The chain answers end to end, but CH1 does not show the PWM. To check next, in this order: CH1's BNC cable goes to SPOC BNC1; CH1 with the mux disabled, then with PA8 routed and the PWM off, then on; `CutPwmController.read_state()` after the command; the channel's divider trim (Core4 trimming flow). The diagnostic run that would have done this failed: the scope stopped answering after the unknown query above.
 
 The scope's bandwidth and maximum sample rate against the 31 ns verdict are still to read (programming guide or the scope's About page).
+
+### 2026-11-19, smoke test continued: nothing reaches the BNCs
+
+Scope CH1–CH3 cabled to SPOC BNC1–BNC3 (checked by Luiz Villa). The scope answered again after the night, no replug. The CUT reads back `enabled=True, enabled_outputs=('PA8',)` after a 1 kHz, 0.5 command.
+
+| Condition | Scope CH1 (×10) |
+|---|---|
+| all muxes disabled | 22 kHz, −0.0 to 1.5 V |
+| PA8 routed to CH1, PWM off | 257 Hz, −0.1 to 1.4 V |
+| PA8 routed to CH1, PWM on | 2.2 kHz, −0.2 to 1.5 V |
+
+PA8 routed to ch1, ch2, then ch3 (the MUX reads back each route enabled): the scope's CH1–CH3 all show the same ~1 V of noise (~0.1 V at the BNC) in every case, and none shows 1 kHz. The cables are not the cause: unrouted channels are disabled, and a slow divider would round the edges, not change the frequency. The signal is lost before the BNCs: the CUT pin, the mux supply or enables, or the board seating. Next: a probe directly on the CUT's PA8, then on the mux side of the CH1 divider (TP1).
