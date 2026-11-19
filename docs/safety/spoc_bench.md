@@ -32,6 +32,11 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
   - the `Core-MUX` injector is written on a branch of `owntech-foundation/SPOC_Software` off `Core-MUX`, its hash pinned in Core2;
   - the existing L0 firmware (`safety_comparator`, `safety_supervision`) stays as it is; the generic firmware is new;
   - CH3 may be routed while the injector is off (both pins high impedance); keep both Spins powered together.
+- **2026-11-19, #23** (Luiz Villa):
+  - the generic safety test firmware is controlled over USB with ThingSet (as Core-CUT); an ST-Link on the CUT (STLINK-V3, SWD checked against the CUT's unique ID) flashes it, reads state when the CPU is dead, and debugs;
+  - self-injection uses DAC2_CH1 on PA6 (Spin pin 34), reserved through the allocation; the test build refuses to run if the reservation changes any trip against the production manifest (then inject from PA5, DAC1_CH2). PA6 is unused on Twist 1.4.2, Ownverter 1.0.0 and 1.1.0;
+  - boards: Twist 1.4.2 first, then Ownverter 1.1.0. O2 is deprecated: not tested;
+  - the CUT stays on the safety firmware between campaigns; the firmware has a 1 kHz calibration output on PA8 for L0-CAL.
 
 ## Plan and commits
 
