@@ -1116,6 +1116,69 @@ def spoc_cal_section(folder, rep):
     return ''.join(out)
 
 
+def spoc_dead_section(folder, rep):
+    """@brief L0-CPU: lockup per PWM pin (waveforms against the marker), then the trips with the CPU halted."""
+    import numpy as np
+    e = html.escape
+    out = ['<h3>4 · Figures</h3>']
+    if not rep:
+        out.append(f'<p class="sub">No report in {e(folder.name)}/.</p>')
+        return ''.join(out)
+    lock = rep.get('lockup') or []
+    if lock:
+        out.append('<p class="sub">L0-CPU-01: one armed single capture per PWM pin, marker (PA6) on SPOC CH1, the pin '
+                   'on CH3. "Last high" is the last sample above 1.65 V after the marker; 0 means the pin was low at '
+                   'the marker and stayed low.</p><table><tr><th>Pin</th><th>Marker</th><th>Switching before</th>'
+                   '<th>Last high after the marker</th></tr>')
+        for r in lock:
+            last = '' if r.get('off_s') is None else f"{r['off_s'] * 1e9:.0f} ns"
+            out.append(f"<tr><td>{e(r['pin'])}</td><td>{'high' if r.get('marker_ok') else 'no'}</td>"
+                       f"<td>{'yes' if r.get('switching_before') else 'no'}</td><td>{last}</td></tr>")
+        out.append('</table>')
+        fig = Figure('µs')
+        main = fig.chart('V', 320)
+        drawn = False
+        for i, r in enumerate(lock):
+            w, t0 = r.get('wave'), r.get('t_marker')
+            if not w or t0 is None:
+                continue
+            t = (np.asarray(w['t'], float) - t0) * 1e6
+            fig.line(main, r['pin'], t, np.asarray(w['pin'], float), SERIES[i % len(SERIES)], 1.2)
+            if not drawn:
+                fig.line(main, 'marker (PA6)', t, np.asarray(w['marker'], float), INK, 2)
+                drawn = True
+        if drawn:
+            out.append('<figure><div><b>PWM pins around the lockup, time from the marker</b></div>'
+                       + fig.html('spoc-dead-lockup', 'PWM pins before and after a Cortex-M4 lockup')
+                       + '<figcaption>One capture per pin, aligned on the marker (PA6, set a few cycles before the '
+                         'lockup; thick line). The HRTIM system fault puts every output in its inactive fault state; '
+                         'the watchdog resets the board about 1 ms later (outside the window). L0-CPU-01, '
+                         'L0-SUP-08.c.</figcaption></figure>')
+    halted = rep.get('halted') or []
+    if halted:
+        out.append('<p class="sub">L0-CPU-02: the CUT halted over SWD after arming with the PWM on; the threshold '
+                   'crossed by writing DAC2 DHR12R1 over SWD; registers and pins read over SWD before the CPU resumes.'
+                   '</p><table><tr><th>Sensor</th><th>Bound</th><th>Path</th><th>DAC</th><th>PC before / after</th>'
+                   '<th>OENR before → after</th><th>FLT flag</th><th>PWM pins</th></tr>')
+        for c in halted:
+            p = c['path']
+            path = (f"COMP{p['comp']} → FLT{p['flt']}" if c['kind'] == 'comparator' else
+                    f"{p['adc'].upper()} AWD{p['awd']} → FLT{p['flt']}")
+            if c.get('blocked') or c.get('error'):
+                out.append(f"<tr><td>{e(c['sensor'])}</td><td>{e(c['bound'])}</td><td>{e(path)}</td>"
+                           f"<td colspan=5>{e(c.get('blocked') or c.get('error'))}</td></tr>")
+                continue
+            flt = 'set' if (c.get('isr_after') or 0) & c['flt_bit'] else 'NOT set'
+            pins = ', '.join(f'{k}={v}' for k, v in c['pins'].items())
+            out.append(f"<tr><td>{e(c['sensor'])}</td><td>{e(c['bound'])}</td><td>{e(path)}</td>"
+                       f"<td>{c['beyond_mV']:.0f} mV (threshold {c['threshold_mV']:.1f})</td>"
+                       f"<td>{e(' / '.join(c.get('pcs', [])))}</td>"
+                       f"<td>0x{c.get('oenr_before') or 0:03x} → 0x{c.get('oenr_after') or 0:03x}</td>"
+                       f"<td>FLT{p['flt']} {flt}</td><td>{e(pins)}</td></tr>")
+        out.append('</table>')
+    return ''.join(out)
+
+
 def spoc_trip_section(folder, rep):
     """@brief L0-TRP: the cases as run (from the manifest), then each trip level against its threshold."""
     e = html.escape
@@ -1502,6 +1565,10 @@ def main(out):
         if c.get('kind') == 'target':
             # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if c.get('figures') == 'spoc_dead':
+                # L0-CPU (ADR 0009, #23): lockup per PWM pin, then the trips with the CPU halted.
+                p.append(spoc_dead_section(c['folder'], rep_t))
+                continue
             if c.get('figures') == 'spoc_trip':
                 # L0-TRP (ADR 0009, #23): the cases from the manifest, then each trip against its threshold.
                 p.append(spoc_trip_section(c['folder'], rep_t))

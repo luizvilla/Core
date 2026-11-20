@@ -154,7 +154,7 @@ def write_manifest(out, log):
                           ['Timing method', 'DWT cycle counter: marked just before the fault, stamped when the outputs '
                                             'are disabled, kept in TAMP backup registers across the reset'],
                           ['Not covered here', 'the pin levels during a lockup (HRTIM system fault) need a scope: '
-                                               'L0-SUP-08.c stays BLOCKED until the SPOC bench']],
+                                               'L0-SUP-08.c is measured by L0-CPU-01 on the SPOC bench']],
            'target': target_snapshot(), 'report': 'report.json', 'figures': 'supervision'}
     with open(os.path.join(out, 'target_manifest.json'), 'w') as f:
         json.dump(man, f, indent=1)
@@ -281,8 +281,9 @@ def main():
     watchdog('L0-SUP-06', 'CONTROL_STUCK', R['STUCK_FLAGS'], 'Control task never returns')
     watchdog('L0-SUP-07', 'IRQ_MASKED', R['IRQ_FLAGS'], 'Interrupts masked forever')
     watchdog('L0-SUP-08', 'LOCKUP', R['LOCKUP_FLAGS'], 'Cortex-M4 lockup')
-    line('L0-SUP-08.c', 'BLOCKED', 'Cortex-M4 lockup: HRTIM system fault turns the outputs off before the watchdog reset',
-         'every PWM pin low within 1 us of the lockup', 'needs a scope on the PWM pins (SPOC bench, #23/#26)')
+    line('L0-SUP-08.c', 'INFO', 'Cortex-M4 lockup: HRTIM system fault turns the outputs off before the watchdog reset',
+         'every PWM pin low within 1 us of the lockup', 'measured on the SPOC bench with a scope: L0-CPU-01 '
+         '(tests/l0/spoc_dead)')
     sr = res[R['SOFTRESET_FLAGS']]
     line('L0-SUP-09.a', judge(sr & 0xFF == FAULT_FATAL and sr >> 8 & 1), 'A software reset keeps the latched fault',
          'latched before and after the software reset', f'fault {sr & 0xFF}, still latched {sr >> 8 & 1}')

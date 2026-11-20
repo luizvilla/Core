@@ -112,11 +112,11 @@
    "tab": "safety",
    "level": "L0",
    "title": "A Cortex-M4 lockup makes the watchdog reset the board; the HRTIM system fault turns the outputs off",
-   "criterion": ".a, .b as L0-SUP-06; .c every PWM pin low within 1 us of the lockup (scope on the PWM pins, BLOCKED until the SPOC bench)",
+   "criterion": ".a, .b as L0-SUP-06; .c every PWM pin low within 1 us of the lockup (measured by L0-CPU-01 on the SPOC bench)",
    "conditions": "Bare Spin (no shield), MCUboot, ST-Link; env SAFETY_SUP; PWM A, C, D, E, F at 200 kHz, 50 %",
    "source": "ADR 0009; `tests/firmware/safety_supervision/main.cpp`",
    "status": "implemented",
-   "status_note": "Implemented 2026-11-14; .c needs the SPOC bench (luizvilla/Core#23, #26)",
+   "status_note": "Implemented 2026-11-14; .c measured by L0-CPU-01 (2026-11-20)",
    "harness": "tests/l0/safety_supervision/run.sh --run"
   },
   {
@@ -894,6 +894,30 @@
    "title": "Each software-path limit of the manifest trips at its threshold",
    "criterion": "per limit and bound (.<sensor>.<bound>), only that sensor watched: software trip of that sensor, outputs off, trip level within ±25 mV of the threshold; BLOCKED when the bench cannot hold the current pins",
    "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C12)",
+   "harness": "tests/l0/spoc_dead/run.sh --run",
+   "source": "ADR 0009; IEC 62109-1 Annex B route (a); `tests/l0/spoc_dead/run.py`",
+   "id": "L0-CPU-01",
+   "title": "A Cortex-M4 lockup turns every PWM output off through the HRTIM system fault",
+   "criterion": "per PWM pin (.<pin>): marker high, the pin switching before it, low and staying low within 1 us of the marker (scope, one armed single capture per pin); also L0-SUP-08.c",
+   "conditions": "SPOC bench; SAFETY_SUP on the CUT (bare Spin, no trips), PWM A, C, D, E, F at 200 kHz, 50 %; marker PA6 on SPOC CH1, the pin on CH3; MHO984 2 us/div"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C12)",
+   "harness": "tests/l0/spoc_dead/run.sh --run",
+   "source": "ADR 0009; IEC 62109-1 Annex B route (a); `tests/l0/spoc_dead/run.py`",
+   "id": "L0-CPU-02",
+   "title": "With the CPU halted, each hardware trip path still turns the outputs off",
+   "criterion": "per limit and bound (.<sensor>.<bound>): CPU halted throughout (same PC), outputs on before, the path's FLT flag set, OENR cleared and every PWM pin low after the threshold is crossed by an SWD write to the injection DAC; BLOCKED when the bench cannot hold the other current pins",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST; CUT halted over SWD after arming (watchdog frozen in debug, HRTIM running); held pins as L0-TRP"
   }
  ],
  "retired": {}

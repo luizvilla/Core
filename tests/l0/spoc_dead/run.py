@@ -3,14 +3,14 @@
 ## Copyright (c) 2026 OWNTECH TECHNOLOGIES
 ##
 ## @file run.py
-## @brief L0-DEAD: the protection with the CPU dead, on the SPOC bench (ADR 0009, issue luizvilla/Core#23, C12;
+## @brief L0-CPU: the protection with the CPU dead, on the SPOC bench (ADR 0009, issue luizvilla/Core#23, C12;
 ##        IEC 62109-1 Annex B route (a): each protection must work with the CPU dead).
 ##
-## Part 1, L0-DEAD-01 (firmware SAFETY_SUP, bare Spin, no trips): the supervision firmware's lockup case (FAULTMASK
+## Part 1, L0-CPU-01 (firmware SAFETY_SUP, bare Spin, no trips): the supervision firmware's lockup case (FAULTMASK
 ## set, then a fault) with a marker on PA6 a few cycles before. Per PWM pin, the scope captures the marker (SPOC CH1)
 ## and the pin (CH3) on one armed single trigger; the pin must be low and stay low within 1 µs of the marker (the
 ## HRTIM system fault, SYSCFG CFGR2 CLL). This is L0-SUP-08.c.
-## Part 2, L0-DEAD-02 (firmware SAFETY_L0_TWIST): for each hardware path of the manifest that the bench can drive,
+## Part 2, L0-CPU-02 (firmware SAFETY_L0_TWIST): for each hardware path of the manifest that the bench can drive,
 ## the CUT is armed with the PWM on, then halted over SWD (watchdog frozen in debug, HRTIM running), and the
 ## threshold is crossed by writing the CUT's DAC register over SWD: no instruction runs. The HRTIM fault flag of
 ## the path, the output enables and the PWM pin levels are read over SWD before the CPU is resumed.
@@ -200,13 +200,16 @@ def part1(out, scope, mux):
     time.sleep(3)
     sup = SupFirmware()
     sup.wait(lambda r: r['busy'] == 0, 30)
-    sup.run_case(SUP_CLEAR)
+    seq = sup.run_case(SUP_CLEAR)
+    sup.wait(lambda r: r['ack'] == seq and r['busy'] == 0, 30)   # else the next command could reuse its sequence
     scope.set_timebase(TIMEBASE_S)
     results = []
     for k, pin in enumerate(SUP_PINS):
         r = lockup_case(scope, mux, sup, pin)
+        if not r['captured']:
+            r = dict(lockup_case(scope, mux, sup, pin), retried=True)   # one retry for a missed trigger
         results.append(r)
-        cid = f'L0-DEAD-01.{pin}'
+        cid = f'L0-CPU-01.{pin}'
         what = f'Cortex-M4 lockup: {pin} (HRTIM output) after the marker'
         if not r['captured']:
             line(cid, 'FAIL', what, 'low within 1 µs', 'no trigger on the marker (PA6 on SPOC CH1)')
@@ -277,7 +280,7 @@ def part2(out, man_env='SAFETY_L0_TWIST', shield='twist:1_4_2'):
         for c in trip.cases_from(man, b.vref):
             if c['kind'] == 'software':
                 continue                            # no software path without a CPU
-            cid = f"L0-DEAD-02.{c['sensor']}.{c['bound']}"
+            cid = f"L0-CPU-02.{c['sensor']}.{c['bound']}"
             what = f"CPU halted: {c['sensor']} {c['bound']} limit, {trip.path_text(c)}, crossed by a DAC write over SWD"
             if len(c['holds']) > (2 if wired else 1):
                 line(cid, 'BLOCKED', what, 'outputs off by the hardware path alone', 'needs TP5-TP7 (two held pins)')
@@ -333,12 +336,12 @@ def main():
     dirty = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=REPO, capture_output=True,
                            text=True).stdout.strip()
     man_out = {
-        'title': 'L0-DEAD · the protection with the CPU dead (SPOC bench)',
+        'title': 'L0-CPU · the protection with the CPU dead (SPOC bench)',
         'purpose': 'IEC 62109-1 Annex B route (a), ADR 0009: each protection must work with the CPU dead. A lockup '
-                   'must turn every PWM output off within 1 µs through the HRTIM system fault (L0-DEAD-01, also '
+                   'must turn every PWM output off within 1 µs through the HRTIM system fault (L0-CPU-01, also '
                    'L0-SUP-08.c); with the CPU halted, each hardware trip path must still turn the outputs off when '
-                   'its threshold is crossed (L0-DEAD-02).',
-        'criteria': ['L0-DEAD-'],
+                   'its threshold is crossed (L0-CPU-02).',
+        'criteria': ['L0-CPU-'],
         'conditions': [
             ['01 firmware', 'SAFETY_SUP (tests/firmware/safety_supervision): bare Spin, PWM A, C, D, E, F at 200 kHz, '
                             '50 %; lockup = FAULTMASK set, then a fault; marker PA6 set a few cycles before'],

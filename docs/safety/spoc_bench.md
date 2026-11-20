@@ -68,7 +68,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 | C9 | `feat(test): generic safety test firmware, ThingSet control` | `tests/firmware/safety_l0`: arm, PWM, report and clear faults, any shield |
 | C10 | `feat(test): software fault injection in the generic firmware` | Stack overflow, hard fault, interrupts masked, watchdog starved, wild register writes after locking |
 | C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; the current pins with a watchdog low bound held by the injector through CH3 and (TP5–TP7 wired) CH4; production build only, its manifest checked against `tools/safety_check.py` |
-| C12 | `test(safety): CPU-dead cases from the MUX injector` | Injection on TP5 while the CUT is dead; unblocks L0-SUP-08.c |
+| C12 | `test(safety): CPU-dead cases` | L0-CPU (`tests/l0/spoc_dead`): lockup per PWM pin on the scope (L0-SUP-08.c); each hardware trip with the CPU halted over SWD, the threshold crossed by an SWD DAC write |
 | C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service |
 | C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once |
 | C15 | `docs(safety): L0 SPOC campaign results` | Campaign under `tests/out/`, control center checked, results here, in the ADR and on the issues; closes #23 |
@@ -288,4 +288,28 @@ First campaign (`2026-11-20_99ff3bf-dirty_001306`), TP5–TP7 not wired yet:
 **Finding: AWD1 never tripped in service.** The first runs found no I1_LOW low trip even at 200 mV. ADC1 converts a 3-channel sequence (ch2, ch1, ch9); AWD1 watches ch2 alone with its filter at "two consecutive detections" (`TR1.AWDFILT = 1`), and in that sequence it never flagged. With the filter cleared (by SWD, at 250 mV) it tripped at once. The arming self-test converts the channel alone and passed either way, so nothing showed it before. On the Twist, I1_LOW's watchdog bound (low, and high behind COMP1) protected nothing in service. Fixed: no AWD1 filter (AWD2 and AWD3 have none); the read-back now includes the filter bits.
 
 Runner notes: the arming self-tests run once per boot, at the first data start, with the idle plausibility of the current sensors; so the runner resets the CUT and arms first with the held pins at 0 A (driving a current pin to its start level before that fails the idle check). The test firmware now enables the shield's sensors at boot (`enableDefaultSensors()`, as an application) and watches one sensor by name for the software-path cases (`/Sw`). After a flash or reset, board discovery waits up to 60 s for both Spins.
+
+### 2026-11-20, C12: L0-CPU, the protection with the CPU dead
+
+`tests/l0/spoc_dead` (README there), campaign `2026-11-20_52d5d0e-dirty_015727`: 14 PASS, 2 BLOCKED (TP5–TP7).
+
+**L0-CPU-01, lockup per PWM pin (L0-SUP-08.c).** `SAFETY_SUP` on the CUT (bare Spin, no trips, PWM A, C, D, E, F at 200 kHz); its lockup case raises PA6 a few cycles before FAULTMASK and the fault. Marker on SPOC CH1, the pin on CH3, one armed single capture per pin (CH1 rising at 2.5 V: PWM crosstalk on CH1 reaches about 1.9 V and fired a 1.65 V trigger before the lockup in the first run).
+
+- **Finding: without a hardware trip, the lockup did not stop the outputs.** Every pin kept switching after the marker until the watchdog reset, about 1 ms later. With the PWM running, `OUTxR` fault states were Inactive and `SYSCFG_CFGR2` = 0xF (lockup, SRAM parity, ECC, PVD connected), but no timer listened to a fault channel (`FLTxR` = lock bit only). RM0440 28.3.17: the system fault is enabled "as long as the output is protected by the fault mechanism". Experiments: `FLT1EN` on every timer alone, set before the HRTIM driver's timer init, changed nothing; an enabled fault channel (never active) with every timer listening, set after the init, stopped all ten pins within 28 ns.
+- **Ruled out: the ST-Link's halting-debug state.** On a power-cycled CUT, with no SWD access, a lockup over USB (`SAFETY_L0_TWIST`, `/Fault` case 5; reference: the reset, seen as the DAC-held I1 node collapsing) stopped PA8 about 1.6 ms before the reset; the same after an SWD connection (`DHCSR.C_DEBUGEN` = 1): 1.5 ms.
+- **Fix (`52d5d0e4`):** when no trip uses a fault input, arming enables a sentinel: FLT1 from its pin, active high, locked; every timer listens to it. Without the pin's HRTIM alternate function the input reads low: no FLT1 flag over a PWM run with USB enumerated (PA12, the FLT1 pin, is USB D+); not tested under bulk USB traffic.
+- **After the fix:** all ten pins low within 27 ns of the marker (most already low at it and staying low). Boards with hardware trips (Twist, Ownverter) were not affected: every timer listens to the trip channels (shown for PA8 on `SAFETY_L0_TWIST` by the reset-reference capture).
+- L0-SUP regression after the fix (`020726`): 36 PASS, 3 INFO; L0-SUP-08.c now points to L0-CPU-01.
+
+**L0-CPU-02, trips with the CPU halted.** `SAFETY_L0_TWIST`, armed as L0-TRP; then in one SWD session: halt (watchdog frozen in debug, HRTIM running), DAC2 DHR12R1 written 50 mV past the threshold, registers and pins read, resume. The PC is identical before and after: no instruction ran.
+
+| Path | DAC | FLT flag | OENR | PWM pins |
+|---|---|---|---|---|
+| I1_LOW high, COMP1 → FLT4 | 1750 mV | FLT4 set | 0x033 → 0x000 | all low |
+| I1_LOW low, ADC1 AWD1 → FLT1 | 250 mV | FLT1 set | 0x033 → 0x000 | all low |
+| I2_LOW high, COMP3 → FLT5 | 1750 mV | FLT5 set | 0x033 → 0x000 | all low |
+| I2_LOW low, ADC2 AWD3 → FLT6 | 246 mV | FLT6 set | 0x033 → 0x000 | all low |
+| V1_LOW high, V_HIGH high (watchdogs) | | | | BLOCKED: TP5–TP7 |
+
+Bench notes: the SPOC preflight takes `SPOC_ROLES=mux` for a test that flashes the CUT itself. The supervision firmware's backup registers survive a flash: a fault latched by another firmware refuses its PWM until cleared. HRTIM timer registers: `OUTxR` at 0x64, `FLTxR` at 0x68; `SYSCFG_CFGR2` at 0x1C (an earlier read at wrong offsets suggested unarmed registers; corrected).
 
