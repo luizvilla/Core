@@ -95,8 +95,21 @@ class VisaTransport:
         self.inst.close()
 
 
-def open_transport(address):
-    """``/dev/usbtmcN`` path -> usbtmc, anything else -> pyvisa resource."""
+def scope_path():
+    """The scope's usbtmc device: $RIGOL_USBTMC, else the first /dev/usbtmcN (N changes when the scope is
+    replugged), else /dev/usbtmc0."""
+    import glob
+    env = os.environ.get("RIGOL_USBTMC")
+    if env:
+        return env
+    found = sorted(glob.glob("/dev/usbtmc[0-9]*"), key=lambda p: int(p[len("/dev/usbtmc"):]))
+    return found[0] if found else "/dev/usbtmc0"
+
+
+def open_transport(address=None):
+    """``/dev/usbtmcN`` path -> usbtmc, anything else -> pyvisa resource; None -> scope_path()."""
+    if address is None:
+        address = scope_path()
     if address.startswith("/dev/"):
         return UsbtmcTransport(address)
     return VisaTransport(address)
@@ -311,7 +324,7 @@ def main():
     import argparse
 
     ap = argparse.ArgumentParser(description=main.__doc__)
-    ap.add_argument("--scope", default="/dev/usbtmc0",
+    ap.add_argument("--scope", default=scope_path(),
                     help="/dev/usbtmcN or a VISA resource")
     args = ap.parse_args()
     scope = RigolScope(open_transport(args.scope))

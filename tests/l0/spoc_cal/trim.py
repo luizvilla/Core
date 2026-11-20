@@ -95,7 +95,7 @@ def main():
     ap.add_argument('--live', action='store_true')
     ap.add_argument('--ch', type=int, choices=CHANNELS, help='one channel only (required with --live)')
     args = ap.parse_args()
-    scope = rigol_mho.RigolScope(rigol_mho.open_transport('/dev/usbtmc0'))
+    scope = rigol_mho.RigolScope(rigol_mho.open_transport())
     mux = MuxController(boards.find('mux'))
     mux.connect()
     try:

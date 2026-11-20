@@ -138,7 +138,7 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
-    scope = rigol_mho.RigolScope(rigol_mho.open_transport('/dev/usbtmc0'))
+    scope = rigol_mho.RigolScope(rigol_mho.open_transport())
     idn = scope.idn()
     mux = MuxController(boards.find('mux'))
     mux.connect()

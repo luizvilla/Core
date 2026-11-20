@@ -315,7 +315,7 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     report = {'limit_s': LOCKUP_LIMIT_S}
     if args.part in ('1', 'both'):
-        scope = rigol_mho.RigolScope(rigol_mho.open_transport('/dev/usbtmc0'))
+        scope = rigol_mho.RigolScope(rigol_mho.open_transport())
         report['scope'] = scope.idn()
         mux = MuxController(boards.find('mux', tries=10))
         mux.connect()
