@@ -37,7 +37,7 @@ from mux_controller import MuxController, PIN_TO_ROUTE  # noqa: E402
 from thingset import ThingSetShell  # noqa: E402
 
 PIO = os.path.expanduser(os.environ.get('PIO', '~/.platformio/penv/bin/pio'))
-MUX_FW = 'owntech-foundation/SPOC_Software mux-injector b500a4e'
+MUX_FW = 'owntech-foundation/SPOC_Software mux-injector fe04fe3'
 SOURCE_PIN = 'PA6'           # DAC2_CH1, reserved from the allocation (app.overlay)
 TOL_MV = 25.0                # trip level against the threshold; DAC, ADC and comparators share the CUT's VREFBUF
 START_MV = 150.0             # start level inside the threshold

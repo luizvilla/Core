@@ -769,7 +769,7 @@
    "level": "L0",
    "title": "The SPOC bench answers: CUT and MUX over ThingSet, scope over usbtmc",
    "criterion": "all three answer",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -781,7 +781,7 @@
    "level": "L0",
    "title": "Each scope channel's divider is trimmed",
    "criterion": ".a-.d CH1-CH4 compensation 95-105 % (level 5-25 us after each edge against the settled level), channel routed alone",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -793,7 +793,7 @@
    "level": "L0",
    "title": "The scope's FREQuency is steady on each channel (cable check)",
    "criterion": ".a-.d 1000 Hz ±0.1 %, spread of 5 readings <= 0.1 %",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -805,7 +805,7 @@
    "level": "L0",
    "title": "The scope's PDUTy is steady on each channel (cable check)",
    "criterion": ".a-.d 0.5 ±0.005, spread of 5 readings <= 0.005",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -817,7 +817,7 @@
    "level": "L0",
    "title": "Each channel reads the 3.3 V swing with steady levels",
    "criterion": ".a-.d VTOP - VBASe = 3.3 V ±5 %, VTOP and VBASe spreads <= 50 mV",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -829,7 +829,7 @@
    "level": "L0",
    "title": "Gain of each channel against CH1, recorded for the campaign",
    "criterion": ".a-.d INFO (calibration.json)",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -841,7 +841,7 @@
    "level": "L0",
    "title": "Skew CH1 -> CH2, CH3, CH4 on the rising edge, recorded for the campaign",
    "criterion": ".b-.d INFO: 50 % crossings from the waveforms, 5 single captures at 20 ns/div (calibration.json)",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -853,7 +853,7 @@
    "level": "L0",
    "title": "Skew CH1 -> CH2, CH3, CH4 on the falling edge, recorded for the campaign",
    "criterion": ".b-.d INFO, as L0-CAL-07",
-   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector b500a4e); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
+   "conditions": "SPOC bench: CUT Spin (Core-CUT) drives PA8 at 1 kHz, 0.5; MUX Spin (Core-MUX mux-injector fe04fe3); MHO984, 30 cm BNC cables, ×10, 1 V/div; TP1-TP3 wired",
    "source": "ADR 0009 (SPOC bench notes of 2026-11-17 and 2026-11-19); `tests/l0/spoc_cal/run.py`",
    "status": "implemented",
    "status_note": "Implemented 2026-11-19 (issue luizvilla/Core#26)",
@@ -869,7 +869,7 @@
    "id": "L0-TRP-01",
    "title": "The test build has the production protection allocation, and arms with the held current pins at 0 A",
    "criterion": "per board (.<board>): .a manifest identical to the production allocation (tools/safety_check.py) but for reserved DAC2_CH1; .b first arming of the boot passes its self-tests, outputs on, quiet",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST or SAFETY_L0_OWNVERTER (production allocation of Twist 1.4.2 or Ownverter 1.1.0 + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST or SAFETY_L0_OWNVERTER (production allocation of Twist 1.4.2 or Ownverter 1.1.0 + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
   },
   {
    "tab": "safety",
@@ -881,7 +881,7 @@
    "id": "L0-TRP-02",
    "title": "Each hardware path (comparator, ADC watchdog) of the manifest trips at its threshold, on its own fault input",
    "criterion": "per limit and bound (.<board>.<sensor>.<bound>, board twist or ownverter): trip fault, the path's FLT set, outputs off, fine-ramp trip level within ±25 mV of the threshold from the manifest counts; BLOCKED when the bench cannot hold the other current pins",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
   },
   {
    "tab": "safety",
@@ -893,7 +893,7 @@
    "id": "L0-TRP-03",
    "title": "Each software-path limit of the manifest trips at its threshold",
    "criterion": "per limit and bound (.<board>.<sensor>.<bound>, board twist or ownverter), only that sensor watched: software trip of that sensor, outputs off, trip level within ±25 mV of the threshold; BLOCKED when the bench cannot hold the current pins",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
   },
   {
    "tab": "safety",

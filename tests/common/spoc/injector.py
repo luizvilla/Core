@@ -1,7 +1,7 @@
 """Independent injector on the SPOC's MUX Spin (ThingSet /Mux/Inj).
 
 Firmware: owntech-foundation/SPOC_Software, branch mux-injector, commit
-b500a4e5d37df710018dac232c65e7b8a362d959 (pinned in docs/safety/spoc_bench.md).
+fe04fe3ccb2a59565d297e667cc5be2a22b95283 (pinned in docs/safety/spoc_bench.md).
 Wiring: MUX Spin pin 2 (PB12, OPAMP4 <- DAC4_CH1) through 220-470 ohm and
 pin 4 (PB13, GPIO) through ~100 ohm, both to TP5 (CH3's signal test point).
 

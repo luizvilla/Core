@@ -315,7 +315,7 @@ def main():
                          '(DAC source) holds or drives the second through CH3'],
             ['Boots', '01 on a fresh boot (the arming self-tests run once per boot); 02-05 on a second fresh boot, '
                       'armed first with both current pins at 0 A; a reset at the end (03 leaves "reboot required")'],
-            ['Glitches (06)', f'MUX injector pulse mode (Core-MUX mux-injector, local commit after b500a4e): the DAC '
+            ['Glitches (06)', f'MUX injector pulse mode (Core-MUX mux-injector, fe04fe3): the DAC '
                               f'source steps the second pin from its 0 A hold to {PULSE_HIGH_MV} mV and back; '
                               'requested widths ' + f'{PULSE_WIDTHS_NS[0]}-{PULSE_WIDTHS_NS[-1]} ns; each pulse captured on '
                               'CH3 (200 ns/div); the time above the threshold decides'],

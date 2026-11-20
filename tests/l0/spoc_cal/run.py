@@ -29,7 +29,7 @@ sys.path.insert(0, HERE)
 import trim  # noqa: E402
 from trim import rigol_mho, boards, waveform, MuxController  # noqa: E402
 
-MUX_FW = 'owntech-foundation/SPOC_Software mux-injector b500a4e'
+MUX_FW = 'owntech-foundation/SPOC_Software mux-injector fe04fe3'
 CHANNELS = trim.CHANNELS
 F_NOM, D_NOM, V_HIGH = 1000.0, 0.5, 3.3
 F_TOL, D_TOL = 0.001, 0.005          # frequency ±0.1 %, duty ±0.005 (median and spread)

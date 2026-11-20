@@ -183,7 +183,7 @@ The overshoot and the wandering VTOP/VBASe came from the cables, not from the di
 
 ### 2026-11-19, C5 and C6: the injector
 
-Firmware: `owntech-foundation/SPOC_Software`, branch `mux-injector` (from `Core-MUX` `295a3f6`), **pinned at `b500a4e5d37df710018dac232c65e7b8a362d959`**. ThingSet `/Mux/Inj`: `wSource` (0 off, 1 DAC, 2 GPIO), `wLevel_mV`, `wGpio`, `xApply`; read back `rSource`, `rLevel_mV`, `rVref_mV`, `rGpio`. Host side: `tests/common/spoc/injector.py`.
+Firmware: `owntech-foundation/SPOC_Software`, branch `mux-injector` (from `Core-MUX` `295a3f6`), **pinned at `fe04fe3ccb2a59565d297e667cc5be2a22b95283`** (`b500a4e` until 2026-11-20, then the pulse mode). ThingSet `/Mux/Inj`: `wSource` (0 off, 1 DAC, 2 GPIO), `wLevel_mV`, `wGpio`, `xApply`; read back `rSource`, `rLevel_mV`, `rVref_mV`, `rGpio`; pulse mode `wPulseHigh_mV`, `wPulse_ns`, `xPulse`, read back `rPulse_ns`, `rPulseRc`. Host side: `tests/common/spoc/injector.py`.
 
 Wiring done by Luiz Villa: MUX Spin pin 2 (PB12) and pin 4 (PB13) to TP5 through their resistors.
 
@@ -327,7 +327,7 @@ Bench notes: the SPOC preflight takes `SPOC_ROLES=mux` for a test that flashes t
 
 **Open: the repeat-clear rule.** ADR 0009 states it two ways. The decision text: "a repeated clear within N s needs a reboot", which is what `safety_supervision_clear_fault()` does (it compares the new clear with the previous one). The implementation note and the Kconfig prompt: "a second fault within N s of a clear". With the code as it is, a fault 70 ms after a clear, cleared 0.6 s later, is accepted; in production (10 s) a fault 2 s after a clear, cleared 20 s later, is accepted too. To decide; the second reading needs the fault time recorded at the latch, which runs in a zero-latency interrupt (no kernel call): stamped by the self-test work within 10 ms, for example.
 
-**Glitch filter (L0-EDG-06, campaign `2026-11-20_81dfd6a-dirty_030645`).** Core-MUX got a pulse mode on the injector's DAC source (`/Mux/Inj` `wPulseHigh_mV`, `wPulse_ns`, `xPulse`; SPOC_Software `mux-injector` local commit `fe04fe3`, **not pushed**: the bench runs it, `b500a4e` stays the pinned hash until it is pushed). I2 is held at 1.0 V and pulsed to 2.0 V; each pulse is captured on CH3 at 200 ns/div and its time above the 1.70 V threshold read from the waveform (the firmware's own timing runs long, in steps of about 41 ns). 19 pulses: no trip up to 270 ns above the threshold, a COMP3 → FLT5 trip from 306 ns; the 282 ns filter (fHRTIM/8, N = 6) lies in between. PASS (no trip up to 242 ns, trip from 322 ns). The ADC watchdog on I2 (no filter, sampled every PWM period) caught none of these pulses.
+**Glitch filter (L0-EDG-06, campaign `2026-11-20_81dfd6a-dirty_030645`).** Core-MUX got a pulse mode on the injector's DAC source (`/Mux/Inj` `wPulseHigh_mV`, `wPulse_ns`, `xPulse`; SPOC_Software `mux-injector` commit `fe04fe3`, pushed and pinned 2026-11-20). I2 is held at 1.0 V and pulsed to 2.0 V; each pulse is captured on CH3 at 200 ns/div and its time above the 1.70 V threshold read from the waveform (the firmware's own timing runs long, in steps of about 41 ns). 19 pulses: no trip up to 270 ns above the threshold, a COMP3 → FLT5 trip from 306 ns; the 282 ns filter (fHRTIM/8, N = 6) lies in between. PASS (no trip up to 242 ns, trip from 322 ns). The ADC watchdog on I2 (no filter, sampled every PWM period) caught none of these pulses.
 
 Faults during dead time stay open: they need the fault aligned on the PWM edges, with direct probes.
 
