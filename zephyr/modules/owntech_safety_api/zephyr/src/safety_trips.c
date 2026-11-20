@@ -634,10 +634,24 @@ int safety_trips_arm(void)
 			LL_HRTIM_FLT_Lock(HRTIM1, ll_fault[f]);
 		}
 	}
+	if (faults == 0U) {
+		/* No trip uses a fault input. The HRTIM system fault (lockup, SRAM parity, flash ECC, PVD, connected by
+		 * SYSCFG_CFGR2 at arming) acts only on timers that listen to an enabled fault channel: without one, a
+		 * lockup left every output switching until the watchdog reset, about 1 ms (SPOC bench, L0-DEAD-01,
+		 * 2026-11-20; RM0440 28.3.17: "as long as the output is protected by the fault mechanism"). A sentinel
+		 * channel: FLT1 from its pin, active high. Without the pin's HRTIM alternate function the input reads
+		 * low, so it never trips (checked with USB traffic on PA12, the FLT1 pin). */
+		uint32_t f = ll_fault[1];
+		LL_HRTIM_FLT_Disable(HRTIM1, f);
+		LL_HRTIM_FLT_SetSrc(HRTIM1, f, LL_HRTIM_FLT_SRC_DIGITALINPUT);
+		LL_HRTIM_FLT_SetPolarity(HRTIM1, f, LL_HRTIM_FLT_POLARITY_HIGH);
+		LL_HRTIM_FLT_SetFilter(HRTIM1, f, LL_HRTIM_FLT_FILTER_NONE);
+		LL_HRTIM_FLT_Enable(HRTIM1, f);
+		LL_HRTIM_FLT_Lock(HRTIM1, f);
+		faults = f;
+	}
 	for (size_t k = 0; k < ARRAY_SIZE(ll_timers); k++) {
-		if (faults != 0U) {
-			LL_HRTIM_TIM_EnableFault(HRTIM1, ll_timers[k], faults);
-		}
+		LL_HRTIM_TIM_EnableFault(HRTIM1, ll_timers[k], faults);
 		LL_HRTIM_TIM_LockFault(HRTIM1, ll_timers[k]);
 	}
 #if SAFETY_COMPARATOR_TRIPS > 0
