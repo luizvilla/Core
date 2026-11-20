@@ -868,8 +868,8 @@
    "source": "ADR 0009; docs/safety/spoc_bench.md (C11); `tests/l0/spoc_trip/run.py`",
    "id": "L0-TRP-01",
    "title": "The test build has the production protection allocation, and arms with the held current pins at 0 A",
-   "criterion": ".a manifest identical to the production allocation (tools/safety_check.py) but for reserved DAC2_CH1; .b first arming of the boot passes its self-tests, outputs on, quiet",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
+   "criterion": "per board (.<board>): .a manifest identical to the production allocation (tools/safety_check.py) but for reserved DAC2_CH1; .b first arming of the boot passes its self-tests, outputs on, quiet",
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST or SAFETY_L0_OWNVERTER (production allocation of Twist 1.4.2 or Ownverter 1.1.0 + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
   },
   {
    "tab": "safety",
@@ -880,7 +880,7 @@
    "source": "ADR 0009; docs/safety/spoc_bench.md (C11); `tests/l0/spoc_trip/run.py`",
    "id": "L0-TRP-02",
    "title": "Each hardware path (comparator, ADC watchdog) of the manifest trips at its threshold, on its own fault input",
-   "criterion": "per limit and bound (.<sensor>.<bound>): trip fault, the path's FLT set, outputs off, fine-ramp trip level within ±25 mV of the threshold from the manifest counts; BLOCKED when the bench cannot hold the other current pins",
+   "criterion": "per limit and bound (.<board>.<sensor>.<bound>, board twist or ownverter): trip fault, the path's FLT set, outputs off, fine-ramp trip level within ±25 mV of the threshold from the manifest counts; BLOCKED when the bench cannot hold the other current pins",
    "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
   },
   {
@@ -892,7 +892,7 @@
    "source": "ADR 0009; docs/safety/spoc_bench.md (C11); `tests/l0/spoc_trip/run.py`",
    "id": "L0-TRP-03",
    "title": "Each software-path limit of the manifest trips at its threshold",
-   "criterion": "per limit and bound (.<sensor>.<bound>), only that sensor watched: software trip of that sensor, outputs off, trip level within ±25 mV of the threshold; BLOCKED when the bench cannot hold the current pins",
+   "criterion": "per limit and bound (.<board>.<sensor>.<bound>, board twist or ownverter), only that sensor watched: software trip of that sensor, outputs off, trip level within ±25 mV of the threshold; BLOCKED when the bench cannot hold the current pins",
    "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector b500a4e, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us"
   },
   {

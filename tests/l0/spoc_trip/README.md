@@ -6,6 +6,7 @@ Drives every limit, bound and path of the board's protection manifest across its
 bash tests/common/spoc_preflight.sh                           # CUT, MUX and scope answer
 bash tests/l0/spoc_cal/run.sh --run                           # calibrate the bench first (L0-CAL)
 bash tests/l0/spoc_trip/run.sh --run                          # flashes SAFETY_L0_TWIST, runs every case
+bash tests/l0/spoc_trip/run.sh --run --board=ownverter        # SAFETY_L0_OWNVERTER (Ownverter 1.1.0)
 .venv/bin/python tests/l0/spoc_trip/run.py --out /tmp/x --no-flash   # development run, not a campaign
 ```
 
@@ -39,10 +40,12 @@ The runner finds the wire itself: with every route off and the injector at 1.2 V
 
 | ID | What | Limit |
 |---|---|---|
-| L0-TRP-01.a | test build manifest against production | identical but for reserved DAC2_CH1 |
-| L0-TRP-01.b | first arming with the held pins at 0 A | armed, outputs on, quiet |
-| L0-TRP-02.<sensor>.<bound> | hardware path (comparator or ADC watchdog) | its FLT, outputs off, ±25 mV |
-| L0-TRP-03.<sensor>.<bound> | software path | software trip of the sensor, outputs off, ±25 mV |
+| L0-TRP-01.<board>.a | test build manifest against production | identical but for reserved DAC2_CH1 |
+| L0-TRP-01.<board>.b | first arming with the held pins at 0 A | armed, outputs on, quiet |
+| L0-TRP-02.<board>.<sensor>.<bound> | hardware path (comparator or ADC watchdog) | its FLT, outputs off, ±25 mV |
+| L0-TRP-03.<board>.<sensor>.<bound> | software path | software trip of the sensor, outputs off, ±25 mV |
+
+The start level is 150 mV inside the threshold, or 40 % of the sensor's window if that is narrower (Ownverter 1.1.0's I3_LOW window is 157 mV wide, see spoc_bench.md). Held pins with 0 A levels less than 50 mV apart share the injector's mean level (Ownverter: I1 1000 mV, I3 1024.5 mV).
 
 Not covered here: trip latency (C13), glitch filters and edge cases (C14), CPU-dead cases (C12).
 

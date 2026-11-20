@@ -331,3 +331,21 @@ Bench notes: the SPOC preflight takes `SPOC_ROLES=mux` for a test that flashes t
 
 Faults during dead time stay open: they need the fault aligned on the PWM edges, with direct probes.
 
+### 2026-11-20, Ownverter 1.1.0 on the SPOC bench (L0-TRP)
+
+Env `SAFETY_L0_OWNVERTER` (same app as the Twist, Ownverter 1.1.0 devicetree); `tests/l0/spoc_trip/run.sh --run --board=ownverter`. L0-TRP IDs now carry the board (`L0-TRP-02.ownverter.I1_LOW.high`); the Twist campaign was run again under them (`035111`: 6 PASS, 8 BLOCKED, same trip levels). Ownverter campaign `2026-11-20_24545e7-dirty_034118`: 6 PASS, 10 BLOCKED (TP5–TP7).
+
+| Path | Threshold | Trip |
+|---|---|---|
+| test build manifest vs production Ownverter 1.1.0 | | identical but for reserved DAC2_CH1 |
+| I1_LOW high, COMP3 → FLT5 | 1700.0 mV | 1698 mV (−2.0) |
+| I1_LOW low, ADC2 AWD3 → FLT6 | 296.0 mV | 316 mV (+20.0) |
+| I3_LOW high, COMP6 → FLT3 | 1102.5 mV | 1102 mV (−0.2) |
+| I3_LOW low, ADC1 AWD1 → FLT1 | 946.2 mV | 958 mV (+12.2) |
+
+**Finding to confirm with the hardware team: I3_LOW's scaling.** On Ownverter 0.9.0, 1.0.0 and 1.1.0, I3_LOW has gain 0.045 and offset −92.2, the values of the voltage sensors V1–V3_LOW; I1_LOW and I2_LOW have 0.005 and −10. With it, I3's ±7 A limits are a 157 mV window around 1024.5 mV (±156 counts): if the real sensor is like I1 and I2, that is about ±0.8 A of real current, and the board would trip at low current. Present in the overlays since 2024 (`f1ff9600`); not changed here. The runner now starts a case at 40 % of a narrow window instead of 150 mV, which landed past I3's other bound.
+
+**Observation: the low-bound watchdog trips come early.** Every ADC-watchdog low bound near 300 mV trips 12–22 mV above its threshold (Twist I1 +14, I2 +13; Ownverter I1 +20, I3 +12 at 946 mV), while the comparators trip within 2 mV. The CUT's DAC is linear down to 200 mV (scope, relative to its 1000 mV reading), and the ADCs are calibrated at start. Within the ±25 mV tolerance; to look at with the CUT's raw ADC reading of the pin against the DAC.
+
+The two held pins of the Ownverter have different 0 A levels (I1 1000 mV, I3 1024.5 mV): the runner holds them at their mean when they are less than 50 mV apart (with TP5–TP7).
+

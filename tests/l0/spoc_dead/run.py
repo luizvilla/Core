@@ -230,7 +230,7 @@ def halted_trip(b, c):
     """Arms, halts the CUT, crosses the threshold by a DAC register write over SWD, reads the result, resumes."""
     high = c['bound'] == 'high'
     thr = c['threshold_mV']
-    start = min(max(thr - (1 if high else -1) * trip.START_MV, 20.0), b.vref - 20.0)
+    start = min(max(thr - (1 if high else -1) * c['start_offset_mV'], 20.0), b.vref - 20.0)
     beyond = min(max(thr + (1 if high else -1) * BEYOND_MV, 0.0), b.vref)
     code = int(round(beyond * 4095 / b.vref))
     res = dict(c, start_mV=start, beyond_mV=beyond, routes=b.route(c['pin'], c['holds']))

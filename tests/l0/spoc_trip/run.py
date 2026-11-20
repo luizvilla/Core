@@ -46,6 +46,7 @@ BEYOND_MV = 100.0            # how far past the threshold a ramp goes before it 
 SETTLE_S = 0.03
 QUIET_S = 0.2
 TRIP_FAULT = 3               # SAFETY_FAULT_TRIP
+HOLD_SPREAD_MV = 50.0        # held pins whose 0 A levels differ by less than this share the injector's mean level
 
 
 def line(cid, verdict, what, expected, measured):
@@ -156,14 +157,20 @@ def cases_from(man, vref):
             if path.get('kind') not in ('comparator', 'adc_watchdog', 'software'):
                 continue
             pin = sensor_pin(man, lim['sensor'], path)
+            lsb = vref / 4096.0
+            window_mv = abs(lim['high'] - lim['low']) / lim['gain'] * lsb    # the sensor's limits, in pin mV
             out.append({'sensor': lim['sensor'], 'bound': bound, 'kind': path['kind'], 'path': path, 'pin': pin,
                         'limit': lim[bound], 'threshold_mV': threshold_mv(lim, bound, path, vref),
+                        'start_offset_mV': min(START_MV, 0.4 * window_mv),
                         'holds': [h for h in held if h != lim['sensor']]})
     return out
 
 
+BOARD = 'twist'   # set by main() from --shield: each board's results keep their own IDs in the control center
+
+
 def case_id(c):
-    return f"{'L0-TRP-03' if c['kind'] == 'software' else 'L0-TRP-02'}.{c['sensor']}.{c['bound']}"
+    return f"{'L0-TRP-03' if c['kind'] == 'software' else 'L0-TRP-02'}.{BOARD}.{c['sensor']}.{c['bound']}"
 
 
 def path_text(c):
@@ -248,7 +255,7 @@ class Bench:
         self.pwm(False)
         hold_mv = [zero_mv(self.man, h, self.vref) for h in holds]
         if holds:
-            self.inj.level(int(round(hold_mv[0])))
+            self.inj.level(int(round(sum(hold_mv) / len(hold_mv))))   # one injector: the mean of the 0 A levels
         else:
             self.inj.off()
         self.mux.disable_all()
@@ -320,7 +327,7 @@ def run_case(b, c):
     high = c['bound'] == 'high'
     thr = c['threshold_mV']
     sign = 1 if high else -1
-    start = min(max(thr - sign * START_MV, 20.0), b.vref - 20.0)
+    start = min(max(thr - sign * c['start_offset_mV'], 20.0), b.vref - 20.0)   # inside both bounds of a narrow window
     stop = min(max(thr + sign * BEYOND_MV, 0.0), b.vref)
     res = dict(c, start_mV=start, routes=b.route(c['pin'], c['holds']))
     sw = c['sensor'] if c['kind'] == 'software' else None
@@ -382,6 +389,8 @@ def main():
     ap.add_argument('--no-flash', action='store_true', help='the CUT already runs the test build')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
+    global BOARD
+    BOARD = args.shield.split(':')[0]
 
     prod = production_manifest(args.shield, args.out)
     man = build_and_flash(args.env, args.out, flash=not args.no_flash)
@@ -391,7 +400,7 @@ def main():
         json.dump(man, fh, indent=1)
     diffs = manifest_diff(prod, man)
     reserved = man['model'].get('reserved', {}).get('dacs', [])
-    line('L0-TRP-01.a', judge(not diffs and reserved == ['DAC2_CH1']),
+    line(f'L0-TRP-01.{BOARD}.a', judge(not diffs and reserved == ['DAC2_CH1']),
          f'Test build {args.env}: protection manifest against the production {args.shield} allocation',
          'identical but for reserved DAC2_CH1',
          'identical, reserved ' + ', '.join(reserved) if not diffs else 'differs in: ' + ', '.join(diffs))
@@ -413,7 +422,7 @@ def main():
             armed, why = False, f'{len(held)} current pins to hold ({", ".join(held)}), {holds_ok + 1} sources'
         else:
             armed, why = b.first_arming(held)
-        line('L0-TRP-01.b', judge(armed), 'First arming of the boot, held current pins at 0 A: self-tests pass',
+        line(f'L0-TRP-01.{BOARD}.b', judge(armed), 'First arming of the boot, held current pins at 0 A: self-tests pass',
              'armed, outputs on, quiet', 'armed' if armed else why)
         for c in cases:
             what = f"{c['sensor']} {c['bound']} limit {c['limit']:g}, {path_text(c)}, pin {c['pin']}"
@@ -423,9 +432,10 @@ def main():
                 line(case_id(c), 'BLOCKED', what, f'trip within ±{TOL_MV:g} mV of the threshold', why)
                 results.append(dict(c, blocked=why))
                 continue
-            levels = {round(zero_mv(man, h, b.vref)) for h in c['holds']}
-            if len(levels) > 1:
-                why = f"held pins need different 0 A levels {sorted(levels)} mV: one injector holds them"
+            levels = [zero_mv(man, h, b.vref) for h in c['holds']]
+            if levels and max(levels) - min(levels) > HOLD_SPREAD_MV:
+                why = (f"held pins need 0 A levels {', '.join(f'{x:.0f}' for x in levels)} mV, more than "
+                       f"{HOLD_SPREAD_MV:g} mV apart: one injector holds them")
                 line(case_id(c), 'BLOCKED', what, f'trip within ±{TOL_MV:g} mV of the threshold', why)
                 results.append(dict(c, blocked=why))
                 continue
@@ -445,7 +455,7 @@ def main():
     dirty = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=REPO, capture_output=True,
                            text=True).stdout.strip()
     man_out = {
-        'title': 'L0-TRP · protection paths trip at their thresholds (SPOC bench)',
+        'title': f'L0-TRP · protection paths trip at their thresholds, {args.shield} (SPOC bench)',
         'purpose': 'Every limit, bound and path of the board\'s protection manifest is driven across its threshold on '
                    'the CUT Spin (ADR 0009): the trip must come within the tolerance of the threshold computed from '
                    'the manifest, on the path\'s own fault input (or the software check), with the outputs off.',
