@@ -61,16 +61,23 @@ def studies(out):
     return sorted(found,key=lambda s:s['started'],reverse=True)
 
 
-def latest_results(camps):
+def latest_results(camps,variants=None):
     """@brief {case ID: (campaign, [rows], blocked_after)} from the newest campaign that ran each case.
     A campaign where a case is only BLOCKED (not run: an on-target test without --target, a missing plant) does
     not hide the newest campaign where it did run; that newer block is kept as blocked_after (campaign, reason)
-    and shown on the row. A case that never ran keeps its newest BLOCKED result."""
+    and shown on the row. A case that never ran keeps its newest BLOCKED result.
+    variants: {case ID: [names]} for tests run per board in campaigns of their own (row ID <case>.<variant>...):
+    each variant keeps its newest campaign; the case then shows every variant's rows, a link per variant
+    (4th element: [(variant, campaign)])."""
+    variants=variants or {}
+    def key(r):
+        p=r['id'].split('.')
+        return f'{p[0]}.{p[1]}' if len(p)>1 and p[1] in variants.get(p[0],()) else p[0]
     latest,blocked={},{}
     for c in camps:  # newest first
         if c.get('reference'):continue
         by={}
-        for r in c['rows']:by.setdefault(r['id'].split('.')[0],[]).append(r)
+        for r in c['rows']:by.setdefault(key(r),[]).append(r)
         for cid,rows in by.items():
             if cid in latest:continue
             if all(r['verdict']=='BLOCKED' for r in rows):
@@ -79,6 +86,12 @@ def latest_results(camps):
             b=blocked.get(cid)
             latest[cid]=(c,rows,(b[0],b[1][0]['measured']) if b else None)
     for cid,(c,rows) in blocked.items():latest.setdefault(cid,(c,rows,None))
+    for cid,names in variants.items():  # merge the variants of a case
+        parts=[(v,latest.pop(f'{cid}.{v}')) for v in names if f'{cid}.{v}' in latest]
+        if not parts:continue
+        if cid in latest:parts.append(('',latest.pop(cid)))
+        newest=max(parts,key=lambda p:p[1][0]['when'])[1]
+        latest[cid]=(newest[0],[r for _,p in parts for r in p[1]],newest[2],[(v,p[0]) for v,p in parts if v])
     return latest
 
 
@@ -153,6 +166,9 @@ def test_row(t,result,state,studs,findings,hardware):
     if result:
         c=result[0]
         when=f'<a href="{rel(c)}">{dt.datetime.fromtimestamp(c["when"]).strftime("%Y-%m-%d %H:%M")}</a><div class="sub">{ago(c["when"])} · {e(c["commit"])}</div>'
+        if len(result)>3:
+            when='<br>'.join(f'{e(v)}: <a href="{rel(cv)}">{dt.datetime.fromtimestamp(cv["when"]).strftime("%Y-%m-%d %H:%M")}</a>'
+                             f'<div class="sub">{ago(cv["when"])} · {e(cv["commit"])}</div>' for v,cv in result[3])
         if len(result)>2 and result[2]:
             when+=f'<div class="sub">not run since: BLOCKED in <a href="{rel(result[2][0])}">{e(result[2][0]["dir"].name[:16])}</a></div>'
     issues=sorted({f['issue'] for r in (result[1] if result else []) if r['verdict']=='FAIL'
@@ -185,7 +201,7 @@ def test_row(t,result,state,studs,findings,hardware):
 
 def page(cat,camps,studs,out):
     findings=findings_register()
-    latest=latest_results(camps)
+    latest=latest_results(camps,{t['id']:t['variants'] for t in cat['tests'] if t.get('variants')})
     for t in cat['tests']:  # a check that only reports failures passed if the newest campaign of its level is silent
         if t.get('reports_only_failures'):
             c=newest_of_level(camps,t['level'])
