@@ -44,6 +44,7 @@
  */
 
 bool DataAPI::is_started = false;
+bool DataAPI::is_unattended = false;
 bool DataAPI::adcInitialized = false;
 uint8_t DataAPI::channels_ranks[ADC_COUNT][CHANNELS_PER_ADC] = {0};
 uint8_t DataAPI::current_rank[ADC_COUNT] = {0};
@@ -128,7 +129,14 @@ int8_t DataAPI::startUnattended()
 		return -1;
 	setDispatchMethod(DispatchMethod_t::externally_triggered);
 	setRepetitionsBetweenDispatches(16);
-	return start();
+	int8_t rc = start();
+	DataAPI::is_unattended = (rc == 0);
+	return rc;
+}
+
+bool DataAPI::startedUnattended()
+{
+	return DataAPI::is_started && DataAPI::is_unattended;
 }
 
 int8_t DataAPI::start()
@@ -212,6 +220,7 @@ int8_t DataAPI::stop()
 	}
 
 	DataAPI::is_started = false;
+	DataAPI::is_unattended = false;
 
 	return 0;
 }

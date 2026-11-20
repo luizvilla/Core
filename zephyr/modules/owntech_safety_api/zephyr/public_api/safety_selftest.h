@@ -28,6 +28,7 @@ enum {
     SAFETY_SELFTEST_IRQ_RATE  = 6,   /**< control task interrupts far more frequent than declared */
     SAFETY_SELFTEST_FROZEN    = 7,   /**< a current sensor reading frozen while the PWM runs (| index << 8) */
     SAFETY_SELFTEST_OFFSET    = 8,   /**< a current sensor away from zero at idle (| index << 8) */
+    SAFETY_SELFTEST_NO_DATA   = 9,   /**< a current sensor without any reading while the PWM runs: no dispatch (| index << 8) */
 };
 
 #define SAFETY_SELFTEST_MAGIC 0x54535453U   /* "STST" */

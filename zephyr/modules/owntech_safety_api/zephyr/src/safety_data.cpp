@@ -59,11 +59,14 @@ extern "C" int safety_data_start(void)
  * (the shield sensor API may read NVS on first use). A current sensor watched
  * by an ADC watchdog whose reading does not change for
  * CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS control periods while the PWM runs is
- * stuck (a real current sensor always shows a little noise). No value: skipped. */
+ * stuck (a real current sensor always shows a little noise). A sensor with no
+ * value for as long while the PWM runs latches too: nothing dispatches the
+ * data, so the check would otherwise be off without saying so (#23). */
 
 #define MAX_WATCHED 8
 static uint16_t last_raw[MAX_WATCHED];
 static uint32_t same_count[MAX_WATCHED];
+static uint32_t none_count[MAX_WATCHED];
 static uint8_t rank_of[MAX_WATCHED];
 static int next_sensor;
 
@@ -99,12 +102,29 @@ extern "C" void safety_plausibility_period(void)
         rank_of[k] = spin.data.getAdcChannelRank(static_cast<adc_t>(adc), channel);
     }
     uint16_t v = spin.data.peekAdcRaw(static_cast<adc_t>(adc), rank_of[k]);
-    if (!running || v == 0xFFFFU)
+    if (!running)
     {
         same_count[k] = 0;
+        none_count[k] = 0;
         last_raw[k] = v;
         return;
     }
+    if (v == 0xFFFFU)
+    {
+        /* No value yet (the first periods after a start), or none at all. */
+        uint32_t before = none_count[k];
+        none_count[k] += (uint32_t)currents;
+        same_count[k] = 0;
+        last_raw[k] = v;
+        if (before < CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS && none_count[k] >= CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS &&
+            safety_supervision_get_fault() == SAFETY_FAULT_NONE)
+        {
+            safety_supervision_latch(SAFETY_FAULT_SELFTEST, SAFETY_SELFTEST_NO_DATA | ((uint32_t)i << 8));
+            safety_emergency_stop();
+        }
+        return;
+    }
+    none_count[k] = 0;
     if (v == last_raw[k])
     {
         uint32_t before = same_count[k];

@@ -17,8 +17,11 @@ config OWNTECH_SAFETY_REPEAT_CLEAR_MS
 	range 100 600000
 	depends on OWNTECH_SAFETY_SUPERVISION
 	help
-		ADR 0009: clearFault() after a second fault within this time of
-		the previous clear is refused until a reboot.
+		ADR 0009 repeat-clear rule: a fault that comes within this time
+		of a clear cannot be cleared with clearFault(), however long one
+		waits: only a reboot (sys_reboot or the reset pin) or a power
+		cycle lifts it. A watchdog reset does not. The time runs from the
+		clear to the new fault.
 
 config OWNTECH_SAFETY_RUNTIME_SELFTEST
 	bool "Class B self-tests at run time (ADR 0009)"
@@ -54,6 +57,10 @@ config OWNTECH_SAFETY_FROZEN_PERIODS
 	default 2000
 	range 100 100000
 	depends on OWNTECH_SAFETY_SUPERVISION
+	help
+		Also the number of control periods a watched current sensor may
+		give no reading at all while the PWM runs (data not dispatched)
+		before the Safety API latches a self-test fault.
 
 config OWNTECH_SAFETY_TEST_HOOKS
 	bool "Fault injection hooks for the safety L0 tests (never in an application)"

@@ -187,8 +187,12 @@ def path_text(c):
 class Bench:
     def __init__(self, man):
         self.man = man
-        self.scope = rigol_mho.RigolScope(rigol_mho.open_transport('/dev/usbtmc0'))
+        self.scope = rigol_mho.RigolScope(rigol_mho.open_transport())
         self.idn = self.scope.idn()
+        # The SPOC channels are read through x10 BNC dividers (L0-CAL): set every channel here instead of relying
+        # on the scope keeping its setup (it returns to x1 after a restart). 0.5 V/div centred on 1.5 V.
+        for ch in (1, 2, 3, 4):
+            self.scope.setup_channel(ch, scale=0.5, offset=-1.5, probe=10)
         ports, t0 = {}, time.time()   # USB re-enumerates after a flash or a reset: up to 60 s for both
         while time.time() - t0 < 60 and len(ports) < 2:
             for r in ('mux', 'cut'):

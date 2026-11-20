@@ -952,8 +952,8 @@
    "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
    "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3); repeat-clear window 100 ms in the test build",
    "id": "L0-EDG-03",
-   "title": "A second fault soon after a clear (repeat-clear rule, IEC 62109-1 4.4.2.2)",
-   "criterion": "recorded (INFO): the ADR reads both \"repeated clear within N s\" and \"second fault within N s of a clear\"; open until decided"
+   "title": "A fault soon after a clear needs a reboot (repeat-clear rule, IEC 62109-1 4.4.2.2)",
+   "criterion": "a fault within the repeat window of a clear (time from the clear to the fault): the next clear is refused (-2) however late, /Safety rRebootRequired true and the text says \"reboot required\"; after a reboot rRebootRequired is false, the fault still latched, and a clear is accepted"
   },
   {
    "tab": "safety",
@@ -990,6 +990,30 @@
    "id": "L0-EDG-06",
    "title": "The comparator path ignores glitches shorter than its 282 ns filter and trips on longer ones",
    "criterion": "pulses on I2 from the MUX injector pulse mode, time above the threshold on the scope: no comparator trip up to 242 ns, a trip from 322 ns; the boundary recorded"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, frozen-sensor finding, fix a)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT (first PWM start before the control task, which starts with startCritical(false)); CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3)",
+   "id": "L0-EDG-07",
+   "title": "Data dispatched after an unattended start (PWM before data acquisition)",
+   "criterion": "raw reading of the first current pin through DataAPI::peekAdcRaw() at two CUT DAC levels 200 mV apart: a value each time (not 0xFFFF), step within 10 % of the expected counts; no fault after 1 s with the PWM on"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, frozen-sensor finding, fix b)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT (first PWM start before the control task, which starts with startCritical(false)); CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3)",
+   "id": "L0-EDG-08",
+   "title": "A current sensor whose readings stop, or never come, latches a fault while the PWM runs",
+   "criterion": ".a the control task stops dispatching (test hook, /Fault case 17) with the PWM on: within 1 s a self-test fault \"frozen current sensor\"; .b dispatch forbidden from boot, then the PWM: within 1 s \"no current reading\"; both with outputs off and reboot required"
   }
  ],
  "retired": {}

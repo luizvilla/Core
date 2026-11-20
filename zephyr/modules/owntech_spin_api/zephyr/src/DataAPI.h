@@ -229,6 +229,13 @@ public:
 	int8_t startUnattended();
 
 	/**
+	 * @brief @return true while acquisition runs as started by
+	 *        startUnattended(): nobody dispatches yet. The control task takes
+	 *        the dispatch over when it starts (ADR 0009, luizvilla/Core#23).
+	 */
+	bool startedUnattended();
+
+	/**
 	 * @brief Latest converted value of an ADC channel, without any lock (safe
 	 *        in an interrupt). Used by the Safety API's plausibility checks.
 	 *
@@ -769,6 +776,7 @@ private:
 
 private:
 	static bool is_started;
+	static bool is_unattended;
 	static bool adcInitialized;
 	static uint8_t channels_ranks[ADC_COUNT][CHANNELS_PER_ADC];
 	static uint8_t current_rank[ADC_COUNT];

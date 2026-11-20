@@ -9,10 +9,14 @@
 ## CH1 -> TP1-TP3 -> CH2, the MUX injector holds or drives the other through CH3. Cases:
 ##   01 arming with a limit already exceeded is refused, and the outputs never turn on;
 ##   02 clearFault() is refused while the limit is still exceeded, accepted once it is back;
-##   03 a second fault within the repeat window of a clear makes clearFault() refuse until a reboot (the second
-##      fault from the MUX injector, the CUT's ThingSet being too slow for the 100 ms window of the test build);
+##   03 a fault within the repeat window of a clear makes clearFault() refuse until a reboot, however long one waits
+##      (the second fault from the MUX injector, the CUT's ThingSet being too slow for the 100 ms window of the test
+##      build); /Safety rRebootRequired says so; a reboot lifts it and the fault then clears;
 ##   04 two limits exceeded one after the other: both fault inputs recorded;
 ##   05 no trip just inside the thresholds, 10 s with the PWM on;
+##   07 data dispatched after an unattended start: with the PWM first (the Safety API starts acquisition), the
+##      control task takes the dispatch over; the raw reading of the first pin follows the CUT DAC;
+##   08 no dispatch (test hook): the plausibility check latches "no current reading" with the PWM on;
 ##   06 glitch filter of the comparator path: pulses on the second pin from the MUX injector's pulse mode (DAC source,
 ##      hold level -> 2.0 V -> hold level), each captured on SPOC CH3; the time above the threshold decides.
 ## Faults during dead time and trip latency need direct probes (C13).
@@ -282,20 +286,102 @@ def main():
         st = b.safety()
         rep['03'] = {'second_fault_after_ms': dt_ms, 'clear_reply_ms': dt_clear_ms, 'after_second_fault': st2,
                      'state': st}
-        # The ADR has two readings (2026-11-20, open): decision text "a repeated clear within N s needs a reboot"
-        # (what safety_supervision_clear_fault() does: it compares the new clear with the previous one) and the
-        # implementation note / Kconfig "a second fault within N s of a clear". Recorded, not judged.
-        line('L0-EDG-03', 'INFO',
-             f'A second fault at most {dt_ms:.0f} ms after a clear, then a clear about 0.6 s later (repeat window '
-             f'{REPEAT_CLEAR_MS} ms in the test build)',
-             'ADR open: "repeated clear within N s" (the code) or "second fault within N s of a clear" (Kconfig, '
-             'ADR implementation note)',
-             f"second fault latched: {st2['rText'] or 'NO'}; second clear: rc {st['rClearRc']}, fault {st['rFault']}"
-             + (' (accepted: the code counts clear-to-clear time, so the fault inside the window is not counted)'
-                if st['rClearRc'] == 0 else f": {st['rText']}"))
     finally:
         b.close()
-    trip.reset_cut()                                   # leave a fresh boot (03 needs a reboot to clear)
+
+    # 03, after a reboot: "reboot required" lifted, the fault still latched and now cleared
+    b = fresh_bench(man)
+    try:
+        boot = b.safety()
+        b.cut.set_value('Safety/xClear', 'true')
+        time.sleep(0.3)
+        cleared = b.safety()
+    finally:
+        b.close()
+    rep['03'].update({'after_reboot': boot, 'after_reboot_clear': cleared})
+    # Repeat-clear rule, reading B (decided 2026-11-20, Luiz Villa): the time runs from a clear to the next fault.
+    # 07-08 data dispatch (finding of 2026-11-20: the frozen-sensor check was off after an unattended start)
+    b = fresh_bench(man)
+    try:
+        armed, why = b.first_arming(held)
+        c1 = comparator_case(man, s1)
+        b.route(c1['pin'], [s2])
+        zero1 = trip.zero_mv(man, s1, b.vref)
+        low = next(l for l in man['limits'] if l['sensor'] == s1)['paths']['low']
+        adc_n, ch = int(str(low.get('adc', 'adc0'))[-1]), int(low.get('channel', 0))
+        b.cut_set('Adc', wAdc=adc_n, wChannel=ch)
+        ok, why2, _ = b.arm(zero1, None)
+        raws = {}
+        for mv in (zero1, zero1 + 200):
+            b.level(mv)
+            time.sleep(0.3)
+            raws[round(mv)] = int(b.group('Adc')['rRaw'])
+        b.level(zero1)
+        time.sleep(1.0)                                  # 10 000 periods with the PWM on
+        st7 = b.safety()
+        vals = list(raws.values())
+        step = (vals[1] - vals[0]) if 0xFFFF not in vals else None
+        expect = 200 * 4096 / b.vref
+        rep['07'] = {'armed': armed and ok, 'why': why or why2, 'adc': adc_n, 'channel': ch, 'raw': raws,
+                     'step_counts': step, 'expected_counts': expect, 'state': st7}
+        line('L0-EDG-07', judge(armed and ok and step is not None and abs(step - expect) < 0.1 * expect
+                                and st7['rFault'] == 0),
+             f'PWM started before data acquisition, then the control task: raw reading of {s1} (ADC{adc_n} '
+             f'channel {ch}) at {round(zero1)} and {round(zero1 + 200)} mV',
+             f'a value at each level (not 0xFFFF), 200 mV apart = {expect:.0f} counts ±10 %; no fault after 1 s of PWM',
+             f"raw {raws}; step {step}; fault {st7['rFault']} {st7['rText']}")
+
+        # 08.a dispatch stopped while running: the readings stop changing -> frozen current sensor
+        b.cut_set('Fault', wCase=17, wIndex=0)
+        b.cut.set_value('Fault/xInject', 'true')
+        time.sleep(1.0)
+        st8a = b.safety()
+        b.pwm(False)
+    finally:
+        b.close()
+
+    # 08.b dispatch forbidden from boot (before the first PWM start): nothing is ever dispatched -> no reading
+    b = fresh_bench(man)
+    try:
+        b.cut_set('Fault', wCase=17, wIndex=0)
+        b.cut.set_value('Fault/xInject', 'true')
+        time.sleep(0.3)
+        rc_req = int(b.group('Fault')['rRc'])
+        b.first_arming(held)                             # PWM on with the pins at 0 A; the fault comes after it
+        b.route(c1['pin'], [s2])
+        b.level(zero1)
+        b.pwm(True)                                      # refused if the fault already latched in the arming
+        time.sleep(1.0)
+        st8b = b.safety()
+        b.pwm(False)
+    finally:
+        b.close()
+    rep['08'] = {'state': st8a, 'never': st8b, 'request_rc': rc_req}
+    line('L0-EDG-08.a', judge(st8a['rFault'] == 4 and 'frozen current sensor' in st8a['rText']
+                              and st8a['rOutputs'] == 0 and st8a.get('rRebootRequired') is True),
+         'The control task stops dispatching (test hook) with the PWM on: the readings stop changing',
+         'within 1 s: self-test fault "frozen current sensor", outputs off, reboot required',
+         f"fault {st8a['rFault']}: {st8a['rText']}; outputs 0x{st8a['rOutputs']:03x}; reboot required "
+         f"{st8a.get('rRebootRequired')}")
+    line('L0-EDG-08.b', judge(rc_req == 0 and st8b['rFault'] == 4 and 'no current reading' in st8b['rText']
+                              and st8b['rOutputs'] == 0 and st8b.get('rRebootRequired') is True),
+         'Data dispatch forbidden from boot (test hook), then the PWM: nothing is ever dispatched',
+         'within 1 s of PWM: self-test fault "no current reading", outputs off, reboot required',
+         f"hook rc {rc_req}; fault {st8b['rFault']}: {st8b['rText']}; outputs 0x{st8b['rOutputs']:03x}; reboot "
+         f"required {st8b.get('rRebootRequired')}")
+    trip.reset_cut()                                   # a self-test fault: the reboot clears it
+
+    line('L0-EDG-03', judge(dt_ms < REPEAT_CLEAR_MS and st2['rFault'] == 3 and st2.get('rRebootRequired') is True
+                             and st['rClearRc'] == -2 and st['rFault'] == 3 and 'reboot required' in st['rText']
+                             and boot['rFault'] == 3 and boot.get('rRebootRequired') is False
+                             and cleared['rClearRc'] == 0 and cleared['rFault'] == 0),
+         f'A second fault at most {dt_ms:.0f} ms after a clear, then a clear about 0.6 s later (repeat window '
+         f'{REPEAT_CLEAR_MS} ms in the test build), then a reboot',
+         'second clear refused (-2), rRebootRequired true and "reboot required" in the text; after the reboot: '
+         'fault still latched, rRebootRequired false, clear accepted',
+         f"second fault: {st2['rText'] or 'NO'} (rRebootRequired {st2.get('rRebootRequired')}); clear 0.6 s later: "
+         f"rc {st['rClearRc']}; after reboot: fault {boot['rFault']}, rRebootRequired {boot.get('rRebootRequired')}, "
+         f"clear rc {cleared['rClearRc']}, fault {cleared['rFault']}")
 
     with open(os.path.join(args.out, 'report.json'), 'w') as fh:
         json.dump(rep, fh)
@@ -314,7 +400,7 @@ def main():
             ['Stimulus', 'the CUT DAC (PA6) on the first current pin through CH1 -> TP1-TP3 -> CH2; the MUX injector '
                          '(DAC source) holds or drives the second through CH3'],
             ['Boots', '01 on a fresh boot (the arming self-tests run once per boot); 02-05 on a second fresh boot, '
-                      'armed first with both current pins at 0 A; a reset at the end (03 leaves "reboot required")'],
+                      'armed first with both current pins at 0 A; 03 ends with a reset (openocd "reset run") and a clear'],
             ['Glitches (06)', f'MUX injector pulse mode (Core-MUX mux-injector, fe04fe3): the DAC '
                               f'source steps the second pin from its 0 A hold to {PULSE_HIGH_MV} mV and back; '
                               'requested widths ' + f'{PULSE_WIDTHS_NS[0]}-{PULSE_WIDTHS_NS[-1]} ns; each pulse captured on '

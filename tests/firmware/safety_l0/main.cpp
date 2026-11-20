@@ -13,7 +13,7 @@
  * flashed and inspected over SWD with an ST-Link. Never flash it on a powered board.
  *
  * ThingSet:
- *   /Safety  rArmed rFault rTripped rFltMask rOutputs rText, xClear      state of the Safety API, clearFault()
+ *   /Safety  rArmed rFault rTripped rFltMask rOutputs rText rRebootRequired, xClear   state of the Safety API, clearFault()
  *   /Pwm     wFreq_Hz wDuty wUnits wRun, xApply                           legs (HRTIM units, bit 0 = A ... 5 = F)
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
@@ -45,6 +45,10 @@
  *  14 a work item blocks forever on the system workqueue: the heartbeat and self-tests stop, threads run
  *  15 a work item spins forever on the system workqueue (cooperative): no thread runs, interrupts do
  *  16 data.stop() with the outputs on: rDetect_us holds its return code + 128 (-2 + 128 = refused)
+ *  17 the control task's data dispatch is forbidden (test hook), also when the task starts later. With the
+ *     task running, the readings stop changing: the plausibility check must latch "frozen current sensor".
+ *     Requested before the first PWM start, nothing is ever dispatched: it must latch "no current reading".
+ *     Either within CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS periods of PWM
  * Cases 7-12 report whether the change took effect (rWritten bit 0), whether a fault latched within 10 ms
  * (rDetected, rDetect_us) and restore the register. Cases 1-5 end in a reset; /Safety and rReason, rPc
  * then show the latched fault and rLastCase the case.
@@ -74,13 +78,16 @@
 #include "safety_supervision.h"
 #include "safety_trips.h"
 
+extern "C" void scheduling_test_data_dispatch(bool on);   /* task API test hook */
+
 /* ------------------------------------------------------------------ state */
 
 static bool safety_armed, cal_on_now, inj_on_now, pwm_running;
 static uint8_t fault_now;
 static uint32_t tripped_now, flt_mask_now;
 static uint16_t outputs_now;
-static char fault_text[96] = "";
+static char fault_text[128] = "";
+static bool reboot_required_now;
 static bool clear_request;
 static int8_t clear_rc;
 
@@ -112,6 +119,7 @@ static void refresh_status(void)
 {
 	safety_armed = safety_trips_armed();
 	fault_now = (uint8_t)safety_supervision_get_fault();
+	reboot_required_now = safety.rebootRequired();
 	tripped_now = safety_trips_tripped();
 	flt_mask_now = safety_trips_flt_mask();
 	outputs_now = (uint16_t)(HRTIM1->sCommonRegs.OENR & 0xFFFU);
@@ -267,7 +275,7 @@ static int cal_apply_now(void)
 enum fault_case : uint8_t {
 	F_STACK = 1, F_HARDFAULT, F_IRQ_MASKED, F_TASK_STUCK, F_LOCKUP,
 	F_WILD_LOCKED, F_WILD_DAC, F_WILD_AWD, F_WILD_EEV, F_WILD_OUTR, F_WILD_AWDCH, F_ADC_STOP,
-	F_KERNEL_STARVED, F_WORK_BLOCKED, F_WORK_SPIN, F_DATA_STOP, F_LAST = F_DATA_STOP
+	F_KERNEL_STARVED, F_WORK_BLOCKED, F_WORK_SPIN, F_DATA_STOP, F_NO_DISPATCH, F_LAST = F_NO_DISPATCH
 };
 
 #define BKP_CASE        (TAMP->BKP29R)   /* 0xFA0000nn: case nn was injected; read and wiped at boot */
@@ -423,6 +431,7 @@ static void inject_work_fn(struct k_work *work)
 		fault_detect_us = (uint32_t)(spin.data.stop() + 128);
 		fault_written = spin.data.started() ? 0U : 1U;
 		break;
+	case F_NO_DISPATCH: scheduling_test_data_dispatch(false); break;
 	case F_TASK_STUCK: task_stuck = true; return;
 	case F_LOCKUP:     __set_FAULTMASK(1U); __builtin_trap(); break;
 	case F_WILD_LOCKED:
@@ -471,10 +480,10 @@ static int fault_request(void)
 	if (c < F_STACK || c > F_LAST) {
 		return -3;
 	}
-	if (c >= F_WILD_LOCKED && !safety_trips_armed()) {
+	if (c >= F_WILD_LOCKED && c != F_NO_DISPATCH && !safety_trips_armed()) {
 		return -1;   /* the registers are set up and locked at arming */
 	}
-	if ((c == F_TASK_STUCK || c >= F_WILD_DAC) && !task_running) {
+	if ((c == F_TASK_STUCK || (c >= F_WILD_DAC && c != F_NO_DISPATCH)) && !task_running) {
 		return -2;   /* the read-back and the watchdog feed run in the control task */
 	}
 	if ((c == F_WILD_DAC && safety_trips_test_regs(false, fault_index_req, &r) != 0) ||
@@ -553,8 +562,9 @@ static uint8_t adc_num = 1, adc_channel = 1;
 static uint16_t adc_raw = 0xFFFF;
 
 /* The raw sample through DataAPI::peekAdcRaw(), as the frozen-sensor check reads it. 0xFFFF: no value. In this
- * firmware the first PWM start comes before data acquisition, so the Safety API starts it unattended and nothing
- * dispatches: the peek stays 0xFFFF (finding of 2026-11-20, docs/safety/spoc_bench.md). */
+ * firmware the first PWM start comes before data acquisition, so the Safety API starts it unattended; the control
+ * task takes the dispatch over when it starts (fixed 2026-11-20; before, nothing dispatched and the peek stayed
+ * 0xFFFF, docs/safety/spoc_bench.md). */
 static void adc_cb(enum thingset_callback_reason reason)
 {
 	if (reason != THINGSET_CALLBACK_PRE_READ) {
@@ -642,6 +652,7 @@ THINGSET_ADD_ITEM_UINT16(ID_SAFETY, 0x9005, "rOutputs", &outputs_now, THINGSET_A
 THINGSET_ADD_ITEM_STRING(ID_SAFETY, 0x9006, "rText", fault_text, sizeof(fault_text), THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_BOOL(ID_SAFETY, 0x9007, "xClear", &clear_request, THINGSET_ANY_RW, 0);
 THINGSET_ADD_ITEM_INT8(ID_SAFETY, 0x9008, "rClearRc", &clear_rc, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_BOOL(ID_SAFETY, 0x9009, "rRebootRequired", &reboot_required_now, THINGSET_ANY_R, 0);
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_PWM, "Pwm", &pwm_cb);
 THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x9101, "wFreq_Hz", &pwm_freq_hz, THINGSET_ANY_RW, 0);

@@ -124,11 +124,20 @@ void safety_supervision_get_record(safety_fault_record_t *record);
 /**
  * @brief Clears the latched fault so that PWM outputs can be enabled again.
  * @return 0 when cleared; -1 if a PWM output is still enabled or a limit is
- *         still exceeded (refused); -2 when a second fault came within
- *         CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS of the previous clear: only a
- *         reboot clears it.
+ *         still exceeded (refused); -2 when only a reboot clears it: a
+ *         self-test failure, or a fault that came within
+ *         CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS of the previous clear
+ *         (repeat-clear rule, ADR 0009).
  */
 int safety_supervision_clear_fault(void);
+
+/**
+ * @brief @return true while clearFault() is refused until a reboot: a
+ *         self-test failure, or a fault within CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS
+ *         of a clear. Kept across a watchdog reset; a software reset
+ *         (sys_reboot) or the reset pin lifts it, a power cycle too.
+ */
+bool safety_supervision_reboot_required(void);
 
 /**
  * @brief Latches a fault so that it survives a reset (any context, register-only).

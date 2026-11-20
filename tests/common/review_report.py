@@ -1145,7 +1145,23 @@ def spoc_edge_section(folder, rep):
     if '03' in rep:
         r = rep['03']
         rows.append(('03', f"second fault {r['second_fault_after_ms']:.0f} ms after a clear",
-                     f"next clear rc {r['state']['rClearRc']}", r.get('after_second_fault', {}).get('rText', '')))
+                     f"next clear rc {r['state']['rClearRc']}, reboot required "
+                     f"{r.get('after_second_fault', {}).get('rRebootRequired', '?')}", r['state'].get('rText', '')))
+        if 'after_reboot' in r:
+            rows.append(('03', 'after a reboot', f"reboot required {r['after_reboot'].get('rRebootRequired', '?')}, "
+                         f"clear rc {r['after_reboot_clear']['rClearRc']}", r['after_reboot'].get('rText', '')))
+    if '07' in rep:
+        r = rep['07']
+        rows.append(('07', f"raw reading ADC{r['adc']} ch {r['channel']} at " + ', '.join(f'{k} mV' for k in r['raw']),
+                     f"{list(r['raw'].values())} (step {r['step_counts']}, expected {r['expected_counts']:.0f})",
+                     r['state'].get('rText', '')))
+    if '08' in rep:
+        r = rep['08']
+        rows.append(('08', 'control task stops dispatching, PWM on', f"fault {r['state']['rFault']}, outputs "
+                     f"0x{r['state']['rOutputs']:03x}", r['state'].get('rText', '')))
+        if 'never' in r:
+            rows.append(('08', 'dispatch forbidden from boot, then PWM', f"fault {r['never']['rFault']}, outputs "
+                         f"0x{r['never']['rOutputs']:03x}", r['never'].get('rText', '')))
     out.append('<table><tr><th>Case</th><th>What</th><th>Outcome</th><th>Fault text</th></tr>')
     for cid, what, outcome, text in rows:
         out.append(f'<tr><td>L0-EDG-{cid}</td><td>{e(what)}</td><td>{e(outcome)}</td><td>{e(text)}</td></tr>')

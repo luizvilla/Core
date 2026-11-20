@@ -144,6 +144,11 @@ int8_t SafetyAPI::clearFault()
     return (int8_t)safety_supervision_clear_fault();
 }
 
+bool SafetyAPI::rebootRequired()
+{
+    return safety_supervision_reboot_required();
+}
+
 #define SAFETY_SENSOR_NAME(node_id) DT_PROP(node_id, sensor_name),
 static const char *const sensor_names[] = {
     "UNDEFINED_SENSOR", DT_FOREACH_STATUS_OKAY(shield_sensors, SAFETY_SENSOR_NAME)

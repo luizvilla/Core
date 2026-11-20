@@ -83,7 +83,10 @@ static const char *const sensor_names[] = {
 /* ---- Backup-register record (TAMP_BKPxR survive a system reset) -------- */
 
 #define BKP_MAGIC        0x5AFE0000U  /* upper half of BKP_FAULT when a record is valid */
-#define BKP_FAULT        (TAMP->BKP0R)  /* magic | safety_fault_t */
+#define BKP_FAULT        (TAMP->BKP0R)  /* magic | flags | safety_fault_t */
+#define BKP_F_RECENT     0x00000100U  /* a clear less than REPEAT_CLEAR_MS ago */
+#define BKP_F_REBOOT     0x00000200U  /* a fault came within REPEAT_CLEAR_MS of a clear: only a reboot clears it */
+#define BKP_F_MASK       (BKP_F_RECENT | BKP_F_REBOOT)
 #define BKP_REASON       (TAMP->BKP1R)  /* Zephyr K_ERR_* reason */
 #define BKP_PC           (TAMP->BKP2R)  /* faulting PC */
 #define BKP_DISABLE_CYC  (TAMP->BKP3R)  /* DWT cycles when outputs were disabled */
@@ -149,6 +152,26 @@ static void record_clear(void)
 	BKP_CONTEXT = 0U;
 	BKP_STACK = 0U;
 	BKP_LR = 0U;
+}
+
+/* Repeat-clear flags of BKP_FAULT (0 when the word holds no record). */
+static uint32_t record_flags(void)
+{
+	uint32_t word = BKP_FAULT;
+
+	return ((word & 0xFFFF0000U) == BKP_MAGIC) ? (word & BKP_F_MASK) : 0U;
+}
+
+/* Writes the fault into BKP_FAULT, keeping the repeat-clear flags. A fault
+ * while a clear is recent (repeat-clear rule, ADR 0009) sets the reboot flag. */
+static void record_set_fault(safety_fault_t fault)
+{
+	uint32_t f = record_flags();
+
+	if ((f & BKP_F_RECENT) != 0U && fault != SAFETY_FAULT_NONE) {
+		f |= BKP_F_REBOOT;
+	}
+	BKP_FAULT = BKP_MAGIC | f | (uint32_t)fault;
 }
 
 static safety_fault_t record_fault(void)
@@ -361,7 +384,7 @@ void safety_supervision_latch_value(safety_fault_t fault, uint32_t detail, uint3
 {
 	backup_access_enable();
 	if (record_fault() == SAFETY_FAULT_NONE) {   /* keep the first cause */
-		BKP_FAULT = BKP_MAGIC | (uint32_t)fault;
+		record_set_fault(fault);
 		BKP_REASON = detail;
 		BKP_PC = value;
 		BKP_DISABLE_CYC = DWT->CYCCNT;
@@ -389,13 +412,32 @@ static int value_text(uint32_t bits, char *buf, size_t size)
 	return snprintk(buf, size, "%s%u.%u", t < 0 ? "-" : "", a / 10U, a % 10U);
 }
 
-static int64_t last_clear_ms;
-static bool reboot_required;
+bool safety_supervision_reboot_required(void)
+{
+	return latched == SAFETY_FAULT_SELFTEST || (record_flags() & BKP_F_REBOOT) != 0U;
+}
+
+/* End of the repeat-clear window: a fault from now on is a new event. */
+static void recent_clear_end(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	unsigned int key = irq_lock();
+	uint32_t word = BKP_FAULT;
+	if ((word & 0xFFFF0000U) == BKP_MAGIC) {
+		BKP_FAULT = word & ~BKP_F_RECENT;
+	}
+	irq_unlock(key);
+}
+
+static K_WORK_DELAYABLE_DEFINE(recent_clear_work, recent_clear_end);
 
 int safety_supervision_clear_fault(void)
 {
-	if (reboot_required || latched == SAFETY_FAULT_SELFTEST) {
-		return -2;   /* a self-test failure is cleared by a reboot, which runs the tests again */
+	if (safety_supervision_reboot_required()) {
+		/* A self-test failure is cleared by a reboot, which runs the tests
+		 * again. A fault within REPEAT_CLEAR_MS of a clear means something
+		 * is wrong with the converter, not a one-off event (ADR 0009). */
+		return -2;
 	}
 	if ((HRTIM1->sCommonRegs.OENR & HRTIM_ALL_OUTPUTS) != 0U) {
 		return -1;
@@ -404,26 +446,21 @@ int safety_supervision_clear_fault(void)
 	if (safety_trips_settle_and_check()) {
 		return -1;   /* a limit is still exceeded */
 	}
-	if (latched != SAFETY_FAULT_NONE) {
-		int64_t now = k_uptime_get();
-		if (last_clear_ms != 0 && now - last_clear_ms < CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS) {
-			/* A second fault soon after a clear: something is wrong with
-			 * the converter, not a one-off event. Only a reboot clears it. */
-			reboot_required = true;
-			printk("safety: second fault within %d ms of a clear: reboot required (ADR 0009)\n",
-			       CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS);
-			return -2;
-		}
-		last_clear_ms = now;
-	}
+	bool had_fault = (latched != SAFETY_FAULT_NONE);
 	safety_trips_clear();
+	backup_access_enable();
 	record_clear();
+	if (had_fault) {
+		/* The repeat-clear window opens: a fault within it needs a reboot. */
+		BKP_FAULT = BKP_MAGIC | BKP_F_RECENT | (uint32_t)SAFETY_FAULT_NONE;
+		k_work_reschedule(&recent_clear_work, K_MSEC(CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS));
+	}
 	latched = SAFETY_FAULT_NONE;
 	latched_reported = false;
 	return 0;
 }
 
-int safety_supervision_describe(char *buf, size_t size)
+static int describe_fault(char *buf, size_t size)
 {
 	switch (latched) {
 	case SAFETY_FAULT_NONE:
@@ -431,11 +468,11 @@ int safety_supervision_describe(char *buf, size_t size)
 	case SAFETY_FAULT_WATCHDOG:
 		if (BKP_REASON == SAFETY_WATCHDOG_KERNEL) {
 			return snprintk(buf, size, "watchdog: the system work queue did not run for %u ms (threads starved "
-					"or blocked); clear: clearFault()", (unsigned)(CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US / 1000U));
+					"or blocked)", (unsigned)(CONFIG_OWNTECH_SAFETY_KERNEL_TIMEOUT_US / 1000U));
 		}
-		return snprintk(buf, size, "watchdog: the control task stopped; clear: clearFault()");
+		return snprintk(buf, size, "watchdog: the control task stopped");
 	case SAFETY_FAULT_FATAL_ERROR:
-		return snprintk(buf, size, "fatal error %u at pc 0x%08x; clear: clearFault()", BKP_REASON, BKP_PC);
+		return snprintk(buf, size, "fatal error %u at pc 0x%08x", BKP_REASON, BKP_PC);
 	case SAFETY_FAULT_TRIP: {
 		int n;
 		if (BKP_REASON & SAFETY_TRIP_SOFTWARE) {
@@ -451,22 +488,39 @@ int safety_supervision_describe(char *buf, size_t size)
 				n += safety_trips_describe(BKP_REASON, buf + n, size - n);
 			}
 		}
-		if (n < (int)size) {
-			n += snprintk(buf + n, size - n, "; clear: PWM off, clearFault()");
-		}
 		return n;
 	}
 	case SAFETY_FAULT_SELFTEST: {
 		static const char *const names[] = {"?", "CPU registers", "RAM", "flash CRC", "system clock",
 						    "VREFINT", "control interrupt rate", "frozen current sensor",
-						    "current sensor offset at idle"};
+						    "current sensor offset at idle", "no current reading (data not dispatched)"};
 		uint32_t id = BKP_REASON & 0xFFU;
-		return snprintk(buf, size, "self-test failed: %s%s; clear: reboot", id < ARRAY_SIZE(names) ? names[id] : "?",
+		return snprintk(buf, size, "self-test failed: %s%s", id < ARRAY_SIZE(names) ? names[id] : "?",
 				(BKP_REASON >> 8) ? " (sensor index in detail)" : "");
 	}
 	default:
 		return snprintk(buf, size, "fault %u", latched);
 	}
+}
+
+int safety_supervision_describe(char *buf, size_t size)
+{
+	int n = describe_fault(buf, size);
+	const char *hint;
+
+	if (latched == SAFETY_FAULT_NONE || n >= (int)size) {
+		return n;
+	}
+	if (latched == SAFETY_FAULT_SELFTEST) {
+		hint = "; clear: reboot";
+	} else if (safety_supervision_reboot_required()) {
+		hint = "; repeat fault after a clear: reboot required";
+	} else if (latched == SAFETY_FAULT_TRIP) {
+		hint = "; clear: PWM off, clearFault()";
+	} else {
+		hint = "; clear: clearFault()";
+	}
+	return n + snprintk(buf + n, size - n, "%s", hint);
 }
 
 void safety_supervision_mark(uint32_t cycles)
@@ -583,7 +637,7 @@ FUNC_NORETURN void k_sys_fatal_error_handler(unsigned int reason,
 	uint32_t levels = pwm_pin_levels();
 
 	backup_access_enable();
-	BKP_FAULT = BKP_MAGIC | (uint32_t)SAFETY_FAULT_FATAL_ERROR;
+	record_set_fault(SAFETY_FAULT_FATAL_ERROR);
 	BKP_REASON = reason;
 	BKP_PC = (esf != NULL) ? esf->basic.pc : 0U;
 	BKP_LR = (esf != NULL) ? esf->basic.lr : 0U;
@@ -626,7 +680,19 @@ static int safety_supervision_boot(void)
 		record_clear();   /* the self-tests run again at this boot */
 	} else if (((csr & RCC_CSR_IWDGRSTF) != 0U) &&
 		   (record_fault() == SAFETY_FAULT_NONE)) {
-		BKP_FAULT = BKP_MAGIC | (uint32_t)SAFETY_FAULT_WATCHDOG;
+		record_set_fault(SAFETY_FAULT_WATCHDOG);
+	}
+	/* Repeat-clear rule: a deliberate reboot (software reset, or the reset
+	 * pin alone) lifts "reboot required"; a watchdog reset does not. The
+	 * clear window does not outlive a reset. */
+	if (record_flags() != 0U) {
+		uint32_t f = record_flags() & ~BKP_F_RECENT;
+		bool pin_only = (csr & (RCC_CSR_PINRSTF | RCC_CSR_IWDGRSTF | RCC_CSR_WWDGRSTF | RCC_CSR_LPWRRSTF
+					| RCC_CSR_OBLRSTF | RCC_CSR_SFTRSTF)) == RCC_CSR_PINRSTF;
+		if ((csr & RCC_CSR_SFTRSTF) != 0U || pin_only) {
+			f &= ~BKP_F_REBOOT;
+		}
+		BKP_FAULT = BKP_MAGIC | f | (uint32_t)record_fault();
 	}
 	RCC->CSR |= RCC_CSR_RMVF;
 

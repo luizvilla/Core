@@ -314,9 +314,17 @@ class SafetyAPI{
      *        or a limit is still exceeded.
      *
      * @return 0 when cleared, -1 when refused, -2 when only a reboot clears it
-     *         (a self-test failure, or a second fault soon after a clear).
+     *         (a self-test failure, or a fault within
+     *         CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS of the previous clear).
      */
     int8_t clearFault();
+
+    /**
+     * @brief @return true while clearFault() is refused until a reboot (see
+     *        clearFault()). Show it to the operator with the fault text, so a
+     *        refused clear is never a mystery.
+     */
+    bool rebootRequired();
 
     /**
      * @brief Tightens the hardware trip thresholds of a sensor, in its unit

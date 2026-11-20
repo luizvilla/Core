@@ -23,7 +23,7 @@ for arg in "$@"; do
     esac
 done
 blocked() {
-    for n in 01 02 03 04 05; do
+    for n in 01 02 03 04 05 06 07 08; do
         printf '@@\tL0-EDG-%s\tBLOCKED\tEdge cases of the hardware trips\ton the SPOC bench\t%s\n' "$n" "$1"
     done
 }

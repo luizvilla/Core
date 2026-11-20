@@ -73,6 +73,20 @@ static task_function_t user_periodic_task = NULL;
 static bool do_data_dispatch = false;
 static uint32_t task_period = 0;
 
+#ifdef CONFIG_OWNTECH_SAFETY_TEST_HOOKS
+/* Safety L0 tests only: forbid the task's data dispatch (from now on, also
+ * when the task starts later), to check that a sensor whose reading stops
+ * or never comes latches a fault while the PWM runs (#23). */
+static bool test_no_dispatch;
+extern "C" void scheduling_test_data_dispatch(bool on)
+{
+	test_no_dispatch = !on;
+}
+#define TEST_NO_DISPATCH test_no_dispatch
+#else
+#define TEST_NO_DISPATCH false
+#endif
+
 /* Safety */
 static bool safety_alert = false;
 
@@ -154,7 +168,7 @@ void user_task_proxy()
 
 	if (user_periodic_task != NULL)
 	{
-		if (do_data_dispatch == true)
+		if (do_data_dispatch == true && !TEST_NO_DISPATCH)
 		{
 			spin.data.doFullDispatch();
 		}
@@ -263,7 +277,18 @@ void scheduling_start_uninterruptible_synchronous_task(
 	if (interrupt_source == scheduling_interrupt_source_t::source_uninitialized)
 		return;
 
-	if ( (manage_data_acquisition == true) && (spin.data.started() == false) )
+	if (spin.data.startedUnattended() == true)
+	{
+		/**
+		 * The Safety API started acquisition for its ADC watchdogs (the
+		 * first PWM output came first): DMA only, externally triggered,
+		 * and nobody dispatches. The task takes the dispatch over whatever
+		 * manage_data_acquisition says, or every reading stays "no value"
+		 * and the sensor plausibility checks see nothing (ADR 0009).
+		 */
+		do_data_dispatch = true;
+	}
+	else if ( (manage_data_acquisition == true) && (spin.data.started() == false) )
 	{
 		/**
 		 * If Data Acquisition has not been started yet,
