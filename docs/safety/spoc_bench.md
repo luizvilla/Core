@@ -349,6 +349,20 @@ Env `SAFETY_L0_OWNVERTER` (same app as the Twist, Ownverter 1.1.0 devicetree); `
 
 The two held pins of the Ownverter have different 0 A levels (I1 1000 mV, I3 1024.5 mV): the runner holds them at their mean when they are less than 50 mV apart (with TP5–TP7).
 
+### 2026-11-20, campaigns with TP5–TP7 wired (C11, C12 complete)
+
+Luiz Villa soldered TP5–TP7; the runner found the wire on CH4 (injector level 1.02 V on CH3 and CH4). Every case now runs on the production builds, nothing BLOCKED:
+
+| Campaign | Result |
+|---|---|
+| L0-TRP Twist 1.4.2 (`113733`) | 14 PASS: voltage watchdogs V1_LOW high +7 mV, V_HIGH high +6 mV; software paths within +4 to +8 mV, V_HIGH low +23 mV |
+| L0-TRP Ownverter 1.1.0 (`112654`) | 15 PASS, 1 FAIL: V_HIGH low (software) +29 mV against ±25 mV, the ADC offset below |
+| L0-CPU (`114506`) | 16 PASS: the two voltage watchdogs trip with the CPU halted too |
+| L0-EDG (`113300`) | 11 PASS (03 judged under reading B; 07, 08.a/b new) |
+| L0-SUP regression (`114939`) | 36 PASS, 3 INFO |
+
+The supervision test build (SAFETY_SUP) now has a 100 ms repeat-clear window like the other test builds: its cases follow each other within seconds, each ending in a clear, and under reading B the next lockup fell inside the 10 s production window.
+
 ### 2026-11-20, finding: the frozen-sensor check is off when the PWM starts before data acquisition
 
 Looking at the early low-bound trips, the test firmware got an `/Adc` readout of a channel's raw sample through `DataAPI::peekAdcRaw()`, the call the frozen-sensor plausibility check uses. With the PWM armed, the watchdogs working and the control task running, it returns 0xFFFF ("no value") on every channel. Cause, from the code: when the first PWM output comes before data acquisition, the Safety API starts acquisition itself (`startUnattended()`: DMA, externally triggered dispatch); the control task started afterwards sees acquisition already running and does not take the dispatch (`do_data_dispatch` stays false in `scheduling_start_uninterruptible_synchronous_task`). Nothing dispatches, every peek returns no value, and the frozen-sensor check skips every period without saying so (IEC 60730-1 H.2 7.2 plausibility off). The hardware trips are not affected: the watchdogs and comparators work on the ADCs and comparators directly. The usual application order (control task first, which starts acquisition and dispatches, then the PWM) is likely fine; not measured. To decide: have the control task dispatch after an unattended start, or make the Safety API refuse or report that order. The ADC-against-DAC comparison for the early low-bound trips waits for it.
