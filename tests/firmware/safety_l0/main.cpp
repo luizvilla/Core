@@ -18,6 +18,7 @@
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
  *   /Sw      wName, xApply; rWatched rRc                                software check on one sensor by name ("" = none)
+ *   /Adc     wAdc wChannel; rRaw                                         latest raw sample of an ADC channel (DMA peek)
  *   /Fault   wCase wIndex, xInject; rRc rDone rWritten rDetected rDetect_us rLastCase rReason rPc rTask
  *            rKernelGap_us (longest gap between kernel heartbeats since boot)
  *            software fault injection (cases below); the case that ended in a reset is kept in TAMP BKP29
@@ -546,6 +547,23 @@ static int sw_apply_now(void)
 	return 0;
 }
 
+/* ------------------------------------------------------------------ sensor readout (ADC against the stimulus) */
+
+static uint8_t adc_num = 1, adc_channel = 1;
+static uint16_t adc_raw = 0xFFFF;
+
+/* The raw sample through DataAPI::peekAdcRaw(), as the frozen-sensor check reads it. 0xFFFF: no value. In this
+ * firmware the first PWM start comes before data acquisition, so the Safety API starts it unattended and nothing
+ * dispatches: the peek stays 0xFFFF (finding of 2026-11-20, docs/safety/spoc_bench.md). */
+static void adc_cb(enum thingset_callback_reason reason)
+{
+	if (reason != THINGSET_CALLBACK_PRE_READ) {
+		return;
+	}
+	uint8_t rank = spin.data.getAdcChannelRank(static_cast<adc_t>(adc_num), adc_channel);
+	adc_raw = rank ? spin.data.peekAdcRaw(static_cast<adc_t>(adc_num), rank) : 0xFFFFU;
+}
+
 /* ------------------------------------------------------------------ ThingSet */
 
 static void sw_cb(enum thingset_callback_reason reason)
@@ -613,6 +631,7 @@ static void cal_cb(enum thingset_callback_reason reason)
 #define ID_CAL    0x93
 #define ID_FAULT  0x94
 #define ID_SW     0x95
+#define ID_ADC    0x96
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_SAFETY, "Safety", &safety_cb);
 THINGSET_ADD_ITEM_BOOL(ID_SAFETY, 0x9001, "rArmed", &safety_armed, THINGSET_ANY_R, 0);
@@ -667,6 +686,11 @@ THINGSET_ADD_ITEM_STRING(ID_SW, 0x9501, "wName", sw_name_req, sizeof(sw_name_req
 THINGSET_ADD_ITEM_BOOL(ID_SW, 0x9502, "xApply", &sw_apply, THINGSET_ANY_RW, 0);
 THINGSET_ADD_ITEM_STRING(ID_SW, 0x9503, "rWatched", sw_watched, sizeof(sw_watched), THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_INT8(ID_SW, 0x9504, "rRc", &sw_rc, THINGSET_ANY_R, 0);
+
+THINGSET_ADD_GROUP(TS_ID_ROOT, ID_ADC, "Adc", &adc_cb);
+THINGSET_ADD_ITEM_UINT8(ID_ADC, 0x9601, "wAdc", &adc_num, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT8(ID_ADC, 0x9602, "wChannel", &adc_channel, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADC, 0x9603, "rRaw", &adc_raw, THINGSET_ANY_R, 0);
 
 /* ------------------------------------------------------------------ main */
 
