@@ -1116,6 +1116,82 @@ def spoc_cal_section(folder, rep):
     return ''.join(out)
 
 
+def spoc_adc_section(folder, rep):
+    """@brief L0-ADC (#23): ADC counts minus DAC code against the level and the sampling time, then the fits."""
+    import numpy as np
+    e = html.escape
+    out = ['<h3>4 · Figures</h3>']
+    if not rep:
+        out.append(f'<p class="sub">No report in {e(folder.name)}/.</p>')
+        return ''.join(out)
+    prod, cyc = rep['prod_smp'], rep['smp_cycles']
+    names = list(rep['points'])
+    shown = [n for n in names if 'DAC pin' in n or ' ADC1 ' in n][:3]   # four colours: ADC2 readings in the table
+    fig = Figure('mV', 'level at the DAC (mV)')
+    main = fig.chart('counts', 280)
+    for i, name in enumerate(shown):
+        rows = sorted((r for r in rep['points'][name]['rows'] if r['smp'] == prod), key=lambda r: r['mV'])
+        fig.line(main, name, np.asarray([r['mV'] for r in rows], float), np.asarray([r['err'] for r in rows], float),
+                 SERIES[i], 2, points=True)
+    pr = rep.get('production') or {}
+    for state, dash in (('on', [6, 4]), ('off', [2, 3])):
+        rows = [r for r in pr.get('rows', []) if state in r]
+        if rows:
+            fig.line(main, f'production: {pr["sensor"]} ADC{pr["adc"]} IN{pr["channel"]}, regular group, PWM {state}',
+                     np.asarray([r['mV'] for r in rows], float), np.asarray([r[state]['err'] for r in rows], float),
+                     SERIES[3], 2, dash=dash, points=True)
+    out.append(f'<figure><div><b>ADC counts minus DAC code against the level, {cyc[prod]} cycles (production '
+               'sampling)</b></div>' + fig.html('spoc-adc-level', 'ADC error against the level, per point')
+               + f'<figcaption>One count is {rep["vref_mV"] / 4096:.2f} mV. Zero is an ideal pair: the DAC and the ADC '
+                 'share the VREFBUF, so the error does not depend on its true value. The DAC pin (PA6, no SPOC path) '
+                 'shows the ADC and DAC alone; the bench pins add the SPOC path; the dashed lines are the reading the '
+                 'trips and the plausibility check see (regular group, armed), with the PWM outputs on and off.'
+                 '</figcaption></figure>')
+    fig = Figure('', 'SMPR code (0 = 2.5 … 7 = 640.5 ADC cycles; production 2 = 12.5)')
+    main = fig.chart('counts', 280)
+    for i, name in enumerate(shown):
+        for mv, dash in ((300, None), (1500, [4, 4])):
+            rows = sorted((r for r in rep['points'][name]['rows'] if r['mV'] == mv), key=lambda r: r['smp'])
+            fig.line(main, f'{name}, {mv} mV', np.asarray([r['smp'] for r in rows], float),
+                     np.asarray([r['err'] for r in rows], float), SERIES[i], 2, dash=dash, points=True)
+    out.append('<figure><div><b>Error against the sampling time, at 300 mV (solid) and 1500 mV (dashed)</b></div>'
+               + fig.html('spoc-adc-smp', 'ADC error against the sampling time')
+               + '<figcaption>A source impedance shows as an error that shrinks as the sampling time grows; an offset of '
+                 'the ADC itself stays flat.</figcaption></figure>')
+    sweep = rep.get('trigger_sweep') or []
+    if sweep:
+        fig = Figure('', 'ADC trigger instant (fraction of the PWM period; outputs switch at 0 and 0.5)')
+        main = fig.chart('counts', 280)
+        for i, mv in enumerate(sorted({r['mV'] for r in sweep})):
+            rows = sorted((r for r in sweep if r['mV'] == mv), key=lambda r: r['trig'])
+            fig.line(main, f'{mv} mV', np.asarray([r['trig'] for r in rows], float),
+                     np.asarray([r['err'] for r in rows], float), SERIES[i], 2, points=True)
+        out.append('<figure><div><b>Error against the ADC sample instant, outputs on (duty 0.5)</b></div>'
+                   + fig.html('spoc-adc-trig', 'ADC error against the trigger instant in the PWM period')
+                   + '<figcaption>ADC1 triggered by the first leg\'s CMP3 (as an application sets it), swept over the '
+                     'period. Away from the switching edges the error is the ADC\'s own offset; near an edge the sample '
+                     'catches the transient the switching couples onto the pin. As found, the ADCs are triggered by the '
+                     'HRTIM master period, which is a switching edge.</figcaption></figure>')
+    nw = rep.get('node_wave')
+    if nw:
+        fig = Figure('µs')
+        main = fig.chart('mV', 220)
+        fig.line(main, 'CH2 (pin node)', np.asarray(nw['t'], float) * 1e6, np.asarray(nw['v'], float) * 1e3, SERIES[0], 1.5)
+        out.append(f'<figure><div><b>The pin node at {nw["mV"]} mV with the outputs switching</b></div>'
+                   + fig.html('spoc-adc-node', 'Pin node with the PWM outputs on')
+                   + '<figcaption>SPOC CH2, 20 mV/div, two PWM periods: a spike at each edge, settled within '
+                     '0.5 µs.</figcaption></figure>')
+    out.append('<table><tr><th>Point</th>' + ''.join(f'<th>{c} cyc</th>' for c in cyc) + '</tr>')
+    for name in names:
+        fits = rep['points'][name].get('fit', {})
+        cells = ''.join(f'<td>{f["offset_counts"]:+.1f} / {f["gain_error"] * 100:+.2f} %</td>'
+                        for f in (fits.get(str(s)) or fits.get(s) for s in range(8)) if f)
+        out.append(f'<tr><td>{e(name)}</td>{cells}</tr>')
+    out.append('</table><p class="sub">Least-squares fit of the error over the levels: offset (counts at code 0) / gain '
+               'error.</p>')
+    return ''.join(out)
+
+
 def spoc_edge_section(folder, rep):
     """@brief L0-EDG: what each edge case did (the verdicts are in the results table)."""
     e = html.escape
@@ -1618,6 +1694,10 @@ def main(out):
         if c.get('kind') == 'target':
             # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if c.get('figures') == 'spoc_adc':
+                # L0-ADC (#23): offset of the CUT ADC against the level and the sampling time.
+                p.append(spoc_adc_section(c['folder'], rep_t))
+                continue
             if c.get('figures') == 'spoc_edge':
                 # L0-EDG (ADR 0009, #23): what each edge case did.
                 p.append(spoc_edge_section(c['folder'], rep_t))

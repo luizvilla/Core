@@ -1026,6 +1026,90 @@
    "id": "L0-EDG-08",
    "title": "A current sensor whose readings stop, or never come, latches a fault while the PWM runs",
    "criterion": ".a the control task stops dispatching (test hook, /Fault case 17) with the PWM on: within 1 s a self-test fault \"frozen current sensor\"; .b dispatch forbidden from boot, then the PWM: within 1 s \"no current reading\"; both with outputs off and reboot required"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-00",
+   "title": "VREF+ of the CUT from VREFINT",
+   "criterion": "VREF+ = 3.0 V x VREFINT_CAL / VREFINT reading (640.5 cycles), against the 2048 mV VREFBUF; information"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-01",
+   "title": "ADC error on the DAC pin itself (no SPOC path)",
+   "criterion": "PA6 on ADC2 IN3 at 100-1900 mV and each sampling time (2.5-640.5 cycles): ADC counts - DAC code, offset and gain fit; information"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-02",
+   "title": "ADC error on sensor pins through the SPOC path",
+   "criterion": "Twist I1 (PA1) and V_HIGH (PC3) on each ADC that reads them, same levels and sampling times as 01; against 01: what the bench path adds; information"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-03",
+   "title": "Memory of the previous channel on the sampling capacitor",
+   "criterion": "the pin converted right after VREFINT, against alone, at 2.5, 12.5 and 640.5 cycles; information"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-04",
+   "title": "Production reading armed (regular group), PWM outputs on and off",
+   "criterion": "V_HIGH (PC3, high watchdog only) from the DAC at 100-1500 mV, I1 and I2 held at 0 A on CH3/CH4: /Adc statistics (newest sample each task period, 1 s) with the outputs on, then off: counts - DAC code, mean and extremes; information"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-05",
+   "title": "Reading against the ADC sample instant in the PWM period",
+   "criterion": "as 04 with the outputs on (duty 0.5), the ADC trigger instant (HRTIM CMP3 of each leg) swept over the period at 100 and 1000 mV: counts - DAC code, mean and extremes; the pin node on the scope; information"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, ADC offset finding)",
+   "harness": "tests/l0/spoc_adc/run.sh --run",
+   "source": "docs/safety/spoc_bench.md (ADC offset finding); `tests/l0/spoc_adc/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
+   "id": "L0-ADC-06",
+   "title": "Where the switching reaches the reading: through the SPOC mux or not",
+   "criterion": "armed, injected conversions (SMPR kept) of the V_HIGH pin (through the SPOC mux) and of the DAC pin PA6 (no mux) at 100-1000 mV, PWM outputs on then off: counts - DAC code; information"
   }
  ],
  "retired": {}

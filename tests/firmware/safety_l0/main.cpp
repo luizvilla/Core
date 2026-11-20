@@ -15,10 +15,15 @@
  * ThingSet:
  *   /Safety  rArmed rFault rTripped rFltMask rOutputs rText rRebootRequired, xClear   state of the Safety API, clearFault()
  *   /Pwm     wFreq_Hz wDuty wUnits wRun, xApply                           legs (HRTIM units, bit 0 = A ... 5 = F)
+ *            wTrig (>= 0: ADC1/ADC2 triggered by the first/second leg's CMP3 at this fraction of the period;
+ *            < 0: as found, the master period); rCmp3 rPer (first leg) rAdc1R rAdc3R (HRTIM trigger sources)
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
  *   /Sw      wName, xApply; rWatched rRc                                software check on one sensor by name ("" = none)
  *   /Adc     wAdc wChannel; rRaw                                         latest raw sample of an ADC channel (DMA peek)
+ *            xStat; rN rMean_x16 rMin rMax                               its statistics since xStat, once per task period
+ *   /AdcJ    wAdc wChannel wSmp wPre wN, xRead; rRc rMean_x16 rMin rMax rVrefintCal
+ *            injected conversions with a chosen sampling time, before data acquisition (ADC offset probe)
  *   /Fault   wCase wIndex, xInject; rRc rDone rWritten rDetected rDetect_us rLastCase rReason rPc rTask
  *            rKernelGap_us (longest gap between kernel heartbeats since boot)
  *            software fault injection (cases below); the case that ended in a reset is kept in TAMP BKP29
@@ -62,6 +67,7 @@
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <soc.h>
+#include <stm32g4xx_ll_adc.h>
 #include <stm32g4xx_ll_bus.h>
 #include <stm32g4xx_ll_dac.h>
 #include <stm32g4xx_ll_gpio.h>
@@ -93,6 +99,9 @@ static int8_t clear_rc;
 
 static uint32_t pwm_freq_hz = 200000;
 static float pwm_duty = 0.5f;
+static float pwm_trig = -1.0f;           /* ADC trigger instant (fraction of the period) on each leg; < 0: as found */
+static uint16_t pwm_cmp3, pwm_per;       /* read back from the first leg: HRTIM CMP3 (ADC trigger) and period */
+static uint32_t pwm_adc1r, pwm_adc3r;    /* HRTIM ADC trigger 1 (ADC1) and 3 (ADC2) sources */
 static uint8_t pwm_units = 0;       /* requested units, bit 0 = A */
 static bool pwm_run_req;
 static bool pwm_apply;
@@ -132,9 +141,24 @@ static void refresh_status(void)
 
 /* ------------------------------------------------------------------ control task */
 
+/* /Adc statistics: the newest sample of one channel once per task period (1 in 20 conversions at 200 kHz). */
+static volatile bool adc_stat_on;
+static volatile uint8_t adc_stat_adc, adc_stat_rank;
+static uint32_t adc_stat_n, adc_stat_sum;
+static uint16_t adc_stat_min, adc_stat_max;
+
 static void control_task(void)
 {
 	task_calls++;
+	if (adc_stat_on && adc_stat_n < 0x00FFFFFFU) {
+		uint16_t v = spin.data.peekAdcRaw(static_cast<adc_t>(adc_stat_adc), adc_stat_rank);
+		if (v != 0xFFFFU) {
+			adc_stat_n++;
+			adc_stat_sum += v;
+			adc_stat_min = v < adc_stat_min ? v : adc_stat_min;
+			adc_stat_max = v > adc_stat_max ? v : adc_stat_max;
+		}
+	}
 	if (task_stuck) {
 		for (;;) {
 		}
@@ -181,6 +205,27 @@ static int pwm_apply_now(void)
 			spin.pwm.startDualOutput(UNITS[u]); /* the first start arms the trips */
 		}
 	}
+	int leg = 0;
+	for (int u = 0; u < 6; u++) {
+		if (pwm_units & (1U << u)) {
+			/* wTrig: as an application does, ADC1 from the first leg's CMP3 and ADC2 from the second's, at
+			 * that instant; by default (as found) the Spin's HRTIM triggers come from the master period. */
+			if (pwm_trig >= 0.0f && pwm_trig <= 1.0f) {
+				if (leg < 2) {
+					spin.pwm.setAdcTrigger(UNITS[u], leg ? ADC_2 : ADC_1);
+					spin.pwm.enableAdcTrigger(UNITS[u]);
+				}
+				spin.pwm.setAdcTriggerInstant(UNITS[u], pwm_trig);
+			}
+			leg++;
+			if (u == __builtin_ctz(pwm_units)) {
+				pwm_cmp3 = (uint16_t)HRTIM1->sTimerxRegs[u].CMP3xR;
+				pwm_per = (uint16_t)HRTIM1->sTimerxRegs[u].PERxR;
+			}
+		}
+	}
+	pwm_adc1r = HRTIM1->sCommonRegs.ADC1R;
+	pwm_adc3r = HRTIM1->sCommonRegs.ADC3R;
 	pwm_running = (HRTIM1->sCommonRegs.OENR & 0xFFFU) != 0U; /* false if arming refused */
 	if (pwm_running && !task_running) {
 		start_control_task();
@@ -560,6 +605,9 @@ static int sw_apply_now(void)
 
 static uint8_t adc_num = 1, adc_channel = 1;
 static uint16_t adc_raw = 0xFFFF;
+static bool adc_stat_req;
+static uint32_t adc_stat_n_out, adc_stat_mean_x16;
+static uint16_t adc_stat_min_out, adc_stat_max_out;
 
 /* The raw sample through DataAPI::peekAdcRaw(), as the frozen-sensor check reads it. 0xFFFF: no value. In this
  * firmware the first PWM start comes before data acquisition, so the Safety API starts it unattended; the control
@@ -567,11 +615,142 @@ static uint16_t adc_raw = 0xFFFF;
  * 0xFFFF, docs/safety/spoc_bench.md). */
 static void adc_cb(enum thingset_callback_reason reason)
 {
+	uint8_t rank = spin.data.getAdcChannelRank(static_cast<adc_t>(adc_num), adc_channel);
+	if (reason == THINGSET_CALLBACK_POST_WRITE && adc_stat_req) {
+		/* xStat: restart the statistics on this channel (taken by the control task) */
+		adc_stat_req = false;
+		adc_stat_on = false;
+		adc_stat_n = adc_stat_sum = 0;
+		adc_stat_min = 0xFFFFU;
+		adc_stat_max = 0;
+		adc_stat_adc = adc_num;
+		adc_stat_rank = rank;
+		adc_stat_on = rank != 0;
+		return;
+	}
 	if (reason != THINGSET_CALLBACK_PRE_READ) {
 		return;
 	}
-	uint8_t rank = spin.data.getAdcChannelRank(static_cast<adc_t>(adc_num), adc_channel);
 	adc_raw = rank ? spin.data.peekAdcRaw(static_cast<adc_t>(adc_num), rank) : 0xFFFFU;
+	unsigned int key = irq_lock();
+	adc_stat_n_out = adc_stat_n;
+	adc_stat_mean_x16 = adc_stat_n ? (uint32_t)(((uint64_t)adc_stat_sum * 16U + adc_stat_n / 2U) / adc_stat_n) : 0U;
+	adc_stat_min_out = adc_stat_min;
+	adc_stat_max_out = adc_stat_max;
+	irq_unlock(key);
+}
+
+/* ------------------------------------------------------------------ ADC offset probe (injected conversions) */
+
+/* Software-triggered injected conversions of any channel of ADC1/ADC2 with a chosen sampling time (SMPR code 0-7:
+ * 2.5, 6.5, 12.5, 24.5, 47.5, 92.5, 247.5, 640.5 cycles of 42.5 MHz; production uses 12.5, adc_core.c) and an
+ * optional channel converted just before it (wPre, 0 = none: the sampling capacitor then holds that channel's
+ * level). SMPR may only change with ADSTART = JADSTART = 0 (RM0440), and stopping the regular group under the PWM
+ * would put the circular DMA out of step: the probe runs before data acquisition starts (fresh boot, rRc -2
+ * otherwise). As the VREFINT self-test, it wakes, calibrates and enables the ADC itself if needed and leaves it
+ * disabled, SMPR and JSQR as found. Channel 18 of ADC1 is VREFINT (enabled here; rVrefintCal is its factory
+ * reading at VREF+ = 3.0 V). Results: mean x16, min, max over wN conversions.
+ * wSmp 255 keeps SMPR as found and may run while acquisition runs (ADC enabled by the data API): the injected
+ * conversions then interrupt the regular sequence, which resumes (RM0440), at instants unrelated to the PWM. */
+static uint8_t adcj_num = 2, adcj_channel = 3, adcj_smp = 2, adcj_pre = 0;
+static uint16_t adcj_n = 256, adcj_min, adcj_max, adcj_vrefint_cal;
+static uint32_t adcj_mean_x16;
+static bool adcj_read;
+static int8_t adcj_rc;
+
+static bool adcj_wait(volatile uint32_t *reg, uint32_t mask, bool set)
+{
+	for (uint32_t i = 0; i < 200000U; i++) {
+		if (((*reg & mask) != 0U) == set) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static int adcj_measure(void)
+{
+	ADC_TypeDef *adc = adcj_num == 1 ? ADC1 : adcj_num == 2 ? ADC2 : NULL;
+	bool keep_smp = adcj_smp == 0xFFU;
+	if (adc == NULL || adcj_channel < 1 || adcj_channel > 18 || adcj_pre > 18 || (adcj_smp > 7 && !keep_smp)
+	    || adcj_n == 0 || adcj_n > 4096) {
+		return -1;
+	}
+	if ((adc->CR & ADC_CR_JADSTART) || (!keep_smp && ((adc->CR & ADC_CR_ADSTART) || spin.data.started()))
+	    || (keep_smp && !(adc->CR & ADC_CR_ADEN))) {
+		return -2;
+	}
+	bool enabled_here = false;
+	RCC->AHB2ENR |= RCC_AHB2ENR_ADC12EN;
+	(void)RCC->AHB2ENR;
+	if (!(adc->CR & ADC_CR_ADEN)) {
+		if (!(adc->CR & ADC_CR_ADVREGEN)) {
+			ADC12_COMMON->CCR |= ADC_CCR_CKMODE;            /* HCLK/4, as the ADC driver sets */
+			LL_ADC_DisableDeepPowerDown(adc);
+			LL_ADC_EnableInternalRegulator(adc);
+			k_busy_wait(25);
+			LL_ADC_StartCalibration(adc, LL_ADC_SINGLE_ENDED);
+			if (!adcj_wait(&adc->CR, ADC_CR_ADCAL, false)) {
+				return -3;
+			}
+			k_busy_wait(1);
+		}
+		adc->ISR = ADC_ISR_ADRDY;
+		LL_ADC_Enable(adc);
+		if (!adcj_wait(&adc->ISR, ADC_ISR_ADRDY, true)) {
+			return -3;
+		}
+		enabled_here = true;
+	}
+	ADC12_COMMON->CCR |= ADC_CCR_VREFEN;
+	volatile uint32_t *smpr = adcj_channel < 10 ? &adc->SMPR1 : &adc->SMPR2;
+	uint32_t pos = 3U * (adcj_channel % 10U);
+	uint32_t smpr_was = *smpr, jsqr_was = adc->JSQR;
+	if (!keep_smp) {
+		*smpr = (smpr_was & ~(7U << pos)) | ((uint32_t)adcj_smp << pos);
+	}
+	adc->JSQR = adcj_pre ? (1U | ((uint32_t)adcj_pre << ADC_JSQR_JSQ1_Pos) | ((uint32_t)adcj_channel << ADC_JSQR_JSQ2_Pos))
+	                     : ((uint32_t)adcj_channel << ADC_JSQR_JSQ1_Pos);   /* JEXTEN 0: software trigger */
+	uint32_t sum = 0;
+	uint16_t lo = 0xFFFFU, hi = 0;
+	int rc = 0;
+	for (uint32_t i = 0; i < adcj_n; i++) {
+		adc->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+		LL_ADC_INJ_StartConversion(adc);
+		if (!adcj_wait(&adc->ISR, ADC_ISR_JEOS, true)) {
+			rc = -4;
+			break;
+		}
+		uint16_t v = (uint16_t)(adcj_pre ? adc->JDR2 : adc->JDR1);
+		sum += v;
+		lo = v < lo ? v : lo;
+		hi = v > hi ? v : hi;
+	}
+	adc->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+	adc->JSQR = jsqr_was;
+	if (!keep_smp) {
+		*smpr = smpr_was;
+	}
+	if (enabled_here) {
+		LL_ADC_Disable(adc);
+		(void)adcj_wait(&adc->CR, ADC_CR_ADEN, false);
+	}
+	if (rc == 0) {
+		adcj_mean_x16 = (sum * 16U + adcj_n / 2U) / adcj_n;
+		adcj_min = lo;
+		adcj_max = hi;
+	}
+	return rc;
+}
+
+static void adcj_cb(enum thingset_callback_reason reason)
+{
+	if (reason == THINGSET_CALLBACK_PRE_READ) {
+		adcj_vrefint_cal = *VREFINT_CAL_ADDR;
+	} else if (reason == THINGSET_CALLBACK_POST_WRITE && adcj_read) {
+		adcj_read = false;
+		adcj_rc = (int8_t)adcj_measure();
+	}
 }
 
 /* ------------------------------------------------------------------ ThingSet */
@@ -642,6 +821,7 @@ static void cal_cb(enum thingset_callback_reason reason)
 #define ID_FAULT  0x94
 #define ID_SW     0x95
 #define ID_ADC    0x96
+#define ID_ADCJ   0x97
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_SAFETY, "Safety", &safety_cb);
 THINGSET_ADD_ITEM_BOOL(ID_SAFETY, 0x9001, "rArmed", &safety_armed, THINGSET_ANY_R, 0);
@@ -662,6 +842,11 @@ THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x9104, "wRun", &pwm_run_req, THINGSET_ANY_RW, 0)
 THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x9105, "xApply", &pwm_apply, THINGSET_ANY_RW, 0);
 THINGSET_ADD_ITEM_INT8(ID_PWM, 0x9106, "rRc", &pwm_rc, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x9107, "rRunning", &pwm_running, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_FLOAT(ID_PWM, 0x9108, "wTrig", &pwm_trig, 3, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT16(ID_PWM, 0x9109, "rCmp3", &pwm_cmp3, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT16(ID_PWM, 0x910A, "rPer", &pwm_per, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910B, "rAdc1R", &pwm_adc1r, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910C, "rAdc3R", &pwm_adc3r, THINGSET_ANY_R, 0);
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_INJ, "Inj", &inj_cb);
 THINGSET_ADD_ITEM_UINT16(ID_INJ, 0x9201, "wLevel_mV", &inj_level_req_mV, THINGSET_ANY_RW, 0);
@@ -702,6 +887,24 @@ THINGSET_ADD_GROUP(TS_ID_ROOT, ID_ADC, "Adc", &adc_cb);
 THINGSET_ADD_ITEM_UINT8(ID_ADC, 0x9601, "wAdc", &adc_num, THINGSET_ANY_RW, 0);
 THINGSET_ADD_ITEM_UINT8(ID_ADC, 0x9602, "wChannel", &adc_channel, THINGSET_ANY_RW, 0);
 THINGSET_ADD_ITEM_UINT16(ID_ADC, 0x9603, "rRaw", &adc_raw, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_BOOL(ID_ADC, 0x9604, "xStat", &adc_stat_req, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT32(ID_ADC, 0x9605, "rN", &adc_stat_n_out, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT32(ID_ADC, 0x9606, "rMean_x16", &adc_stat_mean_x16, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADC, 0x9607, "rMin", &adc_stat_min_out, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADC, 0x9608, "rMax", &adc_stat_max_out, THINGSET_ANY_R, 0);
+
+THINGSET_ADD_GROUP(TS_ID_ROOT, ID_ADCJ, "AdcJ", &adcj_cb);
+THINGSET_ADD_ITEM_UINT8(ID_ADCJ, 0x9701, "wAdc", &adcj_num, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT8(ID_ADCJ, 0x9702, "wChannel", &adcj_channel, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT8(ID_ADCJ, 0x9703, "wSmp", &adcj_smp, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT8(ID_ADCJ, 0x9704, "wPre", &adcj_pre, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADCJ, 0x9705, "wN", &adcj_n, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_BOOL(ID_ADCJ, 0x9706, "xRead", &adcj_read, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_INT8(ID_ADCJ, 0x9707, "rRc", &adcj_rc, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT32(ID_ADCJ, 0x9708, "rMean_x16", &adcj_mean_x16, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADCJ, 0x9709, "rMin", &adcj_min, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADCJ, 0x970A, "rMax", &adcj_max, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT16(ID_ADCJ, 0x970B, "rVrefintCal", &adcj_vrefint_cal, THINGSET_ANY_R, 0);
 
 /* ------------------------------------------------------------------ main */
 

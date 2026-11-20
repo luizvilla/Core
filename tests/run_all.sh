@@ -61,6 +61,7 @@ object_code() {
         spoc_trip) echo TRP-01 ;;
         spoc_dead) echo CPU-01 ;;
         spoc_edge) echo EDG-01 ;;
+        spoc_adc) echo ADC-00 ;;
         l1) echo INT-00 ;;
         *) echo "$1" | tr '[:lower:]' '[:upper:]' ;;
     esac

@@ -375,6 +375,23 @@ Looking at the early low-bound trips, the test firmware got an `/Adc` readout of
 
 **Finding: the CUT's ADC reads about 14 mV low at the bottom of its range.** With `/Adc`, V_HIGH (Ownverter, ADC1 channel 8) reads 286 mV with 302 mV on the pin (scope CH2, CUT DAC at 300 mV, which is linear down to 120 mV within 2 mV); at 1000 mV the current pins read 993–995 mV. A fit gives a slope of 0.99 and an offset of about −14 mV. It explains both earlier observations: the ADC-watchdog low bounds trip 12–22 mV early, and the software low bounds trip late (Twist V_HIGH low +23 mV, Ownverter +29 mV at 167 mV, outside ±25 mV: L0-TRP-03.ownverter.V_HIGH.low FAIL). Not explained yet: sampling time against the bench's source impedance (MUX switches, SPOC dividers) or the ADC's own offset. To measure: the offset against the level and the sampling time, on a pin driven straight by the DAC.
 
+**Measured (2026-11-20, L0-ADC, `tests/l0/spoc_adc`, campaign `2026-11-20_51c9ef7-dirty_133524_Mc6XL1`): the ADC's own offset is −5 mV; the rest came from sampling on the switching edges.** The CUT DAC and ADCs share the VREFBUF, so ADC counts − DAC code is the error whatever VREF's true value (VREFINT puts VREF+ at 2048.7 mV). A test probe (`/AdcJ`, injected conversions with a chosen sampling time) and per-channel statistics in the control task (`/Adc xStat`) gave:
+
+| Reading | Error (counts; 1 count = 0.5 mV) |
+|---|---|
+| DAC pin PA6 on ADC2, no SPOC path, 100–1900 mV | −7 to −11, fit −10 counts, gain +0.06 % |
+| I1 (PA1) and V_HIGH (PC3) through the SPOC path, each ADC | −8 to −11: the path adds ≤ 1.5 counts |
+| Against the sampling time, 6.5 to 640.5 cycles | flat: not the source impedance |
+| Right after VREFINT on the sampling capacitor, 12.5 cycles | +3 at 100 mV, 0 above: no memory worth noting |
+| Production reading (regular group), V_HIGH, PWM outputs off | −8 to −10 at every level |
+| Same, outputs on | **−61 at 100–150 mV, −43 at 200, −15 at 300**, −5 at 500, −11 to −13 at 1000–1500 |
+| Injected conversions at random instants, outputs on | mean −9 (as off); single samples −105 to +185 |
+| Trigger moved to a leg's CMP3, swept over the period, outputs on | −10 away from the edges; +12 to −83 within ~0.06 of an edge (0 and 0.5 at duty 0.5) |
+
+Mechanism: in this build both ADCs are triggered by the HRTIM **master period** (HRTIM ADC1R = ADC3R = 0x10, `ADxMPER`; ADC1 EXTSEL 21 `hrtim_adc_trg1`, ADC2 22 `hrtim_adc_trg3`, read over SWD). The Safety API gives a software-triggered ADC its HRTIM trigger (`safety_data.cpp`) and nothing moves it to a leg; the master period is the legs' rising edge. Each edge puts a ±90 mV spike on the pin node, settled within 0.5 µs (CH2, 20 mV/div); every regular sample lands in it, at a level-dependent point of the transient. The ADC-watchdog low bounds (single samples) and the software low bounds near 170–300 mV read through it: the early watchdog trips (+12 to +22 mV) and L0-TRP-03.ownverter.V_HIGH.low (+29 mV) come from the sample instant, not from the ADC. Away from the edges the ADC is 5 mV low against the DAC (the comparators, whose thresholds are DACs, trip within 2 mV): within the ±25 mV tolerance.
+
+How the spike reaches the pin on the bench (SPOC mux crosstalk, or the CUT's own I/O) is not separated; on a power board the switching noise at the edge is larger, so sampling on the edge matters beyond the bench. Open for decision: where the test firmware (and the Safety API when it supplies a trigger itself) places the ADC trigger.
+
 Bench note: the MHO984 came back with its channels at ×1 after a replug (readings a tenth of the truth, the glitch case never triggered). The runners now set the four channels themselves (×10, 0.5 V/div) and find the scope's `/dev/usbtmcN` (`rigol_mho.scope_path()`, or `$RIGOL_USBTMC`).
 
 ### 2026-11-20, repeat-clear rule decided
