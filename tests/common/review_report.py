@@ -1138,6 +1138,10 @@ def spoc_edge_section(folder, rep):
     for q in rep.get('05', []):
         rows.append(('05', f"{q['sensor']} {q['bound']}: {q['level_mV']:.0f} mV against {q['threshold_mV']:.1f} mV",
                      'tripped' if q['fault'] else 'no trip', q.get('text', '')))
+    for g in rep.get('06', []):
+        if g.get('above_ns') is not None:
+            rows.append(('06', f"pulse {g['width_ns']} ns requested, {g['above_ns']} ns above the threshold",
+                         f"tripped 0x{g['tripped']:02x}" if g['tripped'] else 'no trip', g.get('text', '')))
     if '03' in rep:
         r = rep['03']
         rows.append(('03', f"second fault {r['second_fault_after_ms']:.0f} ms after a clear",

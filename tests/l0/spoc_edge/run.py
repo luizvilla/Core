@@ -12,8 +12,10 @@
 ##   03 a second fault within the repeat window of a clear makes clearFault() refuse until a reboot (the second
 ##      fault from the MUX injector, the CUT's ThingSet being too slow for the 100 ms window of the test build);
 ##   04 two limits exceeded one after the other: both fault inputs recorded;
-##   05 no trip just inside the thresholds, 10 s with the PWM on.
-## Glitch filters, faults during dead time and trip latency need a fast pulse source or direct probes (C13).
+##   05 no trip just inside the thresholds, 10 s with the PWM on;
+##   06 glitch filter of the comparator path: pulses on the second pin from the MUX injector's pulse mode (DAC source,
+##      hold level -> 2.0 V -> hold level), each captured on SPOC CH3; the time above the threshold decides.
+## Faults during dead time and trip latency need direct probes (C13).
 ##
 ## @par Usage
 ##   .venv/bin/python tests/l0/spoc_edge/run.py --out DIR
@@ -37,6 +39,10 @@ ENV, SHIELD = 'SAFETY_L0_TWIST', 'twist:1_4_2'
 INSIDE_MV = 20.0          # case 05: this far inside each threshold
 INSIDE_S = 10.0
 REPEAT_CLEAR_MS = 100     # CONFIG_OWNTECH_SAFETY_REPEAT_CLEAR_MS of the test firmware (app.conf)
+FILTER_NS = 282           # HRTIM fault filter of the comparator paths (fHRTIM/8, N = 6; safety_trips.c)
+FILTER_MARGIN_NS = 40     # about one filter sample (47 ns) each side
+PULSE_HIGH_MV = 2000
+PULSE_WIDTHS_NS = list(range(60, 421, 20))   # requested; the scope measures what the pin got
 
 
 def line(cid, verdict, what, expected, measured):
@@ -58,6 +64,45 @@ def fresh_bench(man):
 
 def comparator_case(man, sensor):
     return next(c for c in trip.cases_from(man, 2048.0) if c['sensor'] == sensor and c['kind'] == 'comparator')
+
+
+def glitch_sweep(b, man, c1, c2, zero1):
+    """One pulse per requested width on the second pin; returns the measured time above its threshold and the trip."""
+    sc, sh = b.scope, b.mux._require_shell()
+    thr = c2['threshold_mV'] / 1000
+    out = []
+    time.sleep(REPEAT_CLEAR_MS / 1000 + 0.5)
+    ok, why, _ = b.arm(zero1, None)
+    for w in PULSE_WIDTHS_NS:
+        if not ok:
+            out.append({'width_ns': w, 'error': why})
+            break
+        sc.set_timebase(200e-9, 0)
+        for cmd in (':TRIGger:MODE EDGE', ':TRIGger:COUPling DC', ':TRIGger:EDGE:SOURce CHANnel3',
+                    ':TRIGger:EDGE:SLOPe POSitive', f':TRIGger:EDGE:LEVel {thr - 0.2:.2f}',
+                    ':TRIGger:SWEep NORMal', ':SINGle'):
+            sc.write(cmd)
+        time.sleep(0.6)
+        sh.set_value('Mux/Inj/wPulseHigh_mV', str(PULSE_HIGH_MV))
+        sh.set_value('Mux/Inj/wPulse_ns', str(w))
+        sh.set_value('Mux/Inj/xPulse', 'true')
+        t0 = time.time()
+        while time.time() - t0 < 5 and not sc.query(':TRIGger:STATus?').strip().upper().startswith('STOP'):
+            time.sleep(0.1)
+        t, v = sc.waveform(3)
+        above = [ti for ti, vi in zip(t, v) if vi > thr]
+        st = b.safety()
+        out.append({'width_ns': w, 'above_ns': round((above[-1] - above[0]) * 1e9) if above else 0,
+                    'vmax': max(v), 'tripped': st['rTripped'] if st['rFault'] else 0, 'text': st['rText']})
+        if st['rFault']:
+            b.pwm(False)
+            time.sleep(REPEAT_CLEAR_MS / 1000 + 0.2)
+            b.cut.set_value('Safety/xClear', 'true')
+            time.sleep(0.3)
+            ok, why, _ = b.arm(zero1, None)
+        time.sleep(0.2)
+    b.pwm(False)
+    return out
 
 
 def main():
@@ -181,6 +226,27 @@ def main():
                  'no trip', f"{q['level_mV']:.0f} mV against {q['threshold_mV']:.1f} mV: "
                  + ('TRIPPED: ' + q['text'] if q['fault'] else 'no trip'))
 
+        # 06 glitch filter of the comparator path (second pin, from the MUX injector's pulse mode)
+        rep['06'] = glitch_sweep(b, man, c1, c2, zero1)
+        thr2 = c2['threshold_mV'] / 1000
+        bit = 1 << (c2['path']['flt'] - 1)
+        rows = [r for r in rep['06'] if r.get('above_ns') is not None]
+        short = [r for r in rows if r['above_ns'] <= FILTER_NS - FILTER_MARGIN_NS]
+        long_ = [r for r in rows if r['above_ns'] >= FILTER_NS + FILTER_MARGIN_NS]
+        quiet = [r['above_ns'] for r in rows if not r['tripped'] & bit]
+        trips = [r['above_ns'] for r in rows if r['tripped'] & bit]
+        ok = (bool(short) and bool(long_) and all(not r['tripped'] & bit for r in short)
+              and all(r['tripped'] & bit for r in long_))
+        line('L0-EDG-06', judge(ok),
+             f"{s2} comparator (COMP{c2['path']['comp']} -> FLT{c2['path']['flt']}) "
+             f"against pulses above its {c2['threshold_mV']:.0f} mV threshold (filter {FILTER_NS} ns)",
+             f'no trip up to {FILTER_NS - FILTER_MARGIN_NS} ns above the threshold, a trip from '
+             f'{FILTER_NS + FILTER_MARGIN_NS} ns',
+             f"{len(rows)} pulses; longest without a trip {max(quiet) if quiet else 'none'} ns, shortest with one "
+             f"{min(trips) if trips else 'none'} ns (time above {thr2:.2f} V on CH3)"
+             + ('' if all(not (r['tripped'] & ~bit & 0x3F) for r in rows) else
+                '; the watchdog caught some pulses too (no filter, sampled every PWM period)'))
+
         # 03 second fault within the repeat window of a clear: trip 1 on the first pin (CUT DAC), trip 2 on the
         # second pin from the MUX injector right after the clear returns (two writes on the MUX's own port: the
         # CUT's ThingSet alone takes more than the 100 ms window)
@@ -249,8 +315,11 @@ def main():
                          '(DAC source) holds or drives the second through CH3'],
             ['Boots', '01 on a fresh boot (the arming self-tests run once per boot); 02-05 on a second fresh boot, '
                       'armed first with both current pins at 0 A; a reset at the end (03 leaves "reboot required")'],
-            ['Not covered here', 'glitch filters, a fault during dead time, trip latency: a fast pulse source or '
-                                 'direct probes (C13)']],
+            ['Glitches (06)', f'MUX injector pulse mode (Core-MUX mux-injector, local commit after b500a4e): the DAC '
+                              f'source steps the second pin from its 0 A hold to {PULSE_HIGH_MV} mV and back; '
+                              'requested widths ' + f'{PULSE_WIDTHS_NS[0]}-{PULSE_WIDTHS_NS[-1]} ns; each pulse captured on '
+                              'CH3 (200 ns/div); the time above the threshold decides'],
+            ['Not covered here', 'a fault during dead time, trip latency: direct probes (C13)']],
         'target': [['Bench', 'SPOC: CUT Spin + MUX Spin, ST-Link on the CUT'], ['MUX', f'Core-MUX ({trip.MUX_FW})'],
                    ['Host code', f'Core2 {sha}{"-dirty" if dirty else ""}']],
         'report': 'report.json', 'figures': 'spoc_edge'}

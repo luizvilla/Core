@@ -70,7 +70,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 | C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; the current pins with a watchdog low bound held by the injector through CH3 and (TP5–TP7 wired) CH4; production build only, its manifest checked against `tools/safety_check.py` |
 | C12 | `test(safety): CPU-dead cases` | L0-CPU (`tests/l0/spoc_dead`): lockup per PWM pin on the scope (L0-SUP-08.c); each hardware trip with the CPU halted over SWD, the threshold crossed by an SWD DAC write |
 | C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service |
-| C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once. Done 2026-11-20 (L0-EDG): arming with a limit exceeded, clear while exceeded, repeated fault, two faults, no trip just inside. Open: glitch filters and dead time (a fast pulse source or probes) |
+| C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once. Done 2026-11-20 (L0-EDG): arming with a limit exceeded, clear while exceeded, repeated fault, two faults, no trip just inside, comparator glitch filter. Open: dead time (probes) |
 | C15 | `docs(safety): L0 SPOC campaign results` | Campaign under `tests/out/`, control center checked, results here, in the ADR and on the issues; closes #23 |
 
 Each test from C7 on is in `tests/catalogue.json` and is done only when it shows in `tests/out/control-center.html` with its newest result and rendered report. Campaign folders are git-ignored: the numbers are copied here.
@@ -315,7 +315,7 @@ Bench notes: the SPOC preflight takes `SPOC_ROLES=mux` for a test that flashes t
 
 ### 2026-11-20, C14 (part): L0-EDG, edge cases
 
-`tests/l0/spoc_edge` (README there), campaign `2026-11-20_18164c6-dirty_025218`: 5 PASS, 1 INFO.
+`tests/l0/spoc_edge` (README there), campaign `2026-11-20_18164c6-dirty_025218`: 5 PASS, 1 INFO; with the glitch case, `2026-11-20_81dfd6a-dirty_030645`: 6 PASS, 1 INFO.
 
 | Case | Result |
 |---|---|
@@ -327,5 +327,7 @@ Bench notes: the SPOC preflight takes `SPOC_ROLES=mux` for a test that flashes t
 
 **Open: the repeat-clear rule.** ADR 0009 states it two ways. The decision text: "a repeated clear within N s needs a reboot", which is what `safety_supervision_clear_fault()` does (it compares the new clear with the previous one). The implementation note and the Kconfig prompt: "a second fault within N s of a clear". With the code as it is, a fault 70 ms after a clear, cleared 0.6 s later, is accepted; in production (10 s) a fault 2 s after a clear, cleared 20 s later, is accepted too. To decide; the second reading needs the fault time recorded at the latch, which runs in a zero-latency interrupt (no kernel call): stamped by the self-test work within 10 ms, for example.
 
-Glitch filters and faults during dead time stay open: the injector's OPAMP (45 V/µs) and the CUT's DAC are too slow for sub-µs glitches without a pulse mode in Core-MUX, and dead-time alignment needs probes.
+**Glitch filter (L0-EDG-06, campaign `2026-11-20_81dfd6a-dirty_030645`).** Core-MUX got a pulse mode on the injector's DAC source (`/Mux/Inj` `wPulseHigh_mV`, `wPulse_ns`, `xPulse`; SPOC_Software `mux-injector` local commit `fe04fe3`, **not pushed**: the bench runs it, `b500a4e` stays the pinned hash until it is pushed). I2 is held at 1.0 V and pulsed to 2.0 V; each pulse is captured on CH3 at 200 ns/div and its time above the 1.70 V threshold read from the waveform (the firmware's own timing runs long, in steps of about 41 ns). 19 pulses: no trip up to 270 ns above the threshold, a COMP3 → FLT5 trip from 306 ns; the 282 ns filter (fHRTIM/8, N = 6) lies in between. PASS (no trip up to 242 ns, trip from 322 ns). The ADC watchdog on I2 (no filter, sampled every PWM period) caught none of these pulses.
+
+Faults during dead time stay open: they need the fault aligned on the PWM edges, with direct probes.
 
