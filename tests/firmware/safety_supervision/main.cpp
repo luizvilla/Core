@@ -337,6 +337,14 @@ static void provoke(uint32_t seq, uint32_t c)
 		}
 		break;
 	case CASE_LOCKUP:
+		/* Marker for the scope (L0-DEAD-01, SPOC bench): PA6 (Spin 34) rises a few cycles before the lockup. */
+		RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN;
+		(void)RCC->AHB2ENR;
+		GPIOA->BSRR = GPIO_BSRR_BR6;
+		GPIOA->OSPEEDR |= 3U << GPIO_OSPEEDR_OSPEED6_Pos;
+		GPIOA->MODER = (GPIOA->MODER & ~GPIO_MODER_MODE6) | GPIO_MODER_MODE6_0;
+		k_busy_wait(5);
+		GPIOA->BSRR = GPIO_BSRR_BS6;
 		__set_FAULTMASK(1U);
 		__builtin_trap();
 		break;
