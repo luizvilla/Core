@@ -285,8 +285,21 @@ void scheduling_start_uninterruptible_synchronous_task(
 		 * and nobody dispatches. The task takes the dispatch over whatever
 		 * manage_data_acquisition says, or every reading stays "no value"
 		 * and the sensor plausibility checks see nothing (ADR 0009).
+		 * Its DMA buffers were sized for UNATTENDED_DMA_DEPTH conversions:
+		 * a task period of that many PWM periods or more makes the
+		 * readings stale (the frozen-sensor check then trips).
 		 */
 		do_data_dispatch = true;
+		uint32_t hrtim_period_us = hrtim_period_Master_get_us();
+		uint32_t per_dispatch = (interrupt_source == scheduling_interrupt_source_t::source_hrtim)
+		                        ? hrtim_PeriodicEvent_GetRep(MSTR)
+		                        : ((hrtim_period_us != 0) ? task_period / hrtim_period_us : 0);
+		if (per_dispatch >= DataAPI::UNATTENDED_DMA_DEPTH)
+		{
+			printk("data: %u conversions per task period, more than the %u the Safety API's "
+			       "acquisition buffers hold: start data acquisition before the first PWM output\n",
+			       (unsigned)per_dispatch, (unsigned)DataAPI::UNATTENDED_DMA_DEPTH);
+		}
 	}
 	else if ( (manage_data_acquisition == true) && (spin.data.started() == false) )
 	{

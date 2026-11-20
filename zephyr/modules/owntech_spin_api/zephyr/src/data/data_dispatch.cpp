@@ -203,6 +203,16 @@ void data_dispatch_init(dispatch_t dispatch_method, uint32_t repetitions)
 			dma_buffer_sizes[adc_index] = dma_buffer_size;
 			dma_main_buffers[adc_index] =
 					(uint16_t*)k_malloc(dma_buffer_size * sizeof(uint16_t));
+			if (dma_main_buffers[adc_index] == nullptr)
+			{
+				/* Out of heap: no DMA for this ADC (it would write at
+				 * address 0) and no value from it, which the Safety
+				 * API's plausibility check reports (luizvilla/Core#23). */
+				printk("data: ADC%u: no memory for a %u-sample DMA buffer, its values are "
+				       "not acquired\n", adc_num, (unsigned)dma_buffer_size);
+				enabled_channels_count[adc_index] = 0;
+				continue;
+			}
 
 			if (dispatch_type == interrupt)
 			{
@@ -382,6 +392,8 @@ uint16_t* data_dispatch_get_acquired_values(uint8_t adc_number,
 
 	/* Get and check data count */
 	uint8_t channel_index = channel_rank-1;
+	if (channel_index >= enabled_channels_count[adc_index])
+		return nullptr;
 	uint32_t current_count =
 				_data_dispatch_get_count(adc_index, channel_index);
 
@@ -410,7 +422,7 @@ uint16_t data_dispatch_peek_acquired_value(uint8_t adc_number,
 {
 	uint8_t adc_index = adc_number-1;
 	uint8_t channel_index = channel_rank-1;
-	if (adc_index < ADC_COUNT)
+	if (adc_index < ADC_COUNT && channel_index < enabled_channels_count[adc_index])
 	{
 		/* Get info on buffer */
 		uint16_t* active_buffer =

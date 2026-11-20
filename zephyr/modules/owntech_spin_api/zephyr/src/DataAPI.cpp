@@ -128,7 +128,14 @@ int8_t DataAPI::startUnattended()
 	if (DataAPI::is_started == true)
 		return -1;
 	setDispatchMethod(DispatchMethod_t::externally_triggered);
-	setRepetitionsBetweenDispatches(16);
+	/* The control task that takes the dispatch over later finds the new
+	 * samples from the DMA position, modulo the buffer: the buffer must hold
+	 * more conversions than come between two dispatches (one per PWM period
+	 * per ADC), or a whole turn reads as none and the readings go stale
+	 * (Ownverter ADC1: 5 channels, 20-slot buffer, 20 conversions per 100 us
+	 * task; luizvilla/Core#23). UNATTENDED_DMA_DEPTH covers task periods up
+	 * to UNATTENDED_DMA_DEPTH - 1 PWM periods; the task warns beyond. */
+	setRepetitionsBetweenDispatches(UNATTENDED_DMA_DEPTH);
 	int8_t rc = start();
 	DataAPI::is_unattended = (rc == 0);
 	return rc;

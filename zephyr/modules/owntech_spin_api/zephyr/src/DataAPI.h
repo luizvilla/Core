@@ -228,6 +228,10 @@ public:
 	 */
 	int8_t startUnattended();
 
+	/** DMA buffer depth of startUnattended(), in conversions per ADC: task
+	 *  periods up to 63 PWM periods (the heap is 4 KB: 512 did not fit). */
+	static const uint32_t UNATTENDED_DMA_DEPTH = 64;
+
 	/**
 	 * @brief @return true while acquisition runs as started by
 	 *        startUnattended(): nobody dispatches yet. The control task takes
