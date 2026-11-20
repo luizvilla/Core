@@ -70,7 +70,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 | C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; the current pins with a watchdog low bound held by the injector through CH3 and (TP5–TP7 wired) CH4; production build only, its manifest checked against `tools/safety_check.py` |
 | C12 | `test(safety): CPU-dead cases` | L0-CPU (`tests/l0/spoc_dead`): lockup per PWM pin on the scope (L0-SUP-08.c); each hardware trip with the CPU halted over SWD, the threshold crossed by an SWD DAC write |
 | C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service |
-| C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once |
+| C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once. Done 2026-11-20 (L0-EDG): arming with a limit exceeded, clear while exceeded, repeated fault, two faults, no trip just inside. Open: glitch filters and dead time (a fast pulse source or probes) |
 | C15 | `docs(safety): L0 SPOC campaign results` | Campaign under `tests/out/`, control center checked, results here, in the ADR and on the issues; closes #23 |
 
 Each test from C7 on is in `tests/catalogue.json` and is done only when it shows in `tests/out/control-center.html` with its newest result and rendered report. Campaign folders are git-ignored: the numbers are copied here.
@@ -312,4 +312,20 @@ Runner notes: the arming self-tests run once per boot, at the first data start, 
 | V1_LOW high, V_HIGH high (watchdogs) | | | | BLOCKED: TP5–TP7 |
 
 Bench notes: the SPOC preflight takes `SPOC_ROLES=mux` for a test that flashes the CUT itself. The supervision firmware's backup registers survive a flash: a fault latched by another firmware refuses its PWM until cleared. HRTIM timer registers: `OUTxR` at 0x64, `FLTxR` at 0x68; `SYSCFG_CFGR2` at 0x1C (an earlier read at wrong offsets suggested unarmed registers; corrected).
+
+### 2026-11-20, C14 (part): L0-EDG, edge cases
+
+`tests/l0/spoc_edge` (README there), campaign `2026-11-20_18164c6-dirty_025218`: 5 PASS, 1 INFO.
+
+| Case | Result |
+|---|---|
+| 01 first PWM start with I1 at 1750 mV (limit 1700 mV) | refused, outputs never on |
+| 02 clear while I1 is still above its limit, then at 0 A | refused (-1), fault kept; then accepted (0) |
+| 04 I1, then I2, above their high limits | FLT4 and FLT5 both recorded (tripped 0x39), outputs off |
+| 05 I1 20 mV inside each threshold, 10 s with the PWM on | no trip (1680 mV against 1700.0; 320 mV against 299.8) |
+| 03 second fault (I2, from the MUX injector) about 70 ms after a clear, next clear about 0.6 s later | INFO: the second fault latched; the next clear was accepted |
+
+**Open: the repeat-clear rule.** ADR 0009 states it two ways. The decision text: "a repeated clear within N s needs a reboot", which is what `safety_supervision_clear_fault()` does (it compares the new clear with the previous one). The implementation note and the Kconfig prompt: "a second fault within N s of a clear". With the code as it is, a fault 70 ms after a clear, cleared 0.6 s later, is accepted; in production (10 s) a fault 2 s after a clear, cleared 20 s later, is accepted too. To decide; the second reading needs the fault time recorded at the latch, which runs in a zero-latency interrupt (no kernel call): stamped by the self-test work within 10 ms, for example.
+
+Glitch filters and faults during dead time stay open: the injector's OPAMP (45 V/µs) and the CUT's DAC are too slow for sub-µs glitches without a pulse mode in Core-MUX, and dead-time alignment needs probes.
 

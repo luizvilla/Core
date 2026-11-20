@@ -1116,6 +1116,39 @@ def spoc_cal_section(folder, rep):
     return ''.join(out)
 
 
+def spoc_edge_section(folder, rep):
+    """@brief L0-EDG: what each edge case did (the verdicts are in the results table)."""
+    e = html.escape
+    out = ['<h3>4 · Figures</h3>']
+    if not rep:
+        out.append(f'<p class="sub">No report in {e(folder.name)}/.</p>')
+        return ''.join(out)
+    rows = []
+    if '01' in rep:
+        r = rep['01']
+        rows.append(('01', f"arming at {r['level_mV']:.0f} mV", 'refused' if not r['armed'] else 'ARMED', r.get('why', '')))
+    if '02' in rep:
+        r = rep['02']
+        rows.append(('02', 'clear while exceeded, then at 0 A',
+                     f"rc {r['refused']['rClearRc']} then {r['after']['rClearRc']}", r['tripped']['rText']))
+    if '04' in rep:
+        r = rep['04']
+        rows.append(('04', 'two limits exceeded', f"tripped 0x{r['state']['rTripped']:02x}",
+                     ', '.join(f'{k} {"set" if v else "NOT set"}' for k, v in r['flags'].items())))
+    for q in rep.get('05', []):
+        rows.append(('05', f"{q['sensor']} {q['bound']}: {q['level_mV']:.0f} mV against {q['threshold_mV']:.1f} mV",
+                     'tripped' if q['fault'] else 'no trip', q.get('text', '')))
+    if '03' in rep:
+        r = rep['03']
+        rows.append(('03', f"second fault {r['second_fault_after_ms']:.0f} ms after a clear",
+                     f"next clear rc {r['state']['rClearRc']}", r.get('after_second_fault', {}).get('rText', '')))
+    out.append('<table><tr><th>Case</th><th>What</th><th>Outcome</th><th>Fault text</th></tr>')
+    for cid, what, outcome, text in rows:
+        out.append(f'<tr><td>L0-EDG-{cid}</td><td>{e(what)}</td><td>{e(outcome)}</td><td>{e(text)}</td></tr>')
+    out.append('</table>')
+    return ''.join(out)
+
+
 def spoc_dead_section(folder, rep):
     """@brief L0-CPU: lockup per PWM pin (waveforms against the marker), then the trips with the CPU halted."""
     import numpy as np
@@ -1565,6 +1598,10 @@ def main(out):
         if c.get('kind') == 'target':
             # On-target timing (L0-TIM): reporting rules in tests/l0/timing/README.md "Reporting".
             rep_t = json.loads(c['report'].read_text()) if c['report'].exists() else None
+            if c.get('figures') == 'spoc_edge':
+                # L0-EDG (ADR 0009, #23): what each edge case did.
+                p.append(spoc_edge_section(c['folder'], rep_t))
+                continue
             if c.get('figures') == 'spoc_dead':
                 # L0-CPU (ADR 0009, #23): lockup per PWM pin, then the trips with the CPU halted.
                 p.append(spoc_dead_section(c['folder'], rep_t))

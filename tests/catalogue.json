@@ -918,6 +918,66 @@
    "title": "With the CPU halted, each hardware trip path still turns the outputs off",
    "criterion": "per limit and bound (.<sensor>.<bound>): CPU halted throughout (same PC), outputs on before, the path's FLT flag set, OENR cleared and every PWM pin low after the threshold is crossed by an SWD write to the injection DAC; BLOCKED when the bench cannot hold the other current pins",
    "conditions": "SPOC bench; SAFETY_L0_TWIST; CUT halted over SWD after arming (watchdog frozen in debug, HRTIM running); held pins as L0-TRP"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C14, part)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3); repeat-clear window 100 ms in the test build",
+   "id": "L0-EDG-01",
+   "title": "Arming with a limit already exceeded is refused",
+   "criterion": "first PWM start of a boot with I1 50 mV above its high limit: arming refused, outputs never on"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C14, part)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3); repeat-clear window 100 ms in the test build",
+   "id": "L0-EDG-02",
+   "title": "clearFault() is refused while the limit is still exceeded",
+   "criterion": "after a trip, with the PWM off: clear refused (-1) while above the limit, fault kept; accepted (0) once back at 0 A"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C14, part)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3); repeat-clear window 100 ms in the test build",
+   "id": "L0-EDG-03",
+   "title": "A second fault soon after a clear (repeat-clear rule, IEC 62109-1 4.4.2.2)",
+   "criterion": "recorded (INFO): the ADR reads both \"repeated clear within N s\" and \"second fault within N s of a clear\"; open until decided"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C14, part)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3); repeat-clear window 100 ms in the test build",
+   "id": "L0-EDG-04",
+   "title": "Two limits exceeded one after the other are both recorded",
+   "criterion": "I1 then I2 above their high limits: both comparator fault inputs in the tripped mask, outputs off"
+  },
+  {
+   "tab": "safety",
+   "level": "L0",
+   "status": "implemented",
+   "status_note": "Implemented 2026-11-20 (issue luizvilla/Core#23, C14, part)",
+   "harness": "tests/l0/spoc_edge/run.sh --run",
+   "source": "ADR 0009; `tests/l0/spoc_edge/run.py`",
+   "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; CUT DAC on the first current pin (CH1 -> TP1-TP3 -> CH2), MUX injector on the second (CH3); repeat-clear window 100 ms in the test build",
+   "id": "L0-EDG-05",
+   "title": "No trip just inside the thresholds",
+   "criterion": "per bound (.<sensor>.<bound>): 20 mV inside the threshold for 10 s with the PWM on: no trip"
   }
  ],
  "retired": {}
