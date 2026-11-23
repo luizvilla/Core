@@ -527,5 +527,32 @@ The fits had R² of at least 0.98, except V2_LOW on 7GLG and YR2P (0.94).
 
 The bench measured the thresholds correctly (L0-TRP), but the thresholds come from the wrong scaling.
 
-**Open (Luiz):** do v1.1.1 boards differ from v1.1.0 in their sensing, or has the overlay never matched the hardware? The repo has overlays only up to v1.1.0.
+**Hardware history (OWNVERTER KiCad repository: v1.0.0 `4ff54ed`, v1.1.0 as built `29fcf13`, v1.1.1 `6b4b9be`).**
 
+| Sensing | v1.0.0 | v1.1.0 | v1.1.1 |
+|---|---|---|---|
+| Leg current I1–I3 | ACS730KLCTR-20AB | ACS724LLCTR-50AB, new op-amp network | as v1.1.0 |
+| Leg voltage V1–V3 | AMC1100 | AMC1311B, new dividers | as v1.1.0 |
+| High side | ACS723-20AB, AMC1100 | ACS723-20AB, AMC1311B | as v1.1.0 |
+
+- **v1.1.0 to v1.1.1:** in the sensing sheets, only renumbered parts (U902 → U607, R824 → R625), Schottky diodes, one added decoupling capacitor and a connector changed. Every sensing part and value is the same.
+- **The overlays:** `ownverter_v1_1_0.overlay` has exactly the scaling of `ownverter_v1_0_0.overlay`, which fits v1.0.0's parts:
+  - 0.005 A/count is 100 mV/A at the ADC, which fits the ACS730-20AB;
+  - a scaling centred on mid-scale fits the AMC1100's differential output.
+- **Conclusion:** the v1.1.0 overlay was never updated for the v1.1 sensing. The v1.1.1 calibrations hold for v1.1.0, and no v1.1.1 overlay is needed.
+
+Mean of the three boards, for the v1.1.0 overlay:
+
+| Sensor | Gain | Offset |
+|---|---|---|
+| I1/I2/I3_LOW | 0.00951 | −19.87 (zero 2089 counts) |
+| I_HIGH | −0.00938 | +19.73 |
+| V1–V3_LOW | 0.03002 | −0.02 |
+| V_HIGH | 0.02996 | 0, unchanged |
+
+Board 9SEZ's I1 sits 7 % above the mean.
+
+**Fixes:**
+- **I3_LOW** takes the I1/I2 scaling in every overlay.
+- **v1.1.0** takes the v1.1 values above, which also covers v1.1.1 boards.
+- **Not checked:** v0.9.0's hardware.
