@@ -71,7 +71,7 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 | C12 | `test(safety): CPU-dead cases` | L0-CPU (`tests/l0/spoc_dead`): lockup per PWM pin on the scope (L0-SUP-08.c); each hardware trip with the CPU halted over SWD, the threshold crossed by an SWD DAC write |
 | C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service. Done 2026-11-23 (L0-LAT, direct probes): comparator and watchdog latency on the pins; the injector's DAC step replaces the GPIO step (its 0 V idle would trip the low bound) |
 | C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once. Done 2026-11-20 (L0-EDG): arming with a limit exceeded, clear while exceeded, repeated fault, two faults, no trip just inside, comparator glitch filter. Dead time done 2026-11-23 (L0-LAT-05) |
-| C15 | `docs(safety): L0 SPOC campaign results` | Campaign under `tests/out/`, control center checked, results here, in the ADR and on the issues; closes #23 |
+| C15 | `docs(safety): L0 SPOC campaign results` | Campaign under `tests/out/`, control center checked, results here, in the ADR and on the issues; closes #23. Done 2026-11-23 |
 
 Each test from C7 on is in `tests/catalogue.json` and is done only when it shows in `tests/out/control-center.html` with its newest result and rendered report. Campaign folders are git-ignored: the numbers are copied here.
 
@@ -462,3 +462,37 @@ Direct ×10 probes on the CUT: CH1 on PA8, without a ground spring; CH2 on PA9; 
 - **Bench notes.**
   - In one run the CUT's USB link dropped and re-enumerated after 132 trips. The firmware kept running, armed with the PWM on. The runner now reopens the port and repeats the trip; there were no drops in the next three runs.
   - The first run reported BLOCKED: the BNC cables were still on CH1 and CH2. The probe check now also requires a 0–3.3 V swing, because a SPOC node shows the switching spikes at 400 kHz.
+
+### 2026-11-23, C15: final L0 campaign
+
+The final campaign is `tests/run_all.sh --l0 --target` (`2026-11-23_ff4df40-dirty_150533_7bVcN7`), on code `ff4df403`. L0-TRP also ran for Ownverter 1.1.0 (`..._154743_UxC1Mv`). Afterwards the CUT got SAFETY_L0_TWIST back.
+
+| Test | Result | Against the previous campaign |
+|---|---|---|
+| L0-ALC allocation | 34 PASS | same |
+| L0-API one Safety API | 34 PASS | same |
+| L0-CMP comparator path (bare-Spin build) | 40 PASS, 2 INFO | L0-AWD-01.b updated: AWD1 has no filter since 2026-11-19 (the expectation predated it) |
+| L0-SUP CPU supervision | 36 PASS, 3 INFO | same |
+| L0-TOV timing overhead | 11 PASS, 11 INFO, 2 FAIL | L0-TOV-03/05.S0_50 task-start jitter, tracked in #27 (decided: does not block #23); L0-TOV-03.S0_100 now passes |
+| L0-ADC CUT ADC offset | 25 INFO | −9.5 counts at 100 mV with the PWM on (shield set-up), as on 2026-11-20 |
+| L0-CAL bench calibration | 14 PASS, 10 INFO, 3 FAIL; then 17 PASS alone (`..._154535_qkRAg5`) | in the campaign, one invalid FREQuency/PDUTy reading among five failed CH2, CH3, CH4; trims, amplitudes and skews were good on every channel |
+| L0-CPU CPU dead | 16 PASS | same |
+| L0-EDG edge cases | 10 PASS | glitch filter edge 246 / 284 ns |
+| L0-LAT latency, direct probes | BLOCKED (probes off) | result kept from `2026-11-23_ffc947f-dirty_133249_rZhctU`, 5 PASS |
+| L0-TRP Twist 1.4.2 | 14 PASS | every trip within 1 mV of 2026-11-20 |
+| L0-TRP Ownverter 1.1.0 | 16 PASS | every trip within 1 mV of 2026-11-20 |
+
+On both boards the low bounds trip 4 to 6 mV above their thresholds, which is the CUT ADC offset. The high bounds trip between −2 and +6 mV.
+
+The control center shows each test's newest run. A campaign where a test only reports BLOCKED does not hide the newest run where it ran.
+
+Open after #23:
+- #28: I3_LOW calibration on Ownverter (data being gathered).
+- #27: L0-TOV jitter.
+- The bug PRs: dispatch overflow, aliasing, unchecked `k_malloc`, dispatch takeover, HRTIM up-down re-init.
+
+Bench findings while running C15:
+- **SPOC preflight order.** After L0-TOV the CUT runs another firmware. The SPOC tests that flash the CUT now check only the MUX before flashing.
+- **Board discovery stalled.** A firmware that never reads its shell port stalled board discovery 30 to 50 s per port, on the kernel's closing wait. `spoc.boards` now discards the unsent probe.
+- **The MUX hung once.** Neither of its ports was read; a USB replug brought it back.
+- **The scope's FREQuency and PDUTy are occasionally invalid.** In the campaign, one invalid reading in five failed three L0-CAL cases. The same bench passed alone two minutes later. This is the same kind of reading the README links to long cables; if it comes back, check the BNC cables on CH2–CH4 (30 cm).
