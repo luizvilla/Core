@@ -150,9 +150,10 @@ def main():
     L('L0-AWD-01.a', J((c1 >> 12) & 1 and (c2 >> 12) & 1 and (c1 >> 10) & 3 and (c2 >> 10) & 3),
       'ADC1/ADC2: overrun mode overwrite, hardware trigger', 'OVRMOD 1, EXTEN != 0',
       f'ADC1 CFGR {c1:#010x}, ADC2 CFGR {c2:#010x}')
-    L('L0-AWD-01.b', J((c1 >> 23) & 1 and (c1 >> 22) & 1 and ((c1 >> 26) & 0x1F) == 2 and tr1 == (3400 << 16) | (1 << 12)),
-      'I1_LOW on ADC1 AWD1: channel 2, single channel, window 0-3400, 2-conversion filter',
-      'AWD1EN AWD1SGL AWD1CH=2, TR1 0x0d481000', f'CFGR {c1:#010x}, TR1 {tr1:#010x}')
+    # no AWD1 filter since 2026-11-19 (safety_trips.c: "two consecutive" never flagged one channel of a sequence)
+    L('L0-AWD-01.b', J((c1 >> 23) & 1 and (c1 >> 22) & 1 and ((c1 >> 26) & 0x1F) == 2 and tr1 == (3400 << 16)),
+      'I1_LOW on ADC1 AWD1: channel 2, single channel, window 0-3400, no filter (AWDFILT 0)',
+      'AWD1EN AWD1SGL AWD1CH=2, TR1 0x0d480000', f'CFGR {c1:#010x}, TR1 {tr1:#010x}')
     L('L0-AWD-01.c', J(a2 == 1 << 9 and tr2 == 208 << 16 and a3 == 1 << 1 and tr3 == 225 << 16 and b3 == 1 << 7 and tr3b == 212 << 16),
       'V_HIGH ADC1 AWD2 (ch 9, high 208), V1_LOW ADC1 AWD3 (ch 1, high 225), I2_LOW ADC2 AWD3 (ch 7, 0-212); 8-bit windows, low side open for voltages',
       'as allocated', f'AWD2CR {a2:#x} TR2 {tr2:#x}, AWD3CR {a3:#x} TR3 {tr3:#x}, ADC2 AWD3CR {b3:#x} TR3 {tr3b:#x}')

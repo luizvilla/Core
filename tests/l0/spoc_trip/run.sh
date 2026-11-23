@@ -53,7 +53,7 @@ if [ -z "${CORE_TEST_OUT:-}" ]; then
     python3 "$repo/tests/common/control_center.py" --out "$repo/tests/out"
     exit "$rc"
 fi
-if ! bash "$repo/tests/common/spoc_preflight.sh" || ! bash "$repo/tests/common/target_preflight.sh" --env=$env; then
+if ! SPOC_ROLES=mux bash "$repo/tests/common/spoc_preflight.sh" || ! bash "$repo/tests/common/target_preflight.sh" --env=$env; then
     blocked "preflight failed, see the MISSING lines above"
     exit 0
 fi

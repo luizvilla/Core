@@ -24,21 +24,31 @@ _cache: dict[str, str] = {}
 
 def _root_keys(port: str) -> set[str]:
     """ThingSet root keys of the shell on `port` (works whether the shell is in 'select thingset' mode or not)."""
+    ser = None
     try:
-        with serial.Serial(port, 115200, timeout=0.3, write_timeout=1.0) as ser:  # a hung Spin blocks writes
-            ser.reset_input_buffer()
-            for cmd in (b"\r\n?\r\n", b"thingset ?\r\n"):
-                ser.write(cmd)
-                time.sleep(0.6)
-                raw = ser.read(4096).decode(errors="replace")
-                start, end = raw.find(":85 {"), raw.rfind("}")
-                if start >= 0 and end > start:
-                    try:
-                        return set(json.loads(raw[start + 4:end + 1]))
-                    except ValueError:
-                        pass
+        ser = serial.Serial(port, 115200, timeout=0.3, write_timeout=1.0)  # a hung Spin blocks writes
+        ser.reset_input_buffer()
+        for cmd in (b"\r\n?\r\n", b"thingset ?\r\n"):
+            ser.write(cmd)
+            time.sleep(0.6)
+            raw = ser.read(4096).decode(errors="replace")
+            start, end = raw.find(":85 {"), raw.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    return set(json.loads(raw[start + 4:end + 1]))
+                except ValueError:
+                    pass
     except (serial.SerialException, OSError):
         pass
+    finally:
+        if ser is not None:
+            # A firmware that never reads its shell port (L0-TOV's, for example) leaves the probe unsent, and
+            # close() then waits for the kernel to drain it (closing_wait, 30 s): discard it first.
+            try:
+                ser.reset_output_buffer()
+                ser.close()
+            except (serial.SerialException, OSError):
+                pass
     return set()
 
 
