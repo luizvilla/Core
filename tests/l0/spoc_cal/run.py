@@ -115,7 +115,7 @@ def target_snapshot(idn):
     dirty = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=REPO, capture_output=True,
                            text=True).stdout.strip()
     return [['Bench', 'SPOC: CUT Spin + MUX Spin soldered on the board, 9 MΩ dividers trimmed, BNC to the scope'],
-            ['CUT', f'Spin 1.2.0, USB 2fe3:01ff, Core-CUT (SPOC_Software Core-CUT), port {boards.find("cut")}'],
+            ['CUT', f'Spin 1.2.0, the safety test firmware (/Cal) or Core-CUT (USB 2fe3:01ff), port {boards.find("cut")}'],
             ['MUX', f'Spin 1.2.0, USB 2fe3:0100, Core-MUX ({MUX_FW}), port {boards.find("mux")}'],
             ['Scope', idn],
             ['Host code', f'Core2 {sha}{"-dirty" if dirty else ""}']]
@@ -205,7 +205,7 @@ def main():
                       'divider is trimmed, the scope\'s own timing and level measurements are steady on a known signal '
                       '(the cable check), and the gain and skew of the four channels are recorded for the campaign.',
            'criteria': ['L0-CAL-'],
-           'conditions': [['Signal', 'CUT PA8, 1 kHz, duty 0.5, 0 to 3.3 V (Core-CUT /Cut/PwmOut)'],
+           'conditions': [['Signal', 'CUT PA8, 1 kHz, duty 0.5, 0 to 3.3 V (/Cal of the safety test firmware, TIM1; or Core-CUT /Cut/PwmOut)'],
                           ['Routing', 'PA8 to one channel at a time for 02-06; CH1 + CHn together (route_pair) for the skew'],
                           ['Injection wiring', 'TP1-TP3 wired (self-injection): SPOC CH1 and CH2 share one node, so routing '
                                                'either shows the signal on both scope channels, and the CH1 -> CH2 skew '

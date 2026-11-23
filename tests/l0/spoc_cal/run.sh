@@ -6,7 +6,7 @@
 ## @brief L0-CAL: SPOC bench calibration (ADR 0009, issue luizvilla/Core#26).
 ##
 ## Runs on the SPOC bench only when asked: CORE_TARGET=1 (tests/run_all.sh --l0 --target sets it) or --run;
-## otherwise it reports BLOCKED. It flashes nothing: the CUT must run Core-CUT and the MUX Core-MUX (branch
+## otherwise it reports BLOCKED. It flashes nothing: the CUT must run the safety test firmware (/Cal) or Core-CUT, and the MUX Core-MUX (branch
 ## mux-injector), the MHO984 on USB (bash tests/common/spoc_preflight.sh). It leaves the CUT's PWM on PA8 at 1 kHz.
 ## @return 0 when every criterion passes or the test is skipped.
 ##

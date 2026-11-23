@@ -13,7 +13,7 @@ bash tests/l0/spoc_cal/run.sh --run                       # the calibration, as 
 
 | Item | Setting |
 |---|---|
-| CUT Spin | Core-CUT (SPOC_Software `Core-CUT`), USB 2fe3:01ff; drives PA8 (Spin pin 12) at 1 kHz, 0.5 |
+| CUT Spin | the safety test firmware (`/Cal`, TIM1) or Core-CUT (SPOC_Software `Core-CUT`, USB 2fe3:01ff); drives PA8 (Spin pin 12) at 1 kHz, 0.5 |
 | MUX Spin | Core-MUX with the injector (SPOC_Software `mux-injector`, `b500a4e`), USB 2fe3:0100 |
 | Scope | Rigol MHO984 on USB, ×10 probe setting on all four channels (9 MΩ divider into 1 MΩ) |
 | Cables | **30 cm BNC.** With 1 m cables the scope's own FREQuency and PDUTy missed edges |
