@@ -496,3 +496,36 @@ Bench findings while running C15:
 - **Board discovery stalled.** A firmware that never reads its shell port stalled board discovery 30 to 50 s per port, on the kernel's closing wait. `spoc.boards` now discards the unsent probe.
 - **The MUX hung once.** Neither of its ports was read; a USB replug brought it back.
 - **The scope's FREQuency and PDUTy are occasionally invalid.** In the campaign, one invalid reading in five failed three L0-CAL cases. The same bench passed alone two minutes later. This is the same kind of reading the README links to long cables; if it comes back, check the BNC cables on CH2–CH4 (30 cm).
+
+### 2026-11-23, #28: Ownverter calibration data
+
+These are the production calibration fits of three Ownverter **v1.1.1** boards (Luiz Villa; serials ending 7GLG and YR2P from 2026-06-05, 9SEZ from 2026-11-06). Each fit is a regression of DMM reading against raw ADC counts. They are in the same units as the overlays' `default-gain`/`default-offset`: V_HIGH fits 0.0298–0.0299 against the overlay's 0.02996.
+
+| Sensor | 7GLG gain / offset | YR2P | 9SEZ | Zero (counts) | Overlay v1.1.0 |
+|---|---|---|---|---|---|
+| I1_LOW | 0.00929 / −19.42 | 0.00916 / −18.93 | 0.01011 / −21.65 | 2066–2141 | 0.005 / −10 |
+| I2_LOW | 0.00944 / −19.61 | 0.00928 / −19.30 | 0.00940 / −19.59 | 2077–2084 | 0.005 / −10 |
+| **I3_LOW** | 0.00965 / −20.08 | 0.00928 / −19.30 | 0.00999 / −20.95 | 2080–2097 | **0.045 / −92.2** |
+| I_HIGH | −0.00958 / +20.15 | −0.00957 / +20.14 | −0.00899 / +18.90 | 2103–2104 | 0.005 / −10 |
+| V1–V3_LOW | 0.0295–0.0308 / −0.98 to +0.65 | | | ≈ 0 | 0.045 / −92.2 |
+| V_HIGH | 0.02981 / 0.14 | 0.02992 / 0.26 | 0.02990 / −0.03 | ≈ 0 | 0.02996 / 0 |
+
+The fits had R² of at least 0.98, except V2_LOW on 7GLG and YR2P (0.94).
+
+**I3_LOW is a current sensor like I1 and I2.** Its gain and zero match theirs on every board. The overlay's 0.045 / −92.2 is the voltage sensors' scaling, copied in by mistake, as #28 suspected.
+
+**The overlay does not match these boards on any current sensor, and on no low-side voltage sensor either:**
+- **Current gains.** I1/I2/I3 measure 0.0092–0.0101 A per count, about 1.9× the overlay's 0.005.
+- **Current zero points.** They sit at 2066–2141 counts, against 2000.
+- **I_HIGH sign.** I_HIGH has the opposite sign.
+- **Low-side voltages.** V1–V3_LOW read from 0 V (gain 0.030, offset ≈ 0), where the overlay has a scaling centred on 2049 counts (0.045 / −92.2).
+
+**What this means for the trips:**
+- The Safety API turns limits into counts from the **devicetree** at build time. Per-board NVS calibration changes only the software readings (SensorsAPI), never the thresholds.
+- **I1/I2 limits.** With the overlay's 0.005 / −10, the ±7 A limits become counts 600 and 3400. On these boards that is −13.4 to −15.6 A and +12.2 to +12.7 A of real current: about 1.8× the intended limit.
+- **I3 limits.** The same ±7 A becomes counts 1893–2205, which is −1.7 to −2.0 A and +1.1 to +1.2 A real. Phase 3 would trip at low current.
+
+The bench measured the thresholds correctly (L0-TRP), but the thresholds come from the wrong scaling.
+
+**Open (Luiz):** do v1.1.1 boards differ from v1.1.0 in their sensing, or has the overlay never matched the hardware? The repo has overlays only up to v1.1.0.
+
