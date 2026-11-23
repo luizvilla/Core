@@ -15,8 +15,11 @@
  * ThingSet:
  *   /Safety  rArmed rFault rTripped rFltMask rOutputs rText rRebootRequired, xClear   state of the Safety API, clearFault()
  *   /Pwm     wFreq_Hz wDuty wUnits wRun, xApply                           legs (HRTIM units, bit 0 = A ... 5 = F)
- *            wTrig (>= 0: ADC1/ADC2 triggered by the first/second leg's CMP3 at this fraction of the period;
- *            < 0: as found, the master period); rCmp3 rPer (first leg) rAdc1R rAdc3R (HRTIM trigger sources)
+ *            wShield (default true): each unit that is a power leg in the devicetree is set up as shield.power
+ *            does (modulation, ADC edge trigger, ADC and decimation, CMP3 = 0.06 x period in UpDwn); false: as
+ *            run until 2026-11-20, left-aligned with the ADCs on the HRTIM master period. Set once per boot.
+ *            wTrig (>= 0: CMP3 of each unit at this fraction of the period; with wShield false ADC1/ADC2 also
+ *            move to the first/second unit's CMP3; < 0: no change); rCmp3 rPer rUdm (first unit) rAdc1R rAdc3R
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
  *   /Sw      wName, xApply; rWatched rRc                                software check on one sensor by name ("" = none)
@@ -99,7 +102,11 @@ static int8_t clear_rc;
 
 static uint32_t pwm_freq_hz = 200000;
 static float pwm_duty = 0.5f;
-static float pwm_trig = -1.0f;           /* ADC trigger instant (fraction of the period) on each leg; < 0: as found */
+static float pwm_trig = -1.0f;           /* ADC trigger instant (fraction of the period) on each leg; < 0: no change */
+static bool pwm_shield = true;           /* legs set up from the devicetree, as shield.power does */
+static bool pwm_init_shield;
+static uint8_t pwm_unit_init;           /* units already through initUnit (once per boot) */
+static bool pwm_udm;                     /* read back: first unit counts up-down (TIMxCR2.UDM) */
 static uint16_t pwm_cmp3, pwm_per;       /* read back from the first leg: HRTIM CMP3 (ADC trigger) and period */
 static uint32_t pwm_adc1r, pwm_adc3r;    /* HRTIM ADC trigger 1 (ADC1) and 3 (ADC2) sources */
 static uint8_t pwm_units = 0;       /* requested units, bit 0 = A */
@@ -174,6 +181,43 @@ static void start_control_task(void)
 
 /* ------------------------------------------------------------------ PWM legs */
 
+/* The power legs of the devicetree (powershield node), as the Shield API reads them (power_init.h). */
+struct dt_leg {
+	uint16_t pin;
+	adc_t adc;
+	hrtim_adc_edgetrigger_t edge;
+	hrtim_cnt_t modulation;
+	uint32_t decim;
+};
+#define DT_LEG_ENTRY(n) {DT_PROP_BY_IDX(n, pwm_pin_num, 0), DT_STRING_TOKEN(n, default_adc), \
+	DT_STRING_TOKEN(n, default_edge_trigger), DT_STRING_TOKEN(n, default_modulation), DT_PROP(n, default_adc_decim)},
+static const struct dt_leg DT_LEGS[] = {
+	DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(powershield), DT_LEG_ENTRY)
+};
+
+static hrtim_tu_number_t pin_to_unit(uint16_t pin) /* PowerAPI::spinNumberToTu */
+{
+	switch (pin) {
+	case 12: case 14: return PWMA;
+	case 15: return PWMB;
+	case 2: case 4: return PWMC;
+	case 5: case 6: return PWMD;
+	case 10: case 11: return PWME;
+	case 7: case 9: return PWMF;
+	default: return PWMA;
+	}
+}
+
+static const struct dt_leg *dt_leg_of(hrtim_tu_number_t unit)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(DT_LEGS); i++) {
+		if (pin_to_unit(DT_LEGS[i].pin) == unit) {
+			return &DT_LEGS[i];
+		}
+	}
+	return NULL;
+}
+
 static int pwm_apply_now(void)
 {
 	if (!pwm_run_req) {
@@ -194,13 +238,31 @@ static int pwm_apply_now(void)
 	if (!pwm_init_done) {
 		spin.pwm.initFixedFrequency(pwm_freq_hz);
 		pwm_init_freq = pwm_freq_hz;
+		pwm_init_shield = pwm_shield;
 		pwm_init_done = true;
-	} else if (pwm_freq_hz != pwm_init_freq) {
-		return -3; /* the HRTIM period is set once per boot */
+	} else if (pwm_freq_hz != pwm_init_freq || pwm_shield != pwm_init_shield) {
+		return -3; /* the HRTIM period and the leg set-up are fixed once per boot */
+	}
+	for (int u = 0; u < 6; u++) {
+		if ((pwm_units & (1U << u)) && !(pwm_unit_init & (1U << u))) {
+			/* once per boot, as an application does: in up-down mode hrtim_tu_init() keeps the doubled
+			 * frequency it computes, so each further init doubles the PWM frequency (and ends in its assert) */
+			pwm_unit_init |= 1U << u;
+			const struct dt_leg *leg_dt = pwm_init_shield ? dt_leg_of(UNITS[u]) : NULL;
+			if (leg_dt) { /* as PowerAPI::initMode: before initUnit */
+				spin.pwm.setModulation(UNITS[u], leg_dt->modulation);
+				spin.pwm.setAdcEdgeTrigger(UNITS[u], leg_dt->edge);
+			}
+			spin.pwm.initUnit(UNITS[u]);
+			if (leg_dt && leg_dt->adc != UNKNOWN_ADC) { /* as PowerAPI::initMode: after initUnit */
+				spin.pwm.setAdcDecimation(UNITS[u], leg_dt->decim);
+				spin.pwm.setAdcTrigger(UNITS[u], leg_dt->adc);
+				spin.pwm.enableAdcTrigger(UNITS[u]);
+			}
+		}
 	}
 	for (int u = 0; u < 6; u++) {
 		if (pwm_units & (1U << u)) {
-			spin.pwm.initUnit(UNITS[u]);
 			spin.pwm.setDutyCycle(UNITS[u], pwm_duty);
 			spin.pwm.startDualOutput(UNITS[u]); /* the first start arms the trips */
 		}
@@ -208,10 +270,10 @@ static int pwm_apply_now(void)
 	int leg = 0;
 	for (int u = 0; u < 6; u++) {
 		if (pwm_units & (1U << u)) {
-			/* wTrig: as an application does, ADC1 from the first leg's CMP3 and ADC2 from the second's, at
-			 * that instant; by default (as found) the Spin's HRTIM triggers come from the master period. */
+			/* wTrig: CMP3 of each unit at that instant; with wShield false, ADC1 also moves to the first unit's
+			 * CMP3 and ADC2 to the second's (as found, the HRTIM triggers come from the master period). */
 			if (pwm_trig >= 0.0f && pwm_trig <= 1.0f) {
-				if (leg < 2) {
+				if (!pwm_init_shield && leg < 2) {
 					spin.pwm.setAdcTrigger(UNITS[u], leg ? ADC_2 : ADC_1);
 					spin.pwm.enableAdcTrigger(UNITS[u]);
 				}
@@ -221,6 +283,7 @@ static int pwm_apply_now(void)
 			if (u == __builtin_ctz(pwm_units)) {
 				pwm_cmp3 = (uint16_t)HRTIM1->sTimerxRegs[u].CMP3xR;
 				pwm_per = (uint16_t)HRTIM1->sTimerxRegs[u].PERxR;
+				pwm_udm = (HRTIM1->sTimerxRegs[u].TIMxCR2 & HRTIM_TIMCR2_UDM) != 0U;
 			}
 		}
 	}
@@ -847,6 +910,8 @@ THINGSET_ADD_ITEM_UINT16(ID_PWM, 0x9109, "rCmp3", &pwm_cmp3, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_UINT16(ID_PWM, 0x910A, "rPer", &pwm_per, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910B, "rAdc1R", &pwm_adc1r, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910C, "rAdc3R", &pwm_adc3r, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x910D, "wShield", &pwm_shield, THINGSET_ANY_RW, 0);
+THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x910E, "rUdm", &pwm_udm, THINGSET_ANY_R, 0);
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_INJ, "Inj", &inj_cb);
 THINGSET_ADD_ITEM_UINT16(ID_INJ, 0x9201, "wLevel_mV", &inj_level_req_mV, THINGSET_ANY_RW, 0);

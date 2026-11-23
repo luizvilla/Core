@@ -83,6 +83,106 @@ def fit(points):
     return (sy - b * sx) / n, b
 
 
+def production_phase(man, rep, held, lim, hi_thr, shield, full):
+    """04-06 on a fresh boot, the legs set up as shield.power does (shield) or as found until 2026-11-20
+    (left-aligned, ADCs on the HRTIM master period)."""
+    res = {'shield': shield}
+    trip.reset_cut()
+    time.sleep(5)
+    b = trip.Bench(man)
+    try:
+        b.vref = rep['vref_mV']
+        b.cut.set_value('Pwm/wShield', 'true' if shield else 'false')   # before the first PWM start
+        armed, why = b.first_arming(held)
+        pin = b.pin_of(PROD_SENSOR)
+        adc_n, ch = 1, int(lim['paths']['high']['channel'])
+        res['production'] = {'sensor': PROD_SENSOR, 'pin': pin, 'adc': adc_n, 'channel': ch, 'armed': armed,
+                             'why': why, 'high_mV': hi_thr, 'rows': []}
+        if armed:
+            b.route(pin, held)
+            b.cut.set_value('Adc/wAdc', str(adc_n))
+            b.cut.set_value('Adc/wChannel', str(ch))
+            levels = [mv for mv in LEVELS_MV if mv < hi_thr - 40]
+            ok, why2, _ = b.arm(levels[0], None)
+            res['production']['why'] = why2
+            b.pwm(True)
+            pw = b.group('Pwm')
+            b.pwm(False)
+            res['production'].update(adc1r=pw['rAdc1R'], adc3r=pw['rAdc3R'], per=pw['rPer'], cmp3=pw['rCmp3'],
+                                     udm=pw['rUdm'])
+            for mv in levels:
+                b.level(mv)
+                code = dac_code(mv, b.vref)
+                row = {'mV': mv, 'code': code}
+                for state in ('on', 'off'):
+                    b.pwm(state == 'on')
+                    time.sleep(0.3)
+                    b.cut.set_value('Adc/xStat', 'true')
+                    time.sleep(STAT_S)
+                    a = b.group('Adc')
+                    mean = a['rMean_x16'] / 16.0
+                    row[state] = {'n': a['rN'], 'mean': mean, 'min': a['rMin'], 'max': a['rMax'], 'err': mean - code,
+                                  'err_min': a['rMin'] - code, 'err_max': a['rMax'] - code,
+                                  'fault': b.safety()['rFault']}
+                res['production']['rows'].append(row)
+            b.pwm(False)
+            # 05 the sample instant across the PWM period (HRTIM CMP3 of each leg), outputs on
+            sweep = []
+            for mv in SWEEP_MV:
+                b.level(mv)
+                code = dac_code(mv, b.vref)
+                for trig in SWEEP_TRIG:
+                    b.cut.set_value('Pwm/wTrig', f'{trig:.3f}')
+                    b.pwm(True)
+                    time.sleep(0.3)
+                    b.cut.set_value('Adc/xStat', 'true')
+                    time.sleep(STAT_S / 2)
+                    a, pw = b.group('Adc'), b.group('Pwm')
+                    mean = a['rMean_x16'] / 16.0
+                    sweep.append({'mV': mv, 'code': code, 'trig': trig, 'cmp3': pw['rCmp3'], 'per': pw['rPer'],
+                                  'adc1r': pw['rAdc1R'],
+                                  'n': a['rN'], 'err': mean - code, 'err_min': a['rMin'] - code,
+                                  'err_max': a['rMax'] - code, 'fault': b.safety()['rFault']})
+            b.pwm(False)
+            if shield:                                      # back to the shield's instant (enableAdcTrigger)
+                b.cut.set_value('Pwm/wTrig', '0.06')
+            res['trigger_sweep'] = sweep
+            # 06 injected conversions while armed (SMPR kept), outputs on and off: the pin through the SPOC mux
+            # against the DAC pin itself, at instants unrelated to the PWM
+            inj = []
+            for mv in INJ_MV:
+                b.level(mv)
+                code = dac_code(mv, b.vref)
+                row = {'mV': mv, 'code': code}
+                for state in ('on', 'off'):
+                    b.pwm(state == 'on')
+                    time.sleep(0.3)
+                    for key, (adc, ch) in (('pin', (1, int(lim['paths']['high']['channel']))), ('dac', DAC_PIN[1:])):
+                        mean, lo, hi = probe(b, adc, ch, 255, n=1024)
+                        row[f'{key}_{state}'] = {'err': mean - code, 'err_min': lo - code, 'err_max': hi - code}
+                inj.append(row)
+            b.pwm(False)
+            res['injected_armed'] = inj
+            if not full:
+                return res
+            # the pin node (CH2) at the lowest level with the outputs on, two PWM periods
+            b.level(SWEEP_MV[0])
+            b.pwm(True)
+            sc = b.scope
+            sc.setup_channel(2, scale=0.02, offset=-SWEEP_MV[0] / 1000, probe=10)
+            sc.set_timebase(1e-6)
+            sc.set_edge_trigger(2, SWEEP_MV[0] / 1000 - 0.01, slope='NEGative', sweep='AUTO')
+            sc.single()
+            t, v = sc.waveform(2)
+            res['node_wave'] = {'mV': SWEEP_MV[0], 't': t, 'v': v}
+            sc.run()
+            b.pwm(False)
+    finally:
+        b.close()
+    return res
+
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--out', required=True)
@@ -139,90 +239,8 @@ def main():
     # only watchdog is high (V_HIGH), so it may go down to 100 mV; I1 and I2 held at 0 A on CH3 and CH4 (TP5-TP7).
     lim = next(l for l in man['limits'] if l['sensor'] == PROD_SENSOR)
     hi_thr = trip.threshold_mv(lim, 'high', lim['paths']['high'], rep['vref_mV'])
-    trip.reset_cut()
-    time.sleep(5)
-    b = trip.Bench(man)
-    try:
-        b.vref = rep['vref_mV']
-        armed, why = b.first_arming(held)
-        pin = b.pin_of(PROD_SENSOR)
-        adc_n, ch = 1, int(lim['paths']['high']['channel'])
-        rep['production'] = {'sensor': PROD_SENSOR, 'pin': pin, 'adc': adc_n, 'channel': ch, 'armed': armed,
-                             'why': why, 'high_mV': hi_thr, 'rows': []}
-        if armed:
-            b.route(pin, held)
-            b.cut.set_value('Adc/wAdc', str(adc_n))
-            b.cut.set_value('Adc/wChannel', str(ch))
-            levels = [mv for mv in LEVELS_MV if mv < hi_thr - 40]
-            ok, why2, _ = b.arm(levels[0], None)
-            rep['production']['why'] = why2
-            pw = b.group('Pwm')
-            rep['production'].update(adc1r=pw['rAdc1R'], adc3r=pw['rAdc3R'], per=pw['rPer'])
-            for mv in levels:
-                b.level(mv)
-                code = dac_code(mv, b.vref)
-                row = {'mV': mv, 'code': code}
-                for state in ('on', 'off'):
-                    b.pwm(state == 'on')
-                    time.sleep(0.3)
-                    b.cut.set_value('Adc/xStat', 'true')
-                    time.sleep(STAT_S)
-                    a = b.group('Adc')
-                    mean = a['rMean_x16'] / 16.0
-                    row[state] = {'n': a['rN'], 'mean': mean, 'min': a['rMin'], 'max': a['rMax'], 'err': mean - code,
-                                  'err_min': a['rMin'] - code, 'err_max': a['rMax'] - code,
-                                  'fault': b.safety()['rFault']}
-                rep['production']['rows'].append(row)
-            b.pwm(False)
-            # 05 the sample instant across the PWM period (HRTIM CMP3 of each leg), outputs on
-            sweep = []
-            for mv in SWEEP_MV:
-                b.level(mv)
-                code = dac_code(mv, b.vref)
-                for trig in SWEEP_TRIG:
-                    b.cut.set_value('Pwm/wTrig', f'{trig:.3f}')
-                    b.pwm(True)
-                    time.sleep(0.3)
-                    b.cut.set_value('Adc/xStat', 'true')
-                    time.sleep(STAT_S / 2)
-                    a, pw = b.group('Adc'), b.group('Pwm')
-                    mean = a['rMean_x16'] / 16.0
-                    sweep.append({'mV': mv, 'code': code, 'trig': trig, 'cmp3': pw['rCmp3'], 'per': pw['rPer'],
-                                  'adc1r': pw['rAdc1R'],
-                                  'n': a['rN'], 'err': mean - code, 'err_min': a['rMin'] - code,
-                                  'err_max': a['rMax'] - code, 'fault': b.safety()['rFault']})
-            b.pwm(False)                                    # the legs keep triggering the ADCs until the reboot
-            rep['trigger_sweep'] = sweep
-            # 06 injected conversions while armed (SMPR kept), outputs on and off: the pin through the SPOC mux
-            # against the DAC pin itself, at instants unrelated to the PWM
-            inj = []
-            for mv in INJ_MV:
-                b.level(mv)
-                code = dac_code(mv, b.vref)
-                row = {'mV': mv, 'code': code}
-                for state in ('on', 'off'):
-                    b.pwm(state == 'on')
-                    time.sleep(0.3)
-                    for key, (adc, ch) in (('pin', (1, int(lim['paths']['high']['channel']))), ('dac', DAC_PIN[1:])):
-                        mean, lo, hi = probe(b, adc, ch, 255, n=1024)
-                        row[f'{key}_{state}'] = {'err': mean - code, 'err_min': lo - code, 'err_max': hi - code}
-                inj.append(row)
-            b.pwm(False)
-            rep['injected_armed'] = inj
-            # the pin node (CH2) at the lowest level with the outputs on, two PWM periods
-            b.level(SWEEP_MV[0])
-            b.pwm(True)
-            sc = b.scope
-            sc.setup_channel(2, scale=0.02, offset=-SWEEP_MV[0] / 1000, probe=10)
-            sc.set_timebase(1e-6)
-            sc.set_edge_trigger(2, SWEEP_MV[0] / 1000 - 0.01, slope='NEGative', sweep='AUTO')
-            sc.single()
-            t, v = sc.waveform(2)
-            rep['node_wave'] = {'mV': SWEEP_MV[0], 't': t, 'v': v}
-            sc.run()
-            b.pwm(False)
-    finally:
-        b.close()
+    rep.update(production_phase(man, rep, held, lim, hi_thr, shield=True, full=True))
+    rep['as_found'] = production_phase(man, rep, held, lim, hi_thr, shield=False, full=False)
 
     # result lines
     lsb = rep['vref_mV'] / 4096
@@ -255,33 +273,38 @@ def main():
             txt.append(f'{SMP_CYCLES[smp]} cyc: ' + ', '.join(f'{mv} mV {pre[mv] - plain[mv]:+.1f}' for mv in (100, 300, 1900)))
         line(f'L0-ADC-03.{rep["points"][name]["pin"]}', 'INFO', f'{name}: converted right after VREFINT (1.21 V), change against alone (counts)',
              '0 if the sampling capacitor settles', '; '.join(txt))
-    pr = rep['production']
-    if pr.get('rows'):
-        for state in ('on', 'off'):
-            line(f'L0-ADC-04.{state}', 'INFO', f'Production reading of {pr["sensor"]} ({pr["pin"]}, ADC{pr["adc"]} '
-                 f'IN{pr["channel"]}, regular group, newest sample each 100 us task period, {STAT_S:.0f} s), PWM '
-                 f'outputs {state}; ADC trigger as found, HRTIM ADC1R 0x{pr["adc1r"]:x}): counts - DAC code, mean '
-                 '[min, max]', 'as 02 at 12.5 cycles',
-                 '; '.join(f'{r["mV"]} mV {r[state]["err"]:+.1f} [{r[state]["err_min"]:+d}, {r[state]["err_max"]:+d}]'
-                           for r in pr['rows']) + f' (n {pr["rows"][0][state]["n"]} per level)')
-    else:
-        line('L0-ADC-04', 'INFO', 'Production reading armed', 'armed', f'not armed: {pr.get("why")}')
-    for key, what in (('pin', f'{PROD_SENSOR} pin (PC3, ADC1 IN9) through the SPOC mux'),
-                      ('dac', 'DAC pin (PA6, ADC2 IN3), no SPOC path')):
-        rows = rep.get('injected_armed', [])
-        if rows:
-            line(f'L0-ADC-06.{key}', 'INFO', f'{what}: injected conversions while armed, PWM outputs on / off: counts '
-                 '- DAC code, mean [min, max]', 'on = off if the switching does not reach this point',
-                 '; '.join(f'{r["mV"]} mV on {r[key + "_on"]["err"]:+.1f} [{r[key + "_on"]["err_min"]:+d}, '
-                           f'{r[key + "_on"]["err_max"]:+d}] / off {r[key + "_off"]["err"]:+.1f}' for r in rows))
-    for mv in SWEEP_MV:
-        rows = [r for r in rep.get('trigger_sweep', []) if r['mV'] == mv]
-        if rows:
-            line(f'L0-ADC-05.{mv}', 'INFO', f'V_HIGH at {mv} mV, PWM outputs on (duty 0.5): counts - DAC code against '
-                 f'the ADC trigger instant (first leg CMP3 / period {rows[0]["per"]}; HRTIM ADC1R '
-                 f'0x{rows[0]["adc1r"]:x}; by default the master period, see 04)', 'flat if the sample instant does not matter',
-                 '; '.join(f'{r["trig"]:.2f} ({r["cmp3"]}): {r["err"]:+.1f} [{r["err_min"]:+d}, {r["err_max"]:+d}]'
-                           for r in rows))
+    for res, sfx in ((rep, ''), (rep.get('as_found', {}), '.found')):
+        pr = res.get('production', {})
+        if pr.get('shield', res.get('shield', True)):
+            how = (f'legs as shield.power sets them ({"up-down" if pr.get("udm") else "left-aligned"}, ADC1 from PWMA '
+                   f'and ADC2 from PWMC CMP3 = {pr.get("cmp3")} / period {pr.get("per")})')
+        else:
+            how = f'legs as found until 2026-11-20 (left-aligned, HRTIM ADC1R 0x{pr.get("adc1r", 0):x}: master period)'
+        if pr.get('rows'):
+            for state in ('on', 'off'):
+                line(f'L0-ADC-04{sfx}.{state}', 'INFO', f'Production reading of {pr["sensor"]} ({pr["pin"]}, ADC{pr["adc"]} '
+                     f'IN{pr["channel"]}, regular group, newest sample each 100 us task period, {STAT_S:.0f} s), PWM '
+                     f'outputs {state}, {how}: counts - DAC code, mean [min, max]', 'as 02 at 12.5 cycles',
+                     '; '.join(f'{r["mV"]} mV {r[state]["err"]:+.1f} [{r[state]["err_min"]:+d}, {r[state]["err_max"]:+d}]'
+                               for r in pr['rows']) + f' (n {pr["rows"][0][state]["n"]} per level)')
+        else:
+            line(f'L0-ADC-04{sfx}', 'INFO', 'Production reading armed', 'armed', f'not armed: {pr.get("why")}')
+        for key, what in (('pin', f'{PROD_SENSOR} pin (PC3, ADC1 IN9) through the SPOC mux'),
+                          ('dac', 'DAC pin (PA6, ADC2 IN3), no SPOC path')):
+            rows = res.get('injected_armed', [])
+            if rows:
+                line(f'L0-ADC-06{sfx}.{key}', 'INFO', f'{what}: injected conversions while armed, {how}, PWM outputs '
+                     'on / off: counts - DAC code, mean [min, max]', 'on = off if the switching does not reach this point',
+                     '; '.join(f'{r["mV"]} mV on {r[key + "_on"]["err"]:+.1f} [{r[key + "_on"]["err_min"]:+d}, '
+                               f'{r[key + "_on"]["err_max"]:+d}] / off {r[key + "_off"]["err"]:+.1f}' for r in rows))
+        for mv in SWEEP_MV:
+            rows = [r for r in res.get('trigger_sweep', []) if r['mV'] == mv]
+            if rows:
+                line(f'L0-ADC-05{sfx}.{mv}', 'INFO', f'V_HIGH at {mv} mV, PWM outputs on (duty 0.5), {how}: counts - '
+                     f'DAC code against the CMP3 fraction (/Pwm wTrig; period register {rows[0]["per"]})',
+                     'flat if the sample instant does not matter',
+                     '; '.join(f'{r["trig"]:.2f} ({r["cmp3"]}): {r["err"]:+.1f} [{r["err_min"]:+d}, {r["err_max"]:+d}]'
+                               for r in rows))
 
     with open(os.path.join(args.out, 'report.json'), 'w') as fh:
         json.dump(rep, fh)
@@ -303,6 +326,9 @@ def main():
             ['Sampling', ', '.join(map(str, SMP_CYCLES)) + ' cycles at 42.5 MHz; production 12.5 (adc_core.c)'],
             ['04', f'first arming, then V_HIGH (PC3) from the DAC, I1 and I2 held at 0 A on CH3/CH4 (TP5-TP7); '
                    f'/Adc statistics {STAT_S:.0f} s per level with the PWM outputs on, then off (HRTIM still triggering)'],
+            ['Legs', '04-06 run twice, each on a fresh boot: the legs as shield.power sets them from the devicetree '
+                     '(/Pwm wShield true: up-down, ADC1 from PWMA and ADC2 from PWMC CMP3 at 0.06 x period), then as '
+                     'found until 2026-11-20 (.found: left-aligned, ADCs on the HRTIM master period)'],
             ['05', 'the same, outputs on at duty 0.5, the ADC trigger instant (each leg\'s HRTIM CMP3, /Pwm wTrig) '
                    'swept over the period at ' + ' and '.join(map(str, SWEEP_MV)) + ' mV; then the node on CH2, '
                    '20 mV/div, 1 us/div'],

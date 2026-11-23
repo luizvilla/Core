@@ -869,7 +869,7 @@
    "id": "L0-TRP-01",
    "title": "The test build has the production protection allocation, and arms with the held current pins at 0 A",
    "criterion": "per board (.<board>): .a manifest identical to the production allocation (tools/safety_check.py) but for reserved DAC2_CH1; .b first arming of the boot passes its self-tests, outputs on, quiet",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST or SAFETY_L0_OWNVERTER (production allocation of Twist 1.4.2 or Ownverter 1.1.0 + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us",
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST or SAFETY_L0_OWNVERTER (production allocation of Twist 1.4.2 or Ownverter 1.1.0 + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, set up as shield.power does from the devicetree since 2026-11-20 (up-down, ADC trigger at 0.06 x period; left-aligned with the ADCs on the HRTIM master period before), control task 100 us",
    "variants": [
     "twist",
     "ownverter"
@@ -885,7 +885,7 @@
    "id": "L0-TRP-02",
    "title": "Each hardware path (comparator, ADC watchdog) of the manifest trips at its threshold, on its own fault input",
    "criterion": "per limit and bound (.<board>.<sensor>.<bound>, board twist or ownverter): trip fault, the path's FLT set, outputs off, fine-ramp trip level within ±25 mV of the threshold from the manifest counts; BLOCKED when the bench cannot hold the other current pins",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us",
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, set up as shield.power does from the devicetree since 2026-11-20 (up-down, ADC trigger at 0.06 x period; left-aligned with the ADCs on the HRTIM master period before), control task 100 us",
    "variants": [
     "twist",
     "ownverter"
@@ -901,7 +901,7 @@
    "id": "L0-TRP-03",
    "title": "Each software-path limit of the manifest trips at its threshold",
    "criterion": "per limit and bound (.<board>.<sensor>.<bound>, board twist or ownverter), only that sensor watched: software trip of that sensor, outputs off, trip level within ±25 mV of the threshold; BLOCKED when the bench cannot hold the current pins",
-   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, control task 100 us",
+   "conditions": "SPOC bench: CUT Spin with SAFETY_L0_TWIST (production Twist 1.4.2 allocation + reserved DAC2_CH1), MUX Spin Core-MUX mux-injector fe04fe3, MHO984; TP1-TP3 wired (stimulus), injector on TP5 (holds), TP5-TP7 wired for cases that hold two pins; PWM 200 kHz on the manifest legs, set up as shield.power does from the devicetree since 2026-11-20 (up-down, ADC trigger at 0.06 x period; left-aligned with the ADCs on the HRTIM master period before), control task 100 us",
    "variants": [
     "twist",
     "ownverter"
@@ -1085,7 +1085,7 @@
    "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
    "id": "L0-ADC-04",
    "title": "Production reading armed (regular group), PWM outputs on and off",
-   "criterion": "V_HIGH (PC3, high watchdog only) from the DAC at 100-1500 mV, I1 and I2 held at 0 A on CH3/CH4: /Adc statistics (newest sample each task period, 1 s) with the outputs on, then off: counts - DAC code, mean and extremes; information"
+   "criterion": "V_HIGH (PC3, high watchdog only) from the DAC at 100-1500 mV, I1 and I2 held at 0 A on CH3/CH4: /Adc statistics (newest sample each task period, 1 s) with the outputs on, then off: counts - DAC code, mean and extremes; with the legs as shield.power sets them (up-down, trigger 0.06 x period), then as found until 2026-11-20 (.found: left-aligned, master period); information"
   },
   {
    "tab": "safety",
@@ -1097,7 +1097,7 @@
    "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
    "id": "L0-ADC-05",
    "title": "Reading against the ADC sample instant in the PWM period",
-   "criterion": "as 04 with the outputs on (duty 0.5), the ADC trigger instant (HRTIM CMP3 of each leg) swept over the period at 100 and 1000 mV: counts - DAC code, mean and extremes; the pin node on the scope; information"
+   "criterion": "as 04 with the outputs on (duty 0.5), the ADC trigger instant (HRTIM CMP3 of each leg) swept over the period at 100 and 1000 mV: counts - DAC code, mean and extremes; the pin node on the scope; with the legs as shield.power sets them (up-down, trigger 0.06 x period), then as found until 2026-11-20 (.found: left-aligned, master period); information"
   },
   {
    "tab": "safety",
@@ -1109,7 +1109,7 @@
    "conditions": "SPOC bench; SAFETY_L0_TWIST on the CUT; /AdcJ injected conversions on a fresh boot before data acquisition; CUT DAC (PA6) on Twist I1 (PA1) or V_HIGH (PC3) through CH1 -> TP1-TP3 -> CH2; error = ADC counts - DAC code (shared VREFBUF)",
    "id": "L0-ADC-06",
    "title": "Where the switching reaches the reading: through the SPOC mux or not",
-   "criterion": "armed, injected conversions (SMPR kept) of the V_HIGH pin (through the SPOC mux) and of the DAC pin PA6 (no mux) at 100-1000 mV, PWM outputs on then off: counts - DAC code; information"
+   "criterion": "armed, injected conversions (SMPR kept) of the V_HIGH pin (through the SPOC mux) and of the DAC pin PA6 (no mux) at 100-1000 mV, PWM outputs on then off: counts - DAC code; with the legs as shield.power sets them (up-down, trigger 0.06 x period), then as found until 2026-11-20 (.found: left-aligned, master period); information"
   }
  ],
  "retired": {}

@@ -390,7 +390,43 @@ Looking at the early low-bound trips, the test firmware got an `/Adc` readout of
 
 Mechanism: in this build both ADCs are triggered by the HRTIM **master period** (HRTIM ADC1R = ADC3R = 0x10, `ADxMPER`; ADC1 EXTSEL 21 `hrtim_adc_trg1`, ADC2 22 `hrtim_adc_trg3`, read over SWD). The Safety API gives a software-triggered ADC its HRTIM trigger (`safety_data.cpp`) and nothing moves it to a leg; the master period is the legs' rising edge. Each edge puts a ±90 mV spike on the pin node, settled within 0.5 µs (CH2, 20 mV/div); every regular sample lands in it, at a level-dependent point of the transient. The ADC-watchdog low bounds (single samples) and the software low bounds near 170–300 mV read through it: the early watchdog trips (+12 to +22 mV) and L0-TRP-03.ownverter.V_HIGH.low (+29 mV) come from the sample instant, not from the ADC. Away from the edges the ADC is 5 mV low against the DAC (the comparators, whose thresholds are DACs, trip within 2 mV): within the ±25 mV tolerance.
 
-How the spike reaches the pin on the bench (SPOC mux crosstalk, or the CUT's own I/O) is not separated; on a power board the switching noise at the edge is larger, so sampling on the edge matters beyond the bench. Open for decision: where the test firmware (and the Safety API when it supplies a trigger itself) places the ADC trigger.
+How the spike reaches the pin on the bench (SPOC mux crosstalk, or the CUT's own I/O) is not separated.
+
+**Correction (2026-11-20, Luiz Villa): the edge sampling came from the test firmware, not from the boards.** `tests/firmware/safety_l0` drove the legs through `spin.pwm` alone (`initFixedFrequency`, `initUnit`), so they ran left-aligned, the driver default, with the ADCs on the master period. Twist 1.4.2 and Ownverter 1.1.0 set their legs up through `shield.power` from the devicetree: up-down counting (`default-modulation = "UpDwn"`), `EdgeTrigger_up`, ADC1 from PWMA and ADC2 from PWMC, CMP3 at 0.06 × period (`PwmHAL::enableAdcTrigger`; the shift covers the instrumentation delay). In up-down mode that instant is far from the edges. The test firmware now does the same: by default (`/Pwm wShield true`) each unit that is a devicetree power leg gets its modulation, edge trigger, ADC and decimation as `PowerAPI::initMode` sets them; `wShield false` keeps the old set-up for comparison.
+
+L0-ADC re-run with both set-ups (campaign `2026-11-20_77dab25-dirty_145915_6H7TNy`, V_HIGH, production reading, counts):
+
+| Level | Shield set-up, outputs on | off | As found, outputs on | off |
+|---|---|---|---|---|
+| 100 mV | −9.5 [−12, −7] | −10.0 | −60.6 | −10.3 |
+| 200 mV | −9.4 | −9.8 | −42.6 | −10.1 |
+| 300 mV | −9.6 | −10.1 | −14.9 | −10.3 |
+| 1000 mV | −8.4 | −8.8 | −11.1 | −9.0 |
+
+With the shield set-up the PWM changes nothing: the reading is the ADC's own −5 mV. The sweep of CMP3 in up-down mode errs only between 0.40 and 0.60 of the period register (the edges at duty 0.5), far from 0.06. The earlier L0-TRP, L0-EDG and L0-CPU campaigns ran with the as-found set-up, and are re-run.
+
+**L0-TRP re-run with the shield set-up (campaigns `2026-11-20_77dab25-dirty_150652_bc41ai` Twist, `..._151121_lHhRoB` Ownverter): every case PASSes (14 Twist, 16 Ownverter); L0-TRP-03.ownverter.V_HIGH.low passes.** Every low bound now trips 4 to 6 mV above its threshold, the ADC's −5 mV offset, where the as-found set-up gave +9 to +29 mV:
+
+| Case | As found | Shield set-up |
+|---|---|---|
+| Ownverter V_HIGH low (software) | +29 mV, FAIL | +4 mV |
+| Twist V_HIGH low (software) | +23 mV | +4 mV |
+| Ownverter I1_LOW low (ADC2 AWD3) / I2_LOW low (software) | +18 / +18 mV | +4 / +4 mV |
+| Twist I1_LOW low (ADC1 AWD1) / I2_LOW low (ADC2 AWD3) | +12 / +9 mV | +6 / +4 mV |
+| Ownverter I3_LOW low (ADC1 AWD1) | +11.2 mV | +5.2 mV |
+
+The high bounds (comparators and watchdogs) are unchanged, within −2 to +6 mV.
+
+**L0-EDG and L0-CPU re-run with the shield set-up (2026-11-23, campaigns `2026-11-23_77dab25-dirty_114008_50zPxN` L0-EDG, `..._114427_qIgccu` L0-CPU, Twist): every case PASSes (10 L0-EDG, 16 L0-CPU), as before (`2026-11-20_6af6bbb-dirty_105929_Rx8QKv`, `2026-11-20_10d8aa6-dirty_114506_QCwkMN`).** The changes are within the bench's noise:
+
+- L0-EDG-06: the longest pulse without a trip is 248 ns (was 246 ns) and the shortest with one 286 ns (unchanged). The ADC watchdog caught none of the 19 pulses this time (it caught some before). It samples once per PWM period, at a different instant in each set-up, so whether it catches a pulse depends on where the sample falls; this does not count toward the verdict.
+- L0-EDG-07: the step is 400 counts for 200 mV (was 399).
+- L0-CPU-01: the last switching edge falls 0 ns after the marker on every pin (up to 27 ns before).
+- L0-CPU-02: every trip is taken in the same instruction of the halted loop (PC 0x0803478a, a new build), with OENR going from 0x033 to 0x000 and the expected FLTx set.
+
+The as-found set-up affected only the ADC-side low bounds, which are measured by L0-TRP.
+
+**Bug found on the way (HRTIM driver, for the PRs at the end):** in up-down mode `hrtim_tu_init()` stores the frequency it computes for the doubled count (`frequency = _period_ckpsc(2 × frequency)`), so each further `initUnit()` on the same unit doubles the PWM frequency again; a few re-inits later the period falls below the minimum and the driver's `assert` aborts (kernel panic, `abort()` at 0x0801cb44). Left-aligned units are not affected. Applications init once; the test firmware re-inited at each PWM start, and now inits each unit once per boot.
 
 Bench note: the MHO984 came back with its channels at ×1 after a replug (readings a tenth of the truth, the glitch case never triggered). The runners now set the four channels themselves (×10, 0.5 V/div) and find the scope's `/dev/usbtmcN` (`rigol_mho.scope_path()`, or `$RIGOL_USBTMC`).
 

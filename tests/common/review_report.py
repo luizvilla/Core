@@ -1133,20 +1133,31 @@ def spoc_adc_section(folder, rep):
         rows = sorted((r for r in rep['points'][name]['rows'] if r['smp'] == prod), key=lambda r: r['mV'])
         fig.line(main, name, np.asarray([r['mV'] for r in rows], float), np.asarray([r['err'] for r in rows], float),
                  SERIES[i], 2, points=True)
-    pr = rep.get('production') or {}
-    for state, dash in (('on', [6, 4]), ('off', [2, 3])):
-        rows = [r for r in pr.get('rows', []) if state in r]
-        if rows:
-            fig.line(main, f'production: {pr["sensor"]} ADC{pr["adc"]} IN{pr["channel"]}, regular group, PWM {state}',
-                     np.asarray([r['mV'] for r in rows], float), np.asarray([r[state]['err'] for r in rows], float),
-                     SERIES[3], 2, dash=dash, points=True)
     out.append(f'<figure><div><b>ADC counts minus DAC code against the level, {cyc[prod]} cycles (production '
                'sampling)</b></div>' + fig.html('spoc-adc-level', 'ADC error against the level, per point')
                + f'<figcaption>One count is {rep["vref_mV"] / 4096:.2f} mV. Zero is an ideal pair: the DAC and the ADC '
                  'share the VREFBUF, so the error does not depend on its true value. The DAC pin (PA6, no SPOC path) '
-                 'shows the ADC and DAC alone; the bench pins add the SPOC path; the dashed lines are the reading the '
-                 'trips and the plausibility check see (regular group, armed), with the PWM outputs on and off.'
-                 '</figcaption></figure>')
+                 'shows the ADC and DAC alone; the bench pins add the SPOC path. Injected conversions on a fresh boot, '
+                 'PWM off.</figcaption></figure>')
+    sets = [(rep, 'legs as the shield sets them', SERIES[0]), (rep.get('as_found') or {}, 'as found', SERIES[1])]
+    if any((r.get('production') or {}).get('rows') for r, _, _ in sets):
+        fig = Figure('mV', 'level at the DAC (mV)')
+        main = fig.chart('counts', 280)
+        for res, name, col in sets:
+            pr = res.get('production') or {}
+            for state, dash in (('on', None), ('off', [4, 4])):
+                rows = [r for r in pr.get('rows', []) if state in r]
+                if rows:
+                    fig.line(main, f'{name}, PWM {state}', np.asarray([r['mV'] for r in rows], float),
+                             np.asarray([r[state]['err'] for r in rows], float), col, 2, dash=dash, points=True)
+        pr = rep.get('production') or {}
+        out.append(f'<figure><div><b>The reading the trips see: {e(str(pr.get("sensor")))} (ADC{pr.get("adc")} '
+                   f'IN{pr.get("channel")}, regular group, armed), PWM outputs on (solid) and off (dashed)</b></div>'
+                   + fig.html('spoc-adc-prod', 'Production ADC reading against the level, per leg set-up')
+                   + '<figcaption>Mean of the newest sample each 100 µs task period over 1 s. Legs as the shield '
+                     'sets them: up-down counting, ADC1 from PWMA and ADC2 from PWMC CMP3 at 0.06 × period (the '
+                     'instrumentation delay). As found (test firmware until 2026-11-20): left-aligned, the ADCs on '
+                     'the HRTIM master period, which is a switching edge.</figcaption></figure>')
     fig = Figure('', 'SMPR code (0 = 2.5 … 7 = 640.5 ADC cycles; production 2 = 12.5)')
     main = fig.chart('counts', 280)
     for i, name in enumerate(shown):
@@ -1158,20 +1169,25 @@ def spoc_adc_section(folder, rep):
                + fig.html('spoc-adc-smp', 'ADC error against the sampling time')
                + '<figcaption>A source impedance shows as an error that shrinks as the sampling time grows; an offset of '
                  'the ADC itself stays flat.</figcaption></figure>')
-    sweep = rep.get('trigger_sweep') or []
-    if sweep:
-        fig = Figure('', 'ADC trigger instant (fraction of the PWM period; outputs switch at 0 and 0.5)')
+    for res, name, key, axis in (
+            (rep, 'legs as the shield sets them', 'spoc-adc-trig',
+             'CMP3 / period register (up-down counting; the shield default is 0.06)'),
+            (rep.get('as_found') or {}, 'as found', 'spoc-adc-trig-found',
+             'CMP3 / period (left-aligned: outputs switch at 0 and 0.5)')):
+        sweep = res.get('trigger_sweep') or []
+        if not sweep:
+            continue
+        fig = Figure('', axis)
         main = fig.chart('counts', 280)
         for i, mv in enumerate(sorted({r['mV'] for r in sweep})):
             rows = sorted((r for r in sweep if r['mV'] == mv), key=lambda r: r['trig'])
             fig.line(main, f'{mv} mV', np.asarray([r['trig'] for r in rows], float),
                      np.asarray([r['err'] for r in rows], float), SERIES[i], 2, points=True)
-        out.append('<figure><div><b>Error against the ADC sample instant, outputs on (duty 0.5)</b></div>'
-                   + fig.html('spoc-adc-trig', 'ADC error against the trigger instant in the PWM period')
-                   + '<figcaption>ADC1 triggered by the first leg\'s CMP3 (as an application sets it), swept over the '
-                     'period. Away from the switching edges the error is the ADC\'s own offset; near an edge the sample '
-                     'catches the transient the switching couples onto the pin. As found, the ADCs are triggered by the '
-                     'HRTIM master period, which is a switching edge.</figcaption></figure>')
+        out.append(f'<figure><div><b>Error against the ADC sample instant, {e(name)}, outputs on (duty 0.5)</b></div>'
+                   + fig.html(key, f'ADC error against the trigger instant, {name}')
+                   + '<figcaption>ADC1 triggered by PWMA\'s CMP3, swept with /Pwm wTrig. Away from the switching '
+                     'edges the error is the ADC\'s own offset; near an edge the sample catches the transient the '
+                     'switching couples onto the pin.</figcaption></figure>')
     nw = rep.get('node_wave')
     if nw:
         fig = Figure('µs')
