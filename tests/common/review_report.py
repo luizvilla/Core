@@ -1261,6 +1261,68 @@ def spoc_edge_section(folder, rep):
     return ''.join(out)
 
 
+def spoc_latency_section(folder, rep):
+    """@brief L0-LAT (ADR 0009, #23 C13/C14): example trips on the direct probes, then the turn-off times."""
+    import numpy as np
+    e = html.escape
+    out = ['<h3>4 · Figures</h3>']
+    if not rep:
+        out.append(f'<p class="sub">No report in {e(folder.name)}/.</p>')
+        return ''.join(out)
+    names = {'1': 'CH1 PA8 (leg 1 high side)', '2': 'CH2 PA9 (leg 1 low side)', '4': 'CH4 PC1 (comparator input)'}
+    for key, label, unit in (('high', 'high bound (comparator)', 1.0), ('low', 'low bound (ADC watchdog)', 1e-3)):
+        res = rep.get(key) or {}
+        rows = res.get('trips') or []
+        waves = [r for r in rows if r.get('wave')]
+        for j, r in enumerate(waves[2:6] if key == 'high' else []):   # odd trips: early turn-off or a residual peak
+            fig = Figure('ns', 'time from PC1 crossing the threshold')
+            main = fig.chart('V', 200)
+            for i, ch in enumerate(('1', '2', '4')):
+                pts = r['wave'].get(ch) or []
+                fig.line(main, names[ch], np.asarray([p[0] for p in pts], float),
+                         np.asarray([p[1] for p in pts], float), SERIES[i], 1.5)
+            out.append(f'<figure><div><b>Odd trip: turn-off {r["off_ns"]:.0f} ns after the crossing, peak '
+                       f'{r["peak_after_V"]:.2f} V after it{" (dead time)" if r.get("dead") else ""}</b></div>'
+                       + fig.html(f'spoc-lat-odd-{j}', 'Direct probes during an odd trip') + '</figure>')
+        if waves:
+            fig = Figure('ns' if unit == 1.0 else 'µs', 'time from PC1 crossing the threshold')
+            main = fig.chart('V', 240)
+            for i, ch in enumerate(('1', '2', '4')):
+                pts = waves[0]['wave'].get(ch) or []
+                fig.line(main, names[ch], np.asarray([p[0] * unit for p in pts], float),
+                         np.asarray([p[1] for p in pts], float), SERIES[i], 1.5)
+            c = res.get('case', {})
+            out.append(f'<figure><div><b>A trip on the {e(label)}: {e(str(c.get("sensor")))} past '
+                       f'{c.get("threshold_mV", 0):.0f} mV</b></div>'
+                       + fig.html(f'spoc-lat-{key}-wave', f'Direct probes during a {label} trip')
+                       + '<figcaption>Direct x10 probes on the CUT pins, single shot triggered by PC1 crossing the '
+                         'threshold (time 0). The output that was high goes low; the other stays low.'
+                         '</figcaption></figure>')
+        offs = sorted(r['off_ns'] for r in rows if r.get('off_ns') is not None)
+        if offs:
+            fig = Figure('', 'trips, sorted')
+            main = fig.chart('ns', 220)
+            fig.line(main, 'turn-off after the crossing', np.arange(1, len(offs) + 1, dtype=float),
+                     np.asarray(offs, float), SERIES[0], 2, points=True)
+            sm = res.get('summary') or {}
+            out.append(f'<figure><div><b>Turn-off after the crossing, every {e(label)} trip, sorted</b></div>'
+                       + fig.html(f'spoc-lat-{key}-off', f'Turn-off times, {label}')
+                       + f'<figcaption>{sm.get("clean")} of {sm.get("n")} trips are latencies (min {sm.get("min")}, '
+                         f'median {sm.get("median")}, max {sm.get("max")} ns).'
+                       + (' The low points, more than 40 ns below the median, are trips whose fault fell in a dead '
+                          'time: the PWM edge before it was the last turn-off.' if key == 'high' else
+                          ' ADC2 converts one channel of its sequence per trigger, so I2 is sampled every Nth period and the latency spreads over N periods.')
+                       + '</figcaption></figure>')
+    d = rep.get('01') or {}
+    if d:
+        pins = d.get('pins_ns') or {}
+        out.append('<table><tr><th>Dead time</th><th>Measured (ns)</th></tr>'
+                   + ''.join(f'<tr><td>{e(k)}</td><td>{"—" if v is None else f"{v:.1f}"}</td></tr>'
+                             for k, v in pins.items())
+                   + f'<tr><td>DTxR (first unit)</td><td>0x{d.get("rDtR", 0):08x}</td></tr></table>')
+    return ''.join(out)
+
+
 def spoc_dead_section(folder, rep):
     """@brief L0-CPU: lockup per PWM pin (waveforms against the marker), then the trips with the CPU halted."""
     import numpy as np
@@ -1717,6 +1779,10 @@ def main(out):
             if c.get('figures') == 'spoc_edge':
                 # L0-EDG (ADR 0009, #23): what each edge case did.
                 p.append(spoc_edge_section(c['folder'], rep_t))
+                continue
+            if c.get('figures') == 'spoc_latency':
+                # L0-LAT (ADR 0009, #23 C13/C14): trip latency and dead time on the direct probes.
+                p.append(spoc_latency_section(c['folder'], rep_t))
                 continue
             if c.get('figures') == 'spoc_dead':
                 # L0-CPU (ADR 0009, #23): lockup per PWM pin, then the trips with the CPU halted.

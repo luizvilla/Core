@@ -69,8 +69,8 @@ Found on the Core4 `test/twt-bnc` bench (`tests/twt_bnc/README.md` there, fw 00.
 | C10 | `feat(test): software fault injection in the generic firmware` | Stack overflow, hard fault, interrupts masked, watchdog starved, wild register writes after locking |
 | C11 | `test(safety): L0 runner, cases from the manifest` | Limit × sign × path, self-injection through TP1–TP3, routes set with the PWM stopped; the current pins with a watchdog low bound held by the injector through CH3 and (TP5–TP7 wired) CH4; production build only, its manifest checked against `tools/safety_check.py` |
 | C12 | `test(safety): CPU-dead cases` | L0-CPU (`tests/l0/spoc_dead`): lockup per PWM pin on the scope (L0-SUP-08.c); each hardware trip with the CPU halted over SWD, the threshold crossed by an SWD DAC write |
-| C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service |
-| C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once. Done 2026-11-20 (L0-EDG): arming with a limit exceeded, clear while exceeded, repeated fault, two faults, no trip just inside, comparator glitch filter. Open: dead time (probes) |
+| C13 | `test(safety): comparator checks on the scope` | Trip latency from the GPIO step; low-bound comparator in service. Done 2026-11-23 (L0-LAT, direct probes): comparator and watchdog latency on the pins; the injector's DAC step replaces the GPIO step (its 0 V idle would trip the low bound) |
+| C14 | `test(safety): edge cases` | Below threshold; glitch shorter and longer than the filter; fault while arming, during clear, during dead time; two faults at once. Done 2026-11-20 (L0-EDG): arming with a limit exceeded, clear while exceeded, repeated fault, two faults, no trip just inside, comparator glitch filter. Dead time done 2026-11-23 (L0-LAT-05) |
 | C15 | `docs(safety): L0 SPOC campaign results` | Campaign under `tests/out/`, control center checked, results here, in the ADR and on the issues; closes #23 |
 
 Each test from C7 on is in `tests/catalogue.json` and is done only when it shows in `tests/out/control-center.html` with its newest result and rendered report. Campaign folders are git-ignored: the numbers are copied here.
@@ -434,3 +434,31 @@ Bench note: the MHO984 came back with its channels at ×1 after a replug (readin
 
 Reading B (Luiz Villa): the time runs from a clear to the next fault; `SafetyAPI::rebootRequired()`, the fault text and `/Safety rRebootRequired` tell the operator why a clear is refused. Details in ADR 0009; checked by L0-EDG-03, now judged.
 
+### 2026-11-23, C13 and C14 dead time: L0-LAT, direct probes
+
+`tests/l0/spoc_latency` (README there), campaign `2026-11-23_ffc947f-dirty_133249_rZhctU`, Twist 1.4.2: **5 PASS**.
+
+Direct ×10 probes on the CUT: CH1 on PA8, without a ground spring; CH2 on PA9; CH4 on PC1. The MUX injector's DAC source steps I2 (PC1) from its 0 A level across a threshold, while the CUT DAC holds I1. There were 300 high-bound trips and 30 low-bound trips, asynchronous to the 200 kHz up-down PWM.
+
+| Case | Result | Limit |
+|---|---|---|
+| L0-LAT-01 dead time of leg 1 on the pins | 100.4 / 100.9 ns; DTxR 0x00880088 | 100 ns ±25 ns |
+| L0-LAT-02 I2_LOW high bound, COMP3 → FLT5: from PC1 crossing 1.70 V to the outputs below 0.5 V | 256.6 to 312.1 ns, median 287.6 ns (295 trips) | ≤ 360 ns (31 + 282 filter + 47) |
+| L0-LAT-03 I2_LOW low bound, ADC2 AWD3 → FLT6 | 0.72 to 15.28 µs, median 9.69 µs (30 trips) | ≤ 3 × 5 µs + 1 µs = 16 µs |
+| L0-LAT-04 every trip | PA8 and PA9 never both high; after the turn-off, at most 0.065 V | < 0.5 V |
+| L0-LAT-05 faults in the dead time | 5 of 300; the next output never turned on | ≥ 3 |
+
+- **Comparator path.** The 55 ns spread is one filter sample, from the synchronisation to fHRTIM/8. The time is mostly the 282 ns filter; L0-EDG-06 measured where the filter cuts, and the 31 ns of the comparator itself cannot be separated with the filter on.
+  - In 54 of the 300 trips FLT6 also latched: the 2.0 V step is outside I2's ADC watchdog window too, and a conversion sometimes falls before the comparator path acts.
+- **Watchdog path: the reaction time follows the ADC sequence.** ADC2 converts one channel of V2_LOW, I2_LOW and I_HIGH per trigger. I2 is therefore sampled every third period, and the latency spreads evenly over three periods.
+  - The first run against the ADR's "≤ 3 switching periods" missed it by 159 ns (15.16 µs).
+  - That figure assumed a 2-event fault counter, dropped on 2026-11-19.
+  - **Decided (Luiz Villa):** the bound is (channels on that ADC) × period + one conversion, taken from each board's manifest. This is in ADR 0009.
+- **Fault at the end of a dead time.** When the fault lands just as a dead time ends, the next output starts to turn on and is cut one HRTIM clock later, about 5 ns, with peaks up to 1.64 V.
+  - This was seen twice in 600 trips over two campaigns.
+  - The cut comes at the normal latency, so it is an ordinary trip: the runner's turn-off is the last moment either output is above 0.5 V.
+  - Whether a gate driver reacts to a 5 ns pulse is not checked here; for L2.
+- **Test firmware.** The test firmware now applies the devicetree dead time, as `PowerAPI::initMode` does. The L0-TRP, L0-EDG, L0-CPU and L0-ADC campaigns before 2026-11-23 ran without it. The thresholds do not depend on it.
+- **Bench notes.**
+  - In one run the CUT's USB link dropped and re-enumerated after 132 trips. The firmware kept running, armed with the PWM on. The runner now reopens the port and repeats the trip; there were no drops in the next three runs.
+  - The first run reported BLOCKED: the BNC cables were still on CH1 and CH2. The probe check now also requires a 0–3.3 V swing, because a SPOC node shows the switching spikes at 400 kHz.

@@ -16,10 +16,10 @@
  *   /Safety  rArmed rFault rTripped rFltMask rOutputs rText rRebootRequired, xClear   state of the Safety API, clearFault()
  *   /Pwm     wFreq_Hz wDuty wUnits wRun, xApply                           legs (HRTIM units, bit 0 = A ... 5 = F)
  *            wShield (default true): each unit that is a power leg in the devicetree is set up as shield.power
- *            does (modulation, ADC edge trigger, ADC and decimation, CMP3 = 0.06 x period in UpDwn); false: as
+ *            does (modulation, ADC edge trigger, dead time, ADC and decimation, CMP3 = 0.06 x period in UpDwn); false: as
  *            run until 2026-11-20, left-aligned with the ADCs on the HRTIM master period. Set once per boot.
  *            wTrig (>= 0: CMP3 of each unit at this fraction of the period; with wShield false ADC1/ADC2 also
- *            move to the first/second unit's CMP3; < 0: no change); rCmp3 rPer rUdm (first unit) rAdc1R rAdc3R
+ *            move to the first/second unit's CMP3; < 0: no change); rCmp3 rPer rUdm rDtR (first unit) rAdc1R rAdc3R
  *   /Inj     wLevel_mV wOn, xApply; rLevel_mV rVref_mV rOn               self-injection DAC2_CH1 on PA6 (pin 34)
  *   /Cal     wOn, xApply; rOn                                             1 kHz, 0.5 on PA8 from TIM1 (L0-CAL)
  *   /Sw      wName, xApply; rWatched rRc                                software check on one sensor by name ("" = none)
@@ -107,6 +107,7 @@ static bool pwm_shield = true;           /* legs set up from the devicetree, as 
 static bool pwm_init_shield;
 static uint8_t pwm_unit_init;           /* units already through initUnit (once per boot) */
 static bool pwm_udm;                     /* read back: first unit counts up-down (TIMxCR2.UDM) */
+static uint32_t pwm_dtr;                 /* read back: first unit's DTxR (dead time) */
 static uint16_t pwm_cmp3, pwm_per;       /* read back from the first leg: HRTIM CMP3 (ADC trigger) and period */
 static uint32_t pwm_adc1r, pwm_adc3r;    /* HRTIM ADC trigger 1 (ADC1) and 3 (ADC2) sources */
 static uint8_t pwm_units = 0;       /* requested units, bit 0 = A */
@@ -188,9 +189,12 @@ struct dt_leg {
 	hrtim_adc_edgetrigger_t edge;
 	hrtim_cnt_t modulation;
 	uint32_t decim;
+	uint16_t dead_rise_ns;
+	uint16_t dead_fall_ns;
 };
 #define DT_LEG_ENTRY(n) {DT_PROP_BY_IDX(n, pwm_pin_num, 0), DT_STRING_TOKEN(n, default_adc), \
-	DT_STRING_TOKEN(n, default_edge_trigger), DT_STRING_TOKEN(n, default_modulation), DT_PROP(n, default_adc_decim)},
+	DT_STRING_TOKEN(n, default_edge_trigger), DT_STRING_TOKEN(n, default_modulation), DT_PROP(n, default_adc_decim), \
+	DT_PROP_BY_IDX(n, default_dead_time, 0), DT_PROP_BY_IDX(n, default_dead_time, 1)},
 static const struct dt_leg DT_LEGS[] = {
 	DT_FOREACH_CHILD_STATUS_OKAY(DT_NODELABEL(powershield), DT_LEG_ENTRY)
 };
@@ -254,6 +258,9 @@ static int pwm_apply_now(void)
 				spin.pwm.setAdcEdgeTrigger(UNITS[u], leg_dt->edge);
 			}
 			spin.pwm.initUnit(UNITS[u]);
+			if (leg_dt) { /* as PowerAPI::initMode: dead time after initUnit */
+				spin.pwm.setDeadTime(UNITS[u], leg_dt->dead_rise_ns, leg_dt->dead_fall_ns);
+			}
 			if (leg_dt && leg_dt->adc != UNKNOWN_ADC) { /* as PowerAPI::initMode: after initUnit */
 				spin.pwm.setAdcDecimation(UNITS[u], leg_dt->decim);
 				spin.pwm.setAdcTrigger(UNITS[u], leg_dt->adc);
@@ -284,6 +291,7 @@ static int pwm_apply_now(void)
 				pwm_cmp3 = (uint16_t)HRTIM1->sTimerxRegs[u].CMP3xR;
 				pwm_per = (uint16_t)HRTIM1->sTimerxRegs[u].PERxR;
 				pwm_udm = (HRTIM1->sTimerxRegs[u].TIMxCR2 & HRTIM_TIMCR2_UDM) != 0U;
+				pwm_dtr = HRTIM1->sTimerxRegs[u].DTxR;
 			}
 		}
 	}
@@ -912,6 +920,7 @@ THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910B, "rAdc1R", &pwm_adc1r, THINGSET_ANY_R, 0
 THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910C, "rAdc3R", &pwm_adc3r, THINGSET_ANY_R, 0);
 THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x910D, "wShield", &pwm_shield, THINGSET_ANY_RW, 0);
 THINGSET_ADD_ITEM_BOOL(ID_PWM, 0x910E, "rUdm", &pwm_udm, THINGSET_ANY_R, 0);
+THINGSET_ADD_ITEM_UINT32(ID_PWM, 0x910F, "rDtR", &pwm_dtr, THINGSET_ANY_R, 0);
 
 THINGSET_ADD_GROUP(TS_ID_ROOT, ID_INJ, "Inj", &inj_cb);
 THINGSET_ADD_ITEM_UINT16(ID_INJ, 0x9201, "wLevel_mV", &inj_level_req_mV, THINGSET_ANY_RW, 0);

@@ -23,4 +23,4 @@ Fresh boots: 01 alone (the arming self-tests run once per boot); 02–06 and 03 
 
 The pulse mode is in Core-MUX (`/Mux/Inj` `wPulseHigh_mV`, `wPulse_ns`, `xPulse`; `mux-injector` `fe04fe3`): the DAC source steps to the pulse level and back, interrupts off, timed on the cycle counter. Its own timing runs long and in steps of about 41 ns, so the time above the threshold is read on the scope. The ADC watchdog on the same pin has no filter and samples every PWM period: it can catch a pulse, which the verdict tells apart by fault input.
 
-Not covered here: a fault during dead time, trip latency (direct probes, C13).
+Not covered here: a fault during dead time, trip latency (direct probes, C13): `tests/l0/spoc_latency` (L0-LAT).

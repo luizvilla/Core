@@ -47,6 +47,6 @@ The runner finds the wire itself: with every route off and the injector at 1.2 V
 
 The start level is 150 mV inside the threshold, or 40 % of the sensor's window if that is narrower (Ownverter 1.1.0's I3_LOW window is 157 mV wide, see spoc_bench.md). Held pins with 0 A levels less than 50 mV apart share the injector's mean level (Ownverter: I1 1000 mV, I3 1024.5 mV).
 
-Not covered here: trip latency (C13), glitch filters and edge cases (C14), CPU-dead cases (C12).
+Not covered here: trip latency and dead time (C13, `tests/l0/spoc_latency`), glitch filters and edge cases (C14), CPU-dead cases (C12).
 
 History and findings: [docs/safety/spoc_bench.md](../../../docs/safety/spoc_bench.md).

@@ -19,7 +19,7 @@
 ##   08 no dispatch (test hook): the plausibility check latches "no current reading" with the PWM on;
 ##   06 glitch filter of the comparator path: pulses on the second pin from the MUX injector's pulse mode (DAC source,
 ##      hold level -> 2.0 V -> hold level), each captured on SPOC CH3; the time above the threshold decides.
-## Faults during dead time and trip latency need direct probes (C13).
+## Faults during dead time and trip latency need direct probes: tests/l0/spoc_latency (L0-LAT, C13).
 ##
 ## @par Usage
 ##   .venv/bin/python tests/l0/spoc_edge/run.py --out DIR
