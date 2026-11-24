@@ -114,6 +114,14 @@ def allocate(model):
             entry['covered'] = True
             results[i] = entry
             continue
+        if linear and gain is not None and gain < 0:
+            # Counts fall as the value rises: the high bound would land below the low one, the comparator would
+            # need the opposite polarity and the watchdog window would come out inverted. Refuse rather than build it.
+            errors.append(f'{name}: negative gain ({gain}); the hardware paths assume the counts rise with the value. '
+                          f'Set protection = "software" on its safety-thresholds node, or support inverted sensors '
+                          f'in safety_allocation.py first.')
+            results[i] = entry
+            continue
         need = _bound_order(lim)
         soft = [x for x in ('high', 'low') if x not in need]
         for x in soft:

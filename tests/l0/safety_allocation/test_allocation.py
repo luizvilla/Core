@@ -3,7 +3,7 @@
 ## Copyright (c) 2026 OWNTECH TECHNOLOGIES
 ##
 ## @file test_allocation.py
-## @brief L0-ALC-01..10: the protection allocation (ADR 0009, issue luizvilla/Core#17) on synthetic boards.
+## @brief L0-ALC-01..10, 13..16: the protection allocation (ADR 0009, issue luizvilla/Core#17) on synthetic boards.
 ##
 ## Pure Python, no hardware, no build. Each criterion prints one result line (@@ format). Synthetic sensors use the
 ## Spin's real pins: PA1 (COMP1, ADC1/2 ch2), PC1 (COMP3), PA0 (COMP3 too), PC2/PC3 (no comparator).
@@ -140,6 +140,16 @@ def main():
     used = set(a['resources']['adc_watchdogs'])
     line('L0-ALC-15', 'ADC2 AWD1' not in used and 'ADC2 AWD2' not in used,
          'ADC2 AWD1 and AWD2 are never assigned (EEV4/EEV5 belong to peak-current mode)', 'not used', str(sorted(used)))
+
+    # 16 a sensor whose counts fall as the value rises (Ownverter v1.1 I_HIGH, #28) is refused for hardware paths
+    a = allocate({'sensors': {'IH': sensor(27, 'PC3', (('adc2', 9),), gain=-0.00938, offset=19.73)},
+                  'limits': [limit('IH')]})
+    b = allocate({'sensors': {'IH': sensor(27, 'PC3', (('adc2', 9),), gain=-0.00938, offset=19.73)},
+                  'limits': [limit('IH', protection='software')]})
+    line('L0-ALC-16', len(a['errors']) == 1 and 'negative gain' in a['errors'][0] and not b['errors']
+         and kinds(b, 'IH') == ('software', 'software'),
+         'Negative gain: hardware limit refused with an error; software protection accepted', '1 error; software ok',
+         f"{a['errors'][:1]}; {b['errors'] or kinds(b, 'IH')}")
     return 0
 
 

@@ -5,7 +5,7 @@
 ## @file run.sh
 ## @brief L0-ALC: protection allocation (ADR 0009, issue luizvilla/Core#17). No hardware.
 ##
-## L0-ALC-01..10: the allocation on synthetic boards (test_allocation.py, instant). L0-ALC-11/12: every shield
+## L0-ALC-01..10, 13..16: the allocation on synthetic boards (test_allocation.py, instant). L0-ALC-11/12: every shield
 ## devicetree builds with the allocation and matches its committed protection table (build_check.py, about 20 s
 ## per shield). Writes the test-case folder l0_alc/ for the review page. Standalone (--run outside a campaign), it
 ## writes a campaign of its own.
@@ -49,7 +49,7 @@ man = {'title': 'L0-ALC · Protection allocation on every shield',
                   'unless the shield states an exception, and that the committed protection tables match the build '
                   '(ADR 0009).',
        'criteria': ['L0-ALC-'],
-       'conditions': [['Synthetic boards', 'L0-ALC-01..10: test_allocation.py on hand-made models using real Spin pins'],
+       'conditions': [['Synthetic boards', 'L0-ALC-01..10, 13..16: test_allocation.py on hand-made models using real Spin pins'],
                       ['Shields', 'L0-ALC-11/12: every zephyr/boards/shields/*/*.overlay, env SAFETY_CHECK, target '
                                   'idedata (devicetree + allocation, no compile), strict mode'],
                       ['Routing tables', 'RM0440 Rev 8 Tables 82, 196, 197, 220']],
