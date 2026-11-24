@@ -600,4 +600,19 @@ Ownverter trips with the new scaling, against the thresholds from the manifest (
 | V1–V3_LOW high, software | 1166.2 mV | +5 to +6 mV |
 | V_HIGH high, ADC1 AWD2 → FLT2 / low, software | 1672.0 / 166.9 mV | +3 / +4 mV |
 
-**Upstream (owntech-foundation/Core), waiting for Luiz's go:** the overlay fixes and the flash CRC fix join the bug PR list.
+**Upstream (owntech-foundation/Core), waiting for Luiz's go:**
+- PRs: data dispatch buffer overflow, unattended-DMA aliasing, unchecked k_malloc in data_dispatch_init, frozen-sensor dispatch takeover, HRTIM up-down re-init; Ownverter I3_LOW scaling (all overlays); Ownverter v1.1.0 sensing values; run-time flash CRC over the image only; negative-gain allocator guard.
+- Issues: I_HIGH sign convention, overlay against production NVS calibration; limits on line voltages (V12, V23, V31) for AC faults on the software path.
+
+### 2026-11-24, #28: decisions on I_HIGH's sign and the V1–V3_LOW low limit (Luiz Villa)
+
+**I_HIGH keeps the old sign convention: gain +0.00938, offset −19.73** (the calibration magnitude). The reading is −I, as with the old 0.005 / −10, and applications negate it: `OWNVERTER/legacy/FOC_speed_hall_sensor` in the examples (branch `new_OWT_examples`) does `I_high = -meas_data` "because of the way hardware sensor is routed". The calibration's own −0.00938 would have given the true sign and made every such application negate it twice. No limit is on I_HIGH, so no trip changes; L0-ALC `2026-11-24_07c5f00-dirty_132308_sl4V5l`: 35 PASS.
+
+Left open (upstream issue): the production NVS calibration stores the negative gain, so a calibrated board reads +I and an uncalibrated one −I. The sign convention should be the same in the overlay and in the calibration.
+
+**V1–V3_LOW keep the −10 V low limit (never trips, L0-TRP INFO).** The schematic (InverterLeg sheet, v1.1.0 `29fcf13`):
+- R616 330 kΩ / R617 5.6 kΩ divide the leg node (to DC−) by 0.0167 into the AMC1311B (U601, input 0 to 2 V); an MCP6486 difference amplifier (U604, 27 kΩ, gain 1) feeds the ADC.
+- At the 2.048 V ADC reference: 0.5 mV / 0.0167 = 0.0300 V per count, 0 V at 0 counts, as the calibrations found.
+- The leg voltage is a wave plus an offset (Vdc/2 + Vac·sin), always between 0 V and Vdc. Below DC− it can go only by a diode drop in the dead time, which the sensor does not see.
+- A 0 V low limit would be the idle state (no bus or leg off) and would trip there, not on an overshoot. Any limit below 0 V cannot trip.
+- An AC fault is a limit on a line voltage (V12 = V1 − V2, computed by the application), a computed quantity for the software path. Upstream issue.

@@ -218,8 +218,8 @@
 			sensor-name = "I_HIGH";
 			default-adc = "ADC_2";
 			default-order = <3>;
-			default-gain = <0xbc19ae92>; /* -0.00938, v1.1 calibration mean: falls as the current rises (#28) */
-			default-offset = <0x419dd70a>; /* 19.73 */
+			default-gain = <0x3c19ae92>; /* 0.00938, v1.1 calibration magnitude; sign kept as before: reads -I, applications negate it (#28) */
+			default-offset = <0xc19dd70a>; /* -19.73 */
 			sensor-conv-type = "LINEAR";
 			i-high-adc1 {
 				io-channels = <&adc1 9>;
