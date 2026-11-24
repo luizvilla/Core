@@ -556,3 +556,48 @@ Board 9SEZ's I1 sits 7 % above the mean.
 - **I3_LOW** takes the I1/I2 scaling in every overlay.
 - **v1.1.0** takes the v1.1 values above, which also covers v1.1.1 boards.
 - **Not checked:** v0.9.0's hardware.
+
+### 2026-11-24, #28: Ownverter overlays fixed, re-run on the bench
+
+Commits `b4ae382a` (overlays, allocator) and `d18e8bdb` (flash CRC, runner).
+
+**Overlays.**
+- `ownverter_v1_1_0.overlay`: the calibration means above. I1–I3's ±7 A limits move from counts 600/3400 (about ±13 A real on v1.1 boards) to 1353/2825; 0 A is at 2089 counts.
+- `ownverter_v0_9_0`, `v1_0_0`: I3_LOW takes I1/I2's 0.005 / −10.
+
+**Allocator.** `safety_allocation.py` assumed counts rise with the value. A negative gain (v1.1 I_HIGH) would swap the bounds, give the comparator the wrong polarity and invert the watchdog window. A hardware-protected limit on a negative-gain sensor is now a build error; L0-ALC-16 checks it. No Ownverter limit is on I_HIGH. Supporting such sensors (swap the bounds, invert the comparator, from the gain's sign) is left for when a board needs it.
+
+L0-ALC campaign `2026-11-24_3fcff75-dirty_110036_BYrXdw`: all PASS, every shield builds; the committed protection tables are unchanged (they list paths, not counts).
+
+**Finding: the run-time flash CRC covered slot 1 and the NVS partition.** The first L0-TRP run on the new build (`..._110347_s94fnl`, repeated in `..._110852_npKpID`) failed every case with "self-test failed: flash CRC; clear: reboot".
+- The run-time self-test compares a CRC of `__rom_region_start..__rom_region_end` with the reference taken at boot. With MCUboot, `__rom_region_end` is the end of flash (0x08080000): 448 KB including slot 1 and the `storage` partition at 0x0807F000.
+- At the first data start after a reflash, NVS was written (178 bytes in `storage` afterwards; most likely NVS's first-use version record). The CRC no longer matched and the fault latched until reboot.
+- Proof: after a reset, a run without reflashing (`--no-flash`, diagnostic) armed and tripped normally, and the `storage` page did not change.
+- The same would happen on a board in the field after a calibration store, a metadata write or a DFU download to slot 1.
+- **Fix:** the CRC covers `_flash_used` bytes, the image (115 KB for SAFETY_SUP, 207 KB for SAFETY_L0_OWNVERTER). New criterion L0-STK-01.e checks `flash_bytes` against the ELF's `_flash_used`.
+- L0-SUP/STK campaign `..._111833_nNsPl0`: all PASS, including L0-STK-01.e (115 292 B) and the injected flash fault.
+- Not reproduced after the fix: the CUT's `storage` already held its NVS records. The size check shows the partition is out of the CRC.
+
+**Finding: the v1.1 V1–V3_LOW low limit (−10 V) is out of the sensor's range.** With the v1.1 scaling these sensors read from 0 V, so −10 V is −166 mV on the pin and can never trip. L0-TRP now reports a threshold outside 0..VREF as INFO instead of FAIL. Whether the limit should move (for example to 0 V or be dropped) is a decision for the shield's thresholds; a low voltage is a range check, not a hazard (ADR 0009).
+
+**L0-TRP re-runs, after the fix:**
+
+| Campaign | Result |
+|---|---|
+| Ownverter 1.1.0 (`2026-11-24_d18e8bd-dirty_112037_0QYueR`) | 13 PASS, 3 INFO (V1–V3_LOW low, out of range) |
+| Twist 1.4.2 (`..._112459_klI9bL`) | 14 PASS; the CUT is back on SAFETY_L0_TWIST |
+
+Ownverter trips with the new scaling, against the thresholds from the manifest (CUT VREF 2048 mV):
+
+| Path | Threshold | Trip |
+|---|---|---|
+| I1_LOW high, COMP3 → FLT5 | 1412.5 mV | −3 mV |
+| I1_LOW low, ADC2 AWD3 → FLT6 | 672.0 mV | +4 mV |
+| I2_LOW high, COMP1 → FLT4 | 1412.5 mV | −1 mV |
+| I2_LOW low, software | 676.7 mV | +4 mV |
+| I3_LOW high, COMP6 → FLT3 | 1412.5 mV | −1 mV |
+| I3_LOW low, ADC1 AWD1 → FLT1 | 676.2 mV | +6 mV |
+| V1–V3_LOW high, software | 1166.2 mV | +5 to +6 mV |
+| V_HIGH high, ADC1 AWD2 → FLT2 / low, software | 1672.0 / 166.9 mV | +3 / +4 mV |
+
+**Upstream (owntech-foundation/Core), waiting for Luiz's go:** the overlay fixes and the flash CRC fix join the bug PR list.
