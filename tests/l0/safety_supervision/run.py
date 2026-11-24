@@ -306,6 +306,12 @@ def main():
          f'{lo:.0f} to {hi:.0f} counts', f"{b['clock_counts']} counts (LSI {8 * f_tim / max(b['clock_counts'], 1) / 1000:.2f} kHz)")
     line('L0-STK-01.d', judge(1987 <= b['vref_mv'] <= 2109), 'VREF+ from VREFINT against the 2.048 V VREFBUF (±3 %)',
          '1987 to 2109 mV', f"{b['vref_mv']} mV (reading {b['vrefint']})")
+    # The flash CRC covers the image only: NVS, slot 1 and the MCUboot trailer change at run time (#28 finding)
+    used = next(int(l.split()[0], 16) for l in subprocess.run([NM, ELF], check=True, capture_output=True,
+                text=True).stdout.splitlines() if l.split()[-1] == '_flash_used')
+    line('L0-STK-01.e', judge(b['flash_bytes'] == used // 4 * 4),
+         'Flash CRC covers the image only, not slot 1 or the NVS storage partition',
+         f'{used // 4 * 4} B (_flash_used)', f"{b['flash_bytes']} B")
     rt = log.get('selftest_runtime', {})
     line('L0-STK-02.a', judge(rt.get('rt_cpu', 0) > 300 and rt.get('rt_flash_passes', 0) >= 1 and rt.get('rt_clock', 0) >= 3
                               and rt.get('rt_ram_passes', 0) >= 1),

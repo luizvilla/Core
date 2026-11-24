@@ -443,6 +443,14 @@ def main():
                 line(case_id(c), 'BLOCKED', what, f'trip within ±{TOL_MV:g} mV of the threshold', why)
                 results.append(dict(c, blocked=why))
                 continue
+            if not 0.0 <= c['threshold_mV'] <= b.vref:
+                # The limit lies outside the pin's range (counts clamped to 0 or full scale): the sensor can never
+                # read it, so there is nothing to trip. Reported, not judged (Ownverter v1.1 V1-V3_LOW at -10 V).
+                why = (f"threshold {c['threshold_mV']:.1f} mV is outside the pin's 0 to {b.vref:.0f} mV: the sensor "
+                       f"cannot read this limit, so it can never trip")
+                line(case_id(c), 'INFO', what, f'trip within ±{TOL_MV:g} mV of the threshold', why)
+                results.append(dict(c, verdict='INFO', blocked=why))
+                continue
             r = run_case(b, c)
             v, measured = verdict(r)
             r['verdict'] = v

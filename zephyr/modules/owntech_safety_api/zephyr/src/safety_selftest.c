@@ -53,7 +53,10 @@
 
 extern int safety_cpu_reg_test(void);
 extern char __rom_region_start[];
-extern char __rom_region_end[];
+/* Bytes of the image from __rom_region_start (Zephyr linker script). __rom_region_end is the end of the ROM
+ * region, which with MCUboot reaches past slot 0 into slot 1 and the NVS storage partition: both change at run
+ * time (a DFU download, a calibration store, NVS's first-use version record) and must not be in the CRC. */
+extern char _flash_used[];
 extern char _image_ram_start[];
 extern char _image_ram_end[];
 
@@ -325,7 +328,7 @@ static int safety_selftest_boot(void)
 	g_safety_selftest.boot_ram_bytes = bytes;
 
 	c0 = DWT->CYCCNT;
-	size_t words = (size_t)(__rom_region_end - __rom_region_start) / 4U;
+	size_t words = (size_t)_flash_used / 4U;
 	g_safety_selftest.flash_reference = crc_feed(0xFFFFFFFFU, (const uint32_t *)__rom_region_start, words);
 	g_safety_selftest.flash_bytes = words * 4U;
 	g_safety_selftest.boot_us[2] = us_since(c0);
