@@ -603,6 +603,7 @@ Ownverter trips with the new scaling, against the thresholds from the manifest (
 **Upstream (owntech-foundation/Core), waiting for Luiz's go:**
 - PRs: data dispatch buffer overflow, unattended-DMA aliasing, unchecked k_malloc in data_dispatch_init, frozen-sensor dispatch takeover, HRTIM up-down re-init; Ownverter I3_LOW scaling (all overlays); Ownverter v1.1.0 sensing values; run-time flash CRC over the image only; negative-gain allocator guard.
 - Issues: I_HIGH sign convention, overlay against production NVS calibration; limits on line voltages (V12, V23, V31) for AC faults on the software path.
+- Opened 2026-11-24: owntech-foundation/Core#171 (Ownverter overlays, branch `fix/ownverter-sensor-scaling` on luizvilla/Core), issues owntech-foundation/Core#169 (I_HIGH sign) and #170 (line-voltage limits). The flash CRC fix and the negative-gain guard touch code that is only on this branch: they go up with the Safety API.
 
 ### 2026-11-24, #28: decisions on I_HIGH's sign and the V1–V3_LOW low limit (Luiz Villa)
 
