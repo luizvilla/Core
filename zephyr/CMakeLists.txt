@@ -68,14 +68,15 @@ get_filename_component(PARENT_DIR ${CMAKE_CURRENT_SOURCE_DIR} DIRECTORY)
 # Application folder: src/ by default. A test environment may build another
 # folder instead by passing -DOWNTECH_APP_DIR=<path relative to the project>
 # in board_build.zephyr.cmake_extra_args (e.g. the safety test firmware).
+# Not APP_DIR: Zephyr 4.4 reads APP_DIR itself (kconfig.cmake) and resets it.
 if(DEFINED OWNTECH_APP_DIR)
-  set(APP_DIR ${PARENT_DIR}/${OWNTECH_APP_DIR})
+  set(OWNTECH_APP_PATH ${PARENT_DIR}/${OWNTECH_APP_DIR})
 else()
-  set(APP_DIR ${PARENT_DIR}/src)
+  set(OWNTECH_APP_PATH ${PARENT_DIR}/src)
 endif()
 
 # Looking for app.conf file
-FILELIST(EXTRA_APP_CONF_FILE ${APP_DIR} conf)
+FILELIST(EXTRA_APP_CONF_FILE ${OWNTECH_APP_PATH} conf)
 # Add app.conf path to zephyr variables
 set(EXTRA_CONF_FILE ${EXTRA_APP_CONF_FILE})
 
@@ -86,7 +87,7 @@ CONFLIB(EXTRA_LIB_CONF_FILE ${PARENT_DIR}/owntech/lib/${BUILD_ENV_NAME} conf)
 list(APPEND EXTRA_CONF_FILE ${EXTRA_LIB_CONF_FILE})
 
 # Looking for app.overlay file
-FILELIST(EXTRA_OVERLAY_APP_FILE ${APP_DIR} overlay)
+FILELIST(EXTRA_OVERLAY_APP_FILE ${OWNTECH_APP_PATH} overlay)
 # Add app.overlay path to zephyr variables
 set(EXTRA_DTC_OVERLAY_FILE ${EXTRA_OVERLAY_APP_FILE})
 # Design-time check (tools/safety_check.py): a draft shield overlay on top.
@@ -115,7 +116,6 @@ list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 # board_shield_version is concatenated to board_shield. 
 
 set(BOARD spin@1_2_0)
-set(SHIELD twist_v1_4_1)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "")
 # Configure Zephyr
@@ -126,9 +126,9 @@ project(owntech_power_api)
 # PlatformIO compiles the application sources itself (build_src_filter); the
 # app target below is used by plain west/CMake builds.
 if(DEFINED OWNTECH_APP_DIR)
-  FILE(GLOB OWNTECH_APP_SOURCES ${APP_DIR}/*.c ${APP_DIR}/*.cpp)
+  FILE(GLOB OWNTECH_APP_SOURCES ${OWNTECH_APP_PATH}/*.c ${OWNTECH_APP_PATH}/*.cpp)
   target_sources(app PRIVATE ${OWNTECH_APP_SOURCES})
-  zephyr_include_directories(${APP_DIR})
+  zephyr_include_directories(${OWNTECH_APP_PATH})
 else()
   target_sources(app PRIVATE ../src/main.cpp)
   zephyr_include_directories(../src)
