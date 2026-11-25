@@ -36,11 +36,11 @@ flowchart LR
   end
 
   subgraph Decide["Before the PR"]
-    N30["🔨 #30 Push safety-hw<br/>to GitHub"]:::open
+    N30["✓ #30 Push safety-hw<br/>to GitHub"]:::done
     N32["✓ 🔎 #32 Zephyr 4.4.2<br/>still holds?"]:::done
     N33["👤 #33 Timing: fix<br/>or declare?"]:::open
     N31["👤 #31 What goes into<br/>the PR"]:::open
-    N38["🔨 #38 Fault ISR:<br/>IRQ_DIRECT_CONNECT"]:::open
+    N38["✓ #38 Fault ISR:<br/>IRQ_DIRECT_CONNECT"]:::done
     FT["timing fixes<br/>(if any)"]:::fog
     FC["companion PRs<br/>order"]:::fog
   end
