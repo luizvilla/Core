@@ -325,3 +325,9 @@ Step 1.4 fixes behind these numbers: no kernel feeder timer while the control ta
 
 The final campaign is `2026-11-23_ff4df40-dirty_150533_7bVcN7`; its results are in `docs/safety/spoc_bench.md`. Open: the Ownverter I3_LOW calibration (#28) and the L0-TOV task-start jitter (#27). L1 and L2 follow.
 
+
+**2026-11-25, Zephyr 4.3 and later (luizvilla/Core#32, #38).** The Safety API was checked against Zephyr 4.4.2 (owntech-foundation/Core#160; findings on branch `research/zephyr-4.4.2-safety`, `docs/safety/zephyr_4_4_2.md`). Two points changed the code, both building on today's 4.0.0:
+- Zephyr 4.3 refuses a zero-latency interrupt registered with `IRQ_CONNECT()` (build check in `include/zephyr/arch/arm/irq.h`). The HRTIM fault interrupt is now a direct ISR (`ISR_DIRECT_DECLARE`, `IRQ_DIRECT_CONNECT`). It returns 0: a zero-latency interrupt never asks the kernel to reschedule.
+- Zephyr 4.4's `CONFIG_USE_SWITCH` raises a planned `udf` fault through `z_arm_fault()` on normal context switches. The `--wrap` of `z_arm_fault` runs first and would stop the PWM on every switch, so a `BUILD_ASSERT` keeps `CONFIG_USE_SWITCH` off.
+
+Checked on a bare Spin: L0-CMP/AWD/SST 40 PASS, 2 INFO (`2026-11-25_2297259-dirty_175935_Ccmn55`); L0-SUP/STK all PASS, 3 INFO (`2026-11-25_2297259-dirty_180114_vjb4ws`). The control task's TIM6/7 zero-latency interrupt still uses `irq_connect_dynamic()`, which has no such build check; it stays open on the upstream-PR map (#29).

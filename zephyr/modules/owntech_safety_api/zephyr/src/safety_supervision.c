@@ -597,7 +597,14 @@ bool hrtim_safety_output_enable_allowed(void)
  * guard, usage fault...), z_fatal_error() for k_panic(), k_oops() and failed
  * asserts. Any CPU fault therefore stops the PWM, including the ones Zephyr
  * could recover from (userspace and debug-monitor faults, unused by OwnTech).
+ *
+ * With CONFIG_USE_SWITCH (Zephyr 4.4 and later) a normal context switch raises
+ * a planned `udf` fault through z_arm_fault(); this wrapper runs before Zephyr
+ * recognises it and would stop the PWM on every switch (luizvilla/Core#38).
  */
+BUILD_ASSERT(!IS_ENABLED(CONFIG_USE_SWITCH),
+	     "Safety API: CONFIG_USE_SWITCH routes context switches through z_arm_fault(), "
+	     "which the Safety API wraps to stop the PWM. Keep CONFIG_USE_SWITCH=n (ADR 0009).");
 void __real_z_arm_fault(uint32_t msp, uint32_t psp, uint32_t exc_return,
 			_callee_saved_t *callee_regs);
 void __real_z_fatal_error(unsigned int reason, const struct arch_esf *esf);

@@ -536,10 +536,11 @@ int safety_trips_watchdog_state(int index)
 
 /* Fault interrupt: the hardware already turned the outputs off; this records
  * the trip so it stays latched across a reset (ADR 0009). Register-only, so it
- * can run at zero latency. */
-static void hrtim_fault_isr(const void *arg)
+ * can run at zero latency. A direct ISR: Zephyr 4.3 and later refuse a
+ * zero-latency interrupt through IRQ_CONNECT (luizvilla/Core#38). It returns 0:
+ * a zero-latency interrupt must never ask the kernel to reschedule. */
+ISR_DIRECT_DECLARE(hrtim_fault_isr)
 {
-	ARG_UNUSED(arg);
 	uint32_t hw = HRTIM1->sCommonRegs.ISR & flt_to_hw(0x3FU);   /* FLT1..FLT6 */
 	uint32_t flags = flt_from_hw(hw);
 
@@ -553,6 +554,7 @@ static void hrtim_fault_isr(const void *arg)
 		safety_outputs_safe();
 		safety_supervision_latch(SAFETY_FAULT_TRIP, flags);
 	}
+	return 0;
 }
 
 int safety_trips_arm(void)
@@ -664,7 +666,7 @@ int safety_trips_arm(void)
 	HRTIM1->sCommonRegs.ICR = flt_to_hw(mask);
 	HRTIM1->sCommonRegs.IER |= flt_to_hw(mask);
 	printk("safety: armed %s · self-test OK\n", len ? text : "(no hardware trip)");
-	IRQ_CONNECT(HRTIM1_FLT_IRQn, 0, hrtim_fault_isr, NULL, IRQ_ZERO_LATENCY);
+	IRQ_DIRECT_CONNECT(HRTIM1_FLT_IRQn, 0, hrtim_fault_isr, IRQ_ZERO_LATENCY);
 	irq_enable(HRTIM1_FLT_IRQn);
 	armed_flt_mask = mask;
 	armed = true;
