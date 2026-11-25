@@ -41,6 +41,7 @@ flowchart LR
     N33["👤 #33 Timing: fix<br/>or declare?"]:::open
     N31["👤 #31 What goes into<br/>the PR"]:::open
     N38["✓ #38 Fault ISR:<br/>IRQ_DIRECT_CONNECT"]:::done
+    N39["✓ #39 L0 on<br/>Zephyr 4.4.2"]:::done
     FT["timing fixes<br/>(if any)"]:::fog
     FC["companion PRs<br/>order"]:::fog
   end
@@ -64,6 +65,7 @@ flowchart LR
   N27 --> N33
   N32 --> N31
   N32 --> N38 --> N34
+  N38 --> N39 --> N31
   N31 --> N34
   N33 --> N34
   N33 -.-> FT -.-> N34
