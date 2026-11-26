@@ -765,6 +765,17 @@ void PowerAPI::setTriggerValue(leg_t leg, float32_t trigger_value)
     }
 }
 
+void PowerAPI::setPhaseShiftDeg(leg_t leg, float phase_shift_deg)
+{
+    int8_t startIndex = (leg == ALL) ? 0 : leg;
+    int8_t endIndex = (leg == ALL) ? dt_leg_count : leg + 1;
+
+    for (int8_t i = startIndex; i < endIndex; i++)
+    {
+        spin.pwm.setPhaseShiftDeg(spinNumberToTu(dt_pwm_pin[i]), phase_shift_deg);
+    }
+}
+
 void PowerAPI::setPhaseShift(leg_t leg, int16_t phase_shift)
 {
     int8_t startIndex = 0;

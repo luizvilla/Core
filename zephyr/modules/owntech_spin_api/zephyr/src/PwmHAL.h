@@ -210,6 +210,16 @@ public:
      void setPhaseShift(hrtim_tu_number_t pwmX, int16_t shift);
 
      /**
+      * @brief Same as setPhaseShift(), with a fractional phase shift in degrees.
+      *        The shift is rounded to the nearest timer tick instead of being
+      *        truncated to a whole degree (1 degree = 278 ns at 10 kHz).
+      *
+      * @param[in] pwmX  PWM Unit: `PWMA`,`PWMB`,`PWMC`,`PWMD`,`PWME`,`PWMF`
+      * @param[in] shift_deg phase shift in degrees (wrapped into [0, 360))
+      */
+     void setPhaseShiftDeg(hrtim_tu_number_t pwmX, float shift_deg);
+
+     /**
       * @brief This function sets a special pwm mode for voltage or current mode
       *
       * @param[in] pwmX  PWM Unit: `PWMA`,`PWMB`,`PWMC`,`PWMD`,`PWME`,`PWMF`

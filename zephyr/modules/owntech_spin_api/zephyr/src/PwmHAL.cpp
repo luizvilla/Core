@@ -30,6 +30,7 @@
 #include "PwmHAL.h"
 /* PWM management layer by inverter leg interface */
 #include "hrtim.h"
+#include <math.h>
 
 void PwmHAL::initUnit(hrtim_tu_number_t pwmX)
 {
@@ -272,6 +273,28 @@ void PwmHAL::setPhaseShift(hrtim_tu_number_t pwmX, int16_t shift)
 	}
 	uint16_t phase_shift_int = (period * phase_shift_degree) / 360;
 	hrtim_phase_shift_set(pwmX, phase_shift_int);
+}
+
+void PwmHAL::setPhaseShiftDeg(hrtim_tu_number_t pwmX, float shift_deg)
+{
+	float deg = fmodf(shift_deg, 360.0f);
+	if (deg < 0.0f)
+		deg += 360.0f;
+	uint32_t period;
+	if (pwmX != PWMB)
+	{
+		period = hrtim_period_get(pwmX);
+		if (hrtim_get_modulation(pwmX) == UpDwn)
+			period = 2 * period;
+	}
+	else
+	{
+		period = hrtim_period_get(PWMA);
+	}
+	uint32_t ticks = (uint32_t)((float)period * deg / 360.0f + 0.5f);
+	if (ticks >= period)
+		ticks = 0;
+	hrtim_phase_shift_set(pwmX, (uint16_t)ticks);
 }
 
 hrtim_cnt_t PwmHAL::getModulation(hrtim_tu_number_t pwmX) {

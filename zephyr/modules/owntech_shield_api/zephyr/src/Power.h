@@ -263,6 +263,15 @@ public:
 	void setPhaseShift(leg_t leg, int16_t phase_shift);
 
 	/**
+	 * @brief Same as setPhaseShift(), with a fractional phase shift in degrees,
+	 *        rounded to the nearest timer tick.
+	 *
+	 * @param leg The leg: `LEG1` to `ALL`
+	 * @param phase_shift_deg phase shift in degrees (wrapped into [0, 360))
+	 */
+	void setPhaseShiftDeg(leg_t leg, float phase_shift_deg);
+
+	/**
 	 * @brief Set the slope compensation in current mode for a leg
 	 *
 	 * @param leg The leg to initialize: `LEG1` to `ALL`
