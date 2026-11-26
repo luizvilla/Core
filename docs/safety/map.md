@@ -2,7 +2,7 @@
 
 Copy of the visual map on [Map: Safety API as an upstream PR](https://github.com/luizvilla/Core/issues/29), the canonical one. Redrawn whenever a ticket opens, closes, is claimed or goes stale.
 
-**Destination:** the Safety API of ADR 0009 merged into `owntech-foundation/Core` as a pull request, L0-verified on the SPOC bench for Twist and Ownverter.
+**Destination:** the Safety API of ADR 0009 and its safety tests merged into `owntech-foundation/Core-staging` as one pull request, passing staging's SPOC CI and L0-verified on Twist and Ownverter (redrawn on 2026-11-26 by [What goes into the Safety API PR](https://github.com/luizvilla/Core/issues/31)).
 
 ```mermaid
 flowchart LR
@@ -15,7 +15,7 @@ flowchart LR
   classDef out fill:#fff,stroke:#adb5bd,color:#868e96,stroke-dasharray:2 2
   classDef dest fill:#343a40,stroke:#000,color:#fff,font-weight:bold
 
-  DEST(["🎯 Safety API merged into<br/>owntech-foundation/Core"]):::dest
+  DEST(["🎯 Safety API merged into<br/>Core-staging, SPOC CI green"]):::dest
 
   subgraph Built["Built and L0-verified on safety-hw"]
     N16["✓ #16 CPU supervision"]:::done
@@ -39,13 +39,18 @@ flowchart LR
     N30["✓ #30 Push safety-hw<br/>to GitHub"]:::done
     N32["✓ 🔎 #32 Zephyr 4.4.2<br/>still holds?"]:::done
     N33["✓ #33 Timing: declared,<br/>no fix"]:::done
-    N31["👤 #31 What goes into<br/>the PR"]:::open
+    N31["✓ #31 One PR on<br/>Core-staging, tests in"]:::done
     N38["✓ #38 Fault ISR:<br/>IRQ_DIRECT_CONNECT"]:::done
     N39["✓ #39 L0 on<br/>Zephyr 4.4.2"]:::done
-    FC["companion PRs<br/>order"]:::fog
   end
 
-  subgraph PR["The PR"]
+  subgraph Comp["Companion PRs on Core-staging (land first)"]
+    N40["🔨👤 #40 Ownverter scaling<br/>(Core#171)"]:::open
+    N41["🔨👤 #41 HRTIM up-down<br/>re-init (Core#172)"]:::open
+    N42["🔨👤 #42 TIM6/7<br/>reconnect fix"]:::open
+  end
+
+  subgraph PR["The Safety API PR on Core-staging (lands last)"]
     N34["🔨 #34 Cut the PR branch"]:::blocked
     N35["🔨👤 #35 L0 campaign<br/>on the PR branch"]:::blocked
     N36["🔨👤 #36 Open the PR"]:::blocked
@@ -56,7 +61,8 @@ flowchart LR
   subgraph Out["Out of scope"]
     N24["#24 L1 switched model"]:::out
     N25["#25 L2 powered tests"]:::out
-    OTI["test infra upstream<br/>(code/Core)"]:::out
+    OST["staging → Core<br/>promotion"]:::out
+    OIRQ["TIM6/7<br/>irq_connect_dynamic"]:::out
     OS1["S1 old software check<br/>speed-up"]:::out
   end
 
@@ -66,9 +72,11 @@ flowchart LR
   N32 --> N31
   N32 --> N38 --> N34
   N38 --> N39 --> N31
+  N28 --> N40
+  N31 --> N40 & N41 & N42
+  N40 & N41 & N42 --> N34
   N31 --> N34
   N33 --> N34
-  N31 -.-> FC -.-> N36
   N34 --> N35 --> N36
   N30 --> N36
   N36 --> N37 --> DEST
