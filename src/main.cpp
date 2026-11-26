@@ -60,6 +60,19 @@ static void update_leg_duty(power_leg_t &leg, leg_t hardware_leg, Pid &pid)
     if (leg.buck || leg.boost) {
         duty = pid.calculateWithReturn(leg.reference_value, *leg.tracking_var);
     }
+    else if (dead_time_comp) {
+        /* Bench dead-time duty compensation (Config/wDeadTimeComp, decision
+         * 2026-11-26): D_comp = D - td * f / 2, td the mean of the leg's rising
+         * and falling dead times, f the live switching frequency. Recomputed
+         * every period, so it follows frequency, dead-time and duty writes.
+         * At 100 kHz and 300 ns it gives the 0.485 used by hand before. */
+        const float td_s = 0.5e-9f * ((float)leg.dead_time_rising_ns +
+                                      (float)leg.dead_time_falling_ns);
+        duty -= 0.5f * td_s * (float)switching_frequency_hz;
+        if (duty < 0.0f) {
+            duty = 0.0f;
+        }
+    }
     if (leg.boost) {
         duty = 1.0f - duty;
     }
