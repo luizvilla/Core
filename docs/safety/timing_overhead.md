@@ -35,6 +35,13 @@ IEC 60730-1 Annex H sets no number for this, but the self-tests must not impair 
   - safety cost per control period ≤ **5 µs**, fixed at every rate (it replaces 5 % of the period: 2.5 µs at 50 µs was out of reach);
   - S1, the old software check on six sensors (about 10.5 µs per period), is **information only** for L0-TOV-01, -03 and -05. Speeding that check up is left for a later session;
   - the other limits stay provisional: interrupts off ≤ 2 µs, jitter ≤ +2 µs and CPU ≤ +5 points against B0.
+- **2026-11-26, final limits: declare and ship, no timing fix before the PR** (Luiz Villa, luizvilla/Core#33):
+  - **CPU against B0 (L0-TOV-05) is information only.** The cost per period (≤ 5 µs, L0-TOV-01) is already 10 points of CPU at 50 µs, so a "+5 points" limit contradicted a limit the API passes. The +6.9 points at 50 µs are declared.
+  - **Jitter against B0 (L0-TOV-03) is information only; its bound is the interrupts-off window (L0-TOV-02, ≤ 2 µs).** The control task is a zero-latency interrupt: the only Safety API code that can delay it is the RAM self-test block, which turns every interrupt off (1.88 µs), and the fault interrupt, which runs only on a fault. `irq_lock()` does not mask it. A difference of two worst cases over 4 s swings by 2–3 µs from run to run of the same build. The +3.9 µs (50 µs) and +2.46 µs (100 µs) are declared as measured.
+  - **The RAM self-test block stays at 4 words** (1.88 µs, within 2 µs). Two words would lengthen the self-test slice and would not reliably shrink a noisy worst case.
+  - **Read-back detection time: N control periods is final** (N = armed trip paths, 6 on Twist, 300 µs at 50 µs). A threshold changed behind the API is a register fault, which matters only with a second fault inside that window; Class B run-time tests usually detect such faults in milliseconds or more.
+  - **The old software check on six sensors (S1, about 10.5 µs per period) is declared as is.** It is opt-in, and the hardware paths watch the same sensors at no CPU cost. Its speed-up is out of scope for the Safety API PR.
+  - The declared figures in the PR come from the L0 campaign on the PR branch (luizvilla/Core#35), judged on these limits.
 
 ## Step 1: the Safety API alone (branch `safety-hw`)
 
@@ -228,7 +235,9 @@ C10 added to the read-back the watchdogs' event routing (EECR1/2), the AWD1 chan
 - An experiment build without the heartbeat thread (results in the scratchpad, not a campaign) gave CPU 36.0 % and jitter 7.38 µs: the 1 ms thread cost about 3 points and 3 µs. It was replaced by a stamp from the run-time self-test work.
 - The remaining jitter excess at 100 µs (+2.46 µs) is about the 1.88 µs all-interrupts-off RAM self-test block plus interrupt entry. Whether it lands on the control interrupt within the 4 s window depends on the phase between the 10 ms work and the task: worst-case figures of the same kind swung by 2–3 µs between today's runs (S0 at 50 µs: 13.25, 12.86, 10.39, 10.09 µs). Joins the open item below.
 
-### Open items (to investigate later)
+### Open items
+
+Settled on 2026-11-26 (luizvilla/Core#33, see "Decisions"): every item below is declared, none is fixed before the PR. Kept for the record.
 
 - **Read-back detection time (1.4e, `a2d1ce9`).** A threshold changed behind the API is now caught within N control periods instead of 1 (N = armed trip paths: 6 on Twist, 300 µs at 50 µs). To decide whether N periods is acceptable as the declared detection time, or whether the read-back needs another scheme (for example all paths in one period at a lower rate, or a cheaper register read). Until then the declared value is N periods.
 - **Old software check on six sensors (S1):** 10.5 µs per period; speed-up planned for a later session.

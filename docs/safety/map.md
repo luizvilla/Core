@@ -38,11 +38,10 @@ flowchart LR
   subgraph Decide["Before the PR"]
     N30["✓ #30 Push safety-hw<br/>to GitHub"]:::done
     N32["✓ 🔎 #32 Zephyr 4.4.2<br/>still holds?"]:::done
-    N33["👤 #33 Timing: fix<br/>or declare?"]:::open
+    N33["✓ #33 Timing: declared,<br/>no fix"]:::done
     N31["👤 #31 What goes into<br/>the PR"]:::open
     N38["✓ #38 Fault ISR:<br/>IRQ_DIRECT_CONNECT"]:::done
     N39["✓ #39 L0 on<br/>Zephyr 4.4.2"]:::done
-    FT["timing fixes<br/>(if any)"]:::fog
     FC["companion PRs<br/>order"]:::fog
   end
 
@@ -58,6 +57,7 @@ flowchart LR
     N24["#24 L1 switched model"]:::out
     N25["#25 L2 powered tests"]:::out
     OTI["test infra upstream<br/>(code/Core)"]:::out
+    OS1["S1 old software check<br/>speed-up"]:::out
   end
 
   N16 & N17 & N18 & N19 & N20 & N21 & N22 --> N31
@@ -68,7 +68,6 @@ flowchart LR
   N38 --> N39 --> N31
   N31 --> N34
   N33 --> N34
-  N33 -.-> FT -.-> N34
   N31 -.-> FC -.-> N36
   N34 --> N35 --> N36
   N30 --> N36

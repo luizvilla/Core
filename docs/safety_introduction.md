@@ -30,8 +30,9 @@ Measured on a bare Spin at 170 MHz (L0-TOV, [timing_overhead.md](safety/timing_o
 
 - **at most 5 µs per control period**, whatever the period (4.65 µs worst case, 4.5 µs on average): plausibility checks, threshold read-back, watchdog feed;
 - **interrupts off for at most 2 µs** at a time (one RAM self-test block, 1.88 µs);
-- against Core without the Safety API: about +7 points of CPU load and +4 µs of task-start jitter with a 50 µs task; nothing measurable with a 100 µs task;
+- against Core without the Safety API: about +7 points of CPU load and +4 µs of task-start jitter with a 50 µs task; nothing measurable with a 100 µs task. The CPU load is the cost per period over the period. The jitter the Safety API can add is bounded by its interrupts-off window: your control task runs at zero latency, and nothing else in the Safety API masks it;
 - a run-time self-test slice every 10 ms in the system work queue (up to about 0.6 ms, outside the control task);
+- a threshold changed behind the API (a register fault) is detected within N control periods, N being the number of armed trip paths (6 on Twist);
 - the first PWM output enable arms the protection: about 1.5 ms, once.
 
 The old software check (`safety.setChannelWatch()`) adds about 10 µs per period when it watches the six Twist sensors. Watch only the sensors that need it.

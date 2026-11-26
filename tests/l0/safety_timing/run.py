@@ -39,11 +39,12 @@ BUILDS = [('B0', 'TOV_BEFORE', SCEN), ('B1', 'SAFETY_TIME', SCEN + [('REACT', 5)
           ('B1p', 'SAFETY_TIME_PROBE', SCEN), ('B2', 'SAFETY_TIME_DEV', SCEN + [('REACT', 5)])]
 BLOCKS = ['software check', 'dispatch', 'user task', 'read-back', 'plausibility', 'feed']
 SAFETY_BLOCKS = [0, 3, 4, 5]
-# Provisional limits (docs/safety/timing_overhead.md, "measure first"), to be confirmed with the numbers.
+# Limits (docs/safety/timing_overhead.md, decisions of 2026-11-15 and 2026-11-26, luizvilla/Core#33).
 OVERHEAD_US = 5.0          # safety code per period, fixed (Luiz Villa, 2026-11-15)
-IRQ_OFF_US = 2.0           # longest interrupts-off window caused by the Safety API
-JITTER_EXTRA_US = 2.0      # worst task-start deviation, B1 beyond B0
-LOAD_EXTRA = 0.05          # CPU taken from the main thread, B1 beyond B0 (share of the CPU)
+IRQ_OFF_US = 2.0           # longest interrupts-off window caused by the Safety API: the bound on its jitter
+# L0-TOV-03 (jitter) and L0-TOV-05 (CPU) against B0 are information only since 2026-11-26: the CPU load is the cost
+# per period over the period (L0-TOV-01), and the only Safety API code that can delay the zero-latency control task
+# is its interrupts-off window (L0-TOV-02). A difference of two worst cases over 4 s swings by 2-3 us run to run.
 REACT_PERIODS = 7          # software trip: 5 periods declared, +1 in progress, +1 margin
 # S1 (old software check on six sensors) is information only until that check is sped up (2026-11-15).
 INFO_SCEN = ('S1_50', 'S1_100')
@@ -167,15 +168,15 @@ def main():
             L(f'L0-TOV-03.{cname}', 'FAIL', f'{cname}: task-start jitter, after against before', 'both builds ran',
               f'B0 {get("B0", cname, "error")}, B1 {get("B1", cname, "error")}')
         else:
-            L(f'L0-TOV-03.{cname}', 'INFO' if cname in INFO_SCEN else J(j1 - j0 <= JITTER_EXTRA_US),
+            L(f'L0-TOV-03.{cname}', 'INFO',
               f'{cname}: worst task-start deviation from the period, B1 beyond B0 (B2 for reference)',
-              f'<= {JITTER_EXTRA_US:.2f} us more than B0',
+              f'information (bound: L0-TOV-02); B1 - B0 = {j1 - j0:+.2f} us',
               f'B0 {j0:.2f} us, B1 {j1:.2f} us, B2 {j2:.2f} us' if j2 is not None else f'B0 {j0:.2f} us, B1 {j1:.2f} us')
         l0, l1, l2 = (get(b, cname, 'load') for b in ('B0', 'B1', 'B2'))
         if l0 is not None and l1 is not None:
-            L(f'L0-TOV-05.{cname}', 'INFO' if cname in INFO_SCEN else J(l1 - l0 <= LOAD_EXTRA),
+            L(f'L0-TOV-05.{cname}', 'INFO',
               f'{cname}: CPU taken from the main thread (interrupts and work queue), B1 beyond B0 (B2 for reference)',
-              f'<= {LOAD_EXTRA:.0%} more than B0',
+              f'information (follows from L0-TOV-01); B1 - B0 = {(l1 - l0) * 100:+.1f} points',
               f'B0 {l0:.1%}, B1 {l1:.1%}, B2 {l2:.1%}' if l2 is not None else f'B0 {l0:.1%}, B1 {l1:.1%}')
         bad = []
         for b in ('B0', 'B1', 'B2'):
@@ -231,9 +232,8 @@ def main():
                        'the HRTIM, 10 us busy load, data dispatch, PWM A, C, D, E, F at 200 kHz; 4 s per scenario'],
          ['Measures', 'DWT cycles: gap between task starts, cycles left to a main-thread loop, probes between the '
                       'blocks of the control interrupt (B1p only), interrupts-off window of the RAM self-test block'],
-         ['Limits', 'safety per period <= 5 us at every rate; provisional: interrupts off <= 2 us, '
-                    'jitter <= +2 us and CPU <= +5 % against B0; S1 cases information only until the old '
-                    'software check is sped up'],
+         ['Limits', 'safety per period <= 5 us at every rate; interrupts off <= 2 us; jitter and CPU against B0 '
+                    'information only (2026-11-26, #33); S1 cases information only (old software check declared)'],
          ['Flash', '4 wait states in every build (RM0440 Table 9; Zephyr\'s clock driver sets 8): safety-hw carries '
                    'the perf(spin) fix, B0 gets the same patch (flash_ws4.patch)']],
         'B0 + SAFETY_TIME + SAFETY_TIME_PROBE + SAFETY_TIME_DEV', 'supervision')

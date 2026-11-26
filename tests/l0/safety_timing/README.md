@@ -50,10 +50,10 @@ The current pins never change, so `CONFIG_OWNTECH_SAFETY_FROZEN_PERIODS` is 1000
 - `timing_tov.json`, every number and histogram;
 - the build logs and the test-case files for the review page.
 
-The limits are provisional ("measure first"):
-- safety code per period ≤ 5 % of the period;
-- interrupts off ≤ 2 µs;
-- jitter ≤ +2 µs against B0;
-- CPU ≤ +5 % against B0.
+Limits (`docs/safety/timing_overhead.md`, decisions of 2026-11-15 and 2026-11-26):
+- safety code per period ≤ 5 µs at every rate (L0-TOV-01);
+- interrupts off ≤ 2 µs (L0-TOV-02): the bound on the jitter the Safety API can add to the zero-latency control task;
+- jitter (L0-TOV-03) and CPU (L0-TOV-05) against B0: information only. The CPU follows from L0-TOV-01; a difference of two worst cases over 4 s swings by 2–3 µs from run to run;
+- S1 (old software check on six sensors): information only, declared at about 10 µs per period.
 
 Afterwards the board holds the `SAFETY_TIME_DEV` firmware: flash env USB before a bench session.
