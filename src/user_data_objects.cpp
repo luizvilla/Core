@@ -42,11 +42,14 @@ calibration_channel_t calibration_channels[CALIBRATION_CHANNEL_COUNT] = {
     { "IH", &I_high_value, I_HIGH, 1.0f, 0.0f, false },
 };
 
+bool dead_time_comp = false;
+volatile bool bench_trigger_request = false;
+
 power_leg_t power_legs[POWER_LEG_COUNT] = {
     { false, false, false, false, 0.1f, 0.0f, &V1_low_value, "V1",
-      false, false, 0, 100, 100, 0.0f, 0.0f },
+      false, false, 0, 100, 100, 0.0f, 0.0f, 0.0f },
     { false, false, false, false, 0.1f, 0.0f, &V2_low_value, "V2",
-      false, false, 0, 100, 100, 0.0f, 0.0f },
+      false, false, 0, 100, 100, 0.0f, 0.0f, 0.0f },
 };
 
 converter_metadata_t converter_metadata = {
@@ -128,6 +131,8 @@ THINGSET_ADD_ITEM_UINT8(ID_CONFIG, ID_CONFIG_MODE, "Mode", &mode,
                         THINGSET_ANY_RW, SUBSET_SER);
 THINGSET_ADD_ITEM_UINT32(ID_CONFIG, ID_CONFIG_FREQ, "Frequency_Hz",
                          &switching_frequency_hz, THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_BOOL(ID_CONFIG, ID_CONFIG_DT_COMP, "wDeadTimeComp",
+                       &dead_time_comp, THINGSET_ANY_RW, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG1, "Leg1", &conf_leg_cb_0);
 THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG1, ID_CONFIG_LEG1_ENABLE, "wEnable",
@@ -155,6 +160,8 @@ THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG1, ID_CONFIG_LEG1_DT_RISE,
 THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG1, ID_CONFIG_LEG1_DT_FALL,
                          "wDeadTimeFalling_ns", &power_legs[0].dead_time_falling_ns,
                          THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG1, ID_CONFIG_LEG1_PHASE_DEG, "wPhaseShift_deg",
+                        &power_legs[0].phase_shift_deg, 3, THINGSET_ANY_RW, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_CONFIG, ID_CONFIG_LEG2, "Leg2", &conf_leg_cb_1);
 THINGSET_ADD_ITEM_BOOL(ID_CONFIG_LEG2, ID_CONFIG_LEG2_ENABLE, "wEnable",
@@ -182,6 +189,8 @@ THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DT_RISE,
 THINGSET_ADD_ITEM_UINT16(ID_CONFIG_LEG2, ID_CONFIG_LEG2_DT_FALL,
                          "wDeadTimeFalling_ns", &power_legs[1].dead_time_falling_ns,
                          THINGSET_ANY_RW, SUBSET_SER);
+THINGSET_ADD_ITEM_FLOAT(ID_CONFIG_LEG2, ID_CONFIG_LEG2_PHASE_DEG, "wPhaseShift_deg",
+                        &power_legs[1].phase_shift_deg, 3, THINGSET_ANY_RW, SUBSET_SER);
 
 THINGSET_ADD_GROUP(ID_ROOT, ID_CALIBRATION, "Calibration", THINGSET_NO_CALLBACK);
 

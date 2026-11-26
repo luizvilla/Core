@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "ShieldAPI.h"
+#include <math.h>
 #include "SpinAPI.h"
 
 /* converter_metadata's serial_number is a null-terminated mirror of
@@ -248,6 +249,7 @@ typedef struct
     bool capacitor;
     bool driver;
     int16_t phase_shift;
+    float phase_shift_deg;
     uint16_t dead_time_rising_ns;
     uint16_t dead_time_falling_ns;
 } leg_shadow_t;
@@ -266,6 +268,7 @@ static void conf_leg_cb(enum thingset_callback_reason reason, uint8_t leg_index)
             previous.capacitor = leg.capacitor;
             previous.driver = leg.driver;
             previous.phase_shift = leg.phase_shift;
+            previous.phase_shift_deg = leg.phase_shift_deg;
             previous.dead_time_rising_ns = leg.dead_time_rising_ns;
             previous.dead_time_falling_ns = leg.dead_time_falling_ns;
             break;
@@ -275,6 +278,9 @@ static void conf_leg_cb(enum thingset_callback_reason reason, uint8_t leg_index)
 
             if (leg.duty_cycle < 0.0f || leg.duty_cycle > 1.0f) {
                 leg.duty_cycle = previous.duty_cycle;
+            }
+            if (leg_index == 1 && leg.duty_cycle != previous.duty_cycle) {
+                bench_trigger_request = true;
             }
 
             if (leg.capacitor != previous.capacitor) {
@@ -295,19 +301,46 @@ static void conf_leg_cb(enum thingset_callback_reason reason, uint8_t leg_index)
                 }
             }
 
+            /* Bench: phase in [0, 360] degrees, whole (wPhaseShift) or fractional
+             * (wPhaseShift_deg); the last one written wins and both read back the
+             * applied value. */
             if (leg.phase_shift != previous.phase_shift) {
-                if (leg.phase_shift < -360 || leg.phase_shift > 360) {
+                if (leg.phase_shift < (int16_t)BENCH_PHASE_MIN_DEG ||
+                    leg.phase_shift > (int16_t)BENCH_PHASE_MAX_DEG) {
                     leg.phase_shift = previous.phase_shift;
                 }
                 else {
-                    shield.power.setPhaseShift(hardware_leg, leg.phase_shift);
+                    leg.phase_shift_deg = (float)leg.phase_shift;
+                }
+            }
+            if (leg.phase_shift_deg != previous.phase_shift_deg) {
+                if (!(leg.phase_shift_deg >= BENCH_PHASE_MIN_DEG &&
+                      leg.phase_shift_deg <= BENCH_PHASE_MAX_DEG)) {
+                    leg.phase_shift_deg = previous.phase_shift_deg;
+                    leg.phase_shift = previous.phase_shift;
+                }
+                else {
+                    shield.power.setPhaseShiftDeg(hardware_leg, leg.phase_shift_deg);
+                    leg.phase_shift = (int16_t)lroundf(leg.phase_shift_deg);
+                    if (leg_index == 1) {
+                        bench_trigger_request = true;
+                    }
                 }
             }
 
             if (leg.dead_time_rising_ns != previous.dead_time_rising_ns ||
                 leg.dead_time_falling_ns != previous.dead_time_falling_ns) {
-                shield.power.setDeadTime(hardware_leg, leg.dead_time_rising_ns,
-                                         leg.dead_time_falling_ns);
+                if (leg.dead_time_rising_ns < BENCH_DEAD_TIME_MIN_NS ||
+                    leg.dead_time_rising_ns > BENCH_DEAD_TIME_MAX_NS ||
+                    leg.dead_time_falling_ns < BENCH_DEAD_TIME_MIN_NS ||
+                    leg.dead_time_falling_ns > BENCH_DEAD_TIME_MAX_NS) {
+                    leg.dead_time_rising_ns = previous.dead_time_rising_ns;
+                    leg.dead_time_falling_ns = previous.dead_time_falling_ns;
+                }
+                else {
+                    shield.power.setDeadTime(hardware_leg, leg.dead_time_rising_ns,
+                                             leg.dead_time_falling_ns);
+                }
             }
 
             if (strncmp(leg.tracking_name, previous.tracking_name,

@@ -33,6 +33,7 @@
 #define ID_CONFIG_BLINK_PERIOD 0x60
 #define ID_CONFIG_MODE         0x61
 #define ID_CONFIG_FREQ         0x62
+#define ID_CONFIG_DT_COMP      0x63
 #define ID_CONFIG_LEG1         0x70
 #define ID_CONFIG_LEG1_ENABLE  0x701
 #define ID_CONFIG_LEG1_BUCK    0x702
@@ -45,6 +46,7 @@
 #define ID_CONFIG_LEG1_PHASE   0x709
 #define ID_CONFIG_LEG1_DT_RISE 0x70A
 #define ID_CONFIG_LEG1_DT_FALL 0x70B
+#define ID_CONFIG_LEG1_PHASE_DEG 0x70C
 #define ID_CONFIG_LEG2         0x80
 #define ID_CONFIG_LEG2_ENABLE  0x801
 #define ID_CONFIG_LEG2_BUCK    0x802
@@ -57,6 +59,7 @@
 #define ID_CONFIG_LEG2_PHASE   0x809
 #define ID_CONFIG_LEG2_DT_RISE 0x80A
 #define ID_CONFIG_LEG2_DT_FALL 0x80B
+#define ID_CONFIG_LEG2_PHASE_DEG 0x80C
 
 #define ID_CONVERTER                  0x07
 #define ID_CONVERTER_BOARD_VERSION    0x72
@@ -129,6 +132,18 @@ extern float meas_data;
 
 extern float blink_period_s;
 extern uint32_t switching_frequency_hz;
+extern bool dead_time_comp;
+
+/* Test bench (opposition method): limits and the scope trigger on GPIO 9. */
+#define BENCH_DEAD_TIME_MIN_NS 100
+#define BENCH_DEAD_TIME_MAX_NS 2000
+#define BENCH_PHASE_MIN_DEG    0.0f
+#define BENCH_PHASE_MAX_DEG    360.0f
+#define BENCH_TRIGGER_GPIO     9
+#define BENCH_TRIGGER_PERIODS  21   /* control periods the trigger pin stays high */
+/* Set by the ThingSet callbacks when LEG2's phase shift or duty cycle is written;
+ * the critical task pulses BENCH_TRIGGER_GPIO so the bench scopes can trigger. */
+extern volatile bool bench_trigger_request;
 
 typedef struct
 {
@@ -161,6 +176,7 @@ typedef struct
     uint16_t dead_time_falling_ns;
     float v_max;
     float duty_readback;
+    float phase_shift_deg;   /* fractional phase shift (bench), degrees */
 } power_leg_t;
 
 typedef struct

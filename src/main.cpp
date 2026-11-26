@@ -76,6 +76,7 @@ void setup_routine()
     shield.power.initBuck(LEG2);
     shield.sensors.enableDefaultTwistSensors();
     scope_capture_init();
+    spin.gpio.configurePin(BENCH_TRIGGER_GPIO, OUTPUT);
 
     uint32_t background_task_number = task.createBackground(loop_background_task);
     uint32_t scope_data_task_number =
@@ -149,6 +150,20 @@ void loop_critical_task()
     }
     if (power_legs[1].running && V2_low_value > power_legs[1].v_max) {
         power_legs[1].v_max = V2_low_value;
+    }
+
+    /* Bench scope trigger: pulse GPIO 9 for BENCH_TRIGGER_PERIODS control
+     * periods after each LEG2 phase / duty write (as the string-protocol
+     * firmware did). */
+    static uint8_t trigger_counter = 0;
+    if (bench_trigger_request) {
+        bench_trigger_request = false;
+        spin.gpio.setPin(BENCH_TRIGGER_GPIO);
+        trigger_counter = 1;
+    }
+    else if (trigger_counter > 0 && ++trigger_counter > BENCH_TRIGGER_PERIODS) {
+        trigger_counter = 0;
+        spin.gpio.resetPin(BENCH_TRIGGER_GPIO);
     }
 
     scope_capture_process();
