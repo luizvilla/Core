@@ -5,3 +5,8 @@
 .vscode/settings.json
 old
 src/Data_records/*
+__pycache__/
+*.pyc
+thingset_objects.json
+src/tools/scope_test_results/
+.claude/*

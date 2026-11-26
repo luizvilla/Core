@@ -102,7 +102,7 @@ list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 # board_shield_version is concatenated to board_shield. 
 
 set(BOARD spin@1_2_0)
-set(SHIELD twist_v1_4_1)
+set(SHIELD twist_v1_4_2)
 
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "")
 # Configure Zephyr
@@ -111,4 +111,8 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(owntech_power_api)
 target_sources(app PRIVATE ../src/main.cpp)
+target_sources(app PRIVATE ../src/scope_capture.cpp)
+target_sources(app PRIVATE ../src/scope_data_port.cpp)
+target_sources(app PRIVATE ../src/user_data_objects.cpp)
+target_sources(app PRIVATE ../src/thingset_callbacks.cpp)
 zephyr_include_directories(../src)

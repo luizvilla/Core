@@ -1,0 +1,792 @@
+%
+% Copyright (c) 2021-present LAAS-CNRS
+%
+%   This program is free software: you can redistribute it and/or modify
+%   it under the terms of the GNU General Public License as published by
+%   the Free Software Foundation, either version 2 of the License, or
+%   (at your option) any later version.
+%
+% SPDX-License-Identifier: GPL-2.0-or-later
+%
+
+classdef PowerTestBench < handle
+    % PowerTestBench  Safety-oriented API over a ThingSet transport.
+    %
+    % The supplied client must provide read(path) and write(path, values)
+    % methods, as ThingSetTools does.
+
+    properties (SetAccess = private)
+        Client
+        ScopeClient
+    end
+
+    properties (Access = private)
+        ArmedPretriggerRatio = NaN
+    end
+
+    properties (Constant)
+        ModeIdle = 0
+        ModePowerOn = 1
+        ModePowerOff = 2
+    end
+
+    methods
+        function obj = PowerTestBench(client, scopeClient)
+            if nargin < 1 || nargin > 2 || ...
+                    ~ismethod(client, "read") || ~ismethod(client, "write")
+                error("PowerTestBench:invalidClient", ...
+                    "client must provide read(path) and write(path, values)");
+            end
+            if nargin < 2
+                scopeClient = [];
+            elseif ~isempty(scopeClient) && ~ismethod(scopeClient, "download")
+                error("PowerTestBench:invalidClient", ...
+                    "scopeClient must provide download(metadata)");
+            end
+            obj.Client = client;
+            obj.ScopeClient = scopeClient;
+        end
+
+        function modeValue = setMode(obj, mode)
+            % Set and verify Config/Mode.
+            modeValue = PowerTestBench.normalizeMode(mode);
+            obj.writeAndVerify("Config", struct("Mode", modeValue));
+        end
+
+        function frequencyHz = setFrequency(obj, frequencyHz)
+            % Set and verify Config/Frequency_Hz.
+            frequencyHz = PowerTestBench.validateInteger( ...
+                "frequencyHz", frequencyHz, 1, Inf);
+            obj.writeAndVerify( ...
+                "Config", struct("Frequency_Hz", frequencyHz));
+        end
+
+        function readback = configureLeg(obj, leg, settings)
+            % Configure a leg from a scalar settings struct.
+            %
+            % Supported fields: enable, capacitor, driver, buck, boost,
+            % dutyCycle, referenceValue, trackingVar, phaseShift,
+            % deadTimeRisingNs, and deadTimeFallingNs.
+            arguments
+                obj
+                leg
+                settings (1,1) struct
+            end
+
+            legNumber = PowerTestBench.normalizeLeg(leg);
+            allowed = [ ...
+                "enable", "capacitor", "driver", "buck", "boost", ...
+                "dutyCycle", "referenceValue", "trackingVar", ...
+                "phaseShift", "deadTimeRisingNs", "deadTimeFallingNs"];
+            PowerTestBench.rejectUnknownFields(settings, allowed, "leg setting");
+
+            values = struct();
+            boolMappings = {
+                "enable", "wEnable";
+                "capacitor", "wCapa";
+                "driver", "wDriver";
+                "buck", "wBuck";
+                "boost", "wBoost"
+            };
+            for i = 1:size(boolMappings, 1)
+                source = boolMappings{i, 1};
+                target = boolMappings{i, 2};
+                if isfield(settings, source)
+                    values.(target) = PowerTestBench.validateLogical( ...
+                        source, settings.(source));
+                end
+            end
+
+            if isfield(settings, "buck") && isfield(settings, "boost") && ...
+                    settings.buck && settings.boost
+                error("PowerTestBench:validation", ...
+                    "buck and boost cannot both be true");
+            end
+            if isfield(settings, "buck") && settings.buck
+                values.wBoost = false;
+            end
+            if isfield(settings, "boost") && settings.boost
+                values.wBuck = false;
+            end
+
+            if isfield(settings, "dutyCycle")
+                duty = PowerTestBench.validateFinite( ...
+                    "dutyCycle", settings.dutyCycle);
+                if duty < 0 || duty > 1
+                    error("PowerTestBench:validation", ...
+                        "dutyCycle must be between 0 and 1");
+                end
+                values.wDutyCycle = duty;
+            end
+            if isfield(settings, "referenceValue")
+                values.wReferenceValue = PowerTestBench.validateFinite( ...
+                    "referenceValue", settings.referenceValue);
+            end
+            if isfield(settings, "trackingVar")
+                values.wTrackingVar = char( ...
+                    PowerTestBench.normalizeChannel(settings.trackingVar));
+            end
+            if isfield(settings, "phaseShift")
+                values.wPhaseShift = PowerTestBench.validateInteger( ...
+                    "phaseShift", settings.phaseShift, -360, 360);
+            end
+            if isfield(settings, "deadTimeRisingNs")
+                values.wDeadTimeRising_ns = PowerTestBench.validateInteger( ...
+                    "deadTimeRisingNs", settings.deadTimeRisingNs, 0, 65535);
+            end
+            if isfield(settings, "deadTimeFallingNs")
+                values.wDeadTimeFalling_ns = PowerTestBench.validateInteger( ...
+                    "deadTimeFallingNs", settings.deadTimeFallingNs, 0, 65535);
+            end
+
+            if isempty(fieldnames(values))
+                error("PowerTestBench:validation", ...
+                    "at least one leg setting must be supplied");
+            end
+            path = "Config/Leg" + legNumber;
+            readback = obj.writeAndVerify(path, values, 5e-4);
+        end
+
+        function value = readLeg(obj, leg)
+            % Read all configuration fields for one leg.
+            legNumber = PowerTestBench.normalizeLeg(leg);
+            value = obj.readObject("Config/Leg" + legNumber, "leg");
+        end
+
+        function value = readMeasurements(obj)
+            % Read all live measurements.
+            value = obj.readObject("Measurements", "measurement");
+        end
+
+        function value = readCalibration(obj, channel)
+            % Read one sensor channel's calibration object.
+            normalized = PowerTestBench.normalizeChannel(channel);
+            value = obj.readObject("Calibration/" + normalized, "calibration");
+        end
+
+        function readback = setCalibration(obj, channel, settings)
+            % Set gain/offset and optionally persist them with store=true.
+            arguments
+                obj
+                channel
+                settings (1,1) struct
+            end
+            normalized = PowerTestBench.normalizeChannel(channel);
+            allowed = ["gain", "offset", "store"];
+            PowerTestBench.rejectUnknownFields( ...
+                settings, allowed, "calibration setting");
+
+            values = struct();
+            if isfield(settings, "gain")
+                values.wGain = PowerTestBench.validateFinite( ...
+                    "gain", settings.gain);
+            end
+            if isfield(settings, "offset")
+                values.wOffset = PowerTestBench.validateFinite( ...
+                    "offset", settings.offset);
+            end
+            if isfield(settings, "store")
+                store = PowerTestBench.validateLogical("store", settings.store);
+                if store
+                    values.wStore = true;
+                end
+            end
+            if isempty(fieldnames(values))
+                error("PowerTestBench:validation", ...
+                    "gain, offset, or store=true must be supplied");
+            end
+
+            expected = values;
+            if isfield(values, "wStore")
+                expected.wStore = false;
+            end
+            readback = obj.writeAndVerify( ...
+                "Calibration/" + normalized, values, 5e-7, expected);
+        end
+
+        function metadata = readMetadata(obj)
+            % Read converter metadata using host-friendly field names.
+            raw = obj.readObject("Converter", "metadata");
+            metadata = PowerTestBench.metadataFromReadback(raw);
+        end
+
+        function metadata = setMetadata(obj, settings)
+            % Set and verify one or more persistent converter identity fields.
+            arguments
+                obj
+                settings (1,1) struct
+            end
+            allowed = [ ...
+                "boardVersion", "serialNumber"];
+            PowerTestBench.rejectUnknownFields( ...
+                settings, allowed, "metadata field");
+
+            % source, target, minimumLength, maximumLength
+            mappings = {
+                "boardVersion", "wBoardVersion", 1, 15;
+                "serialNumber", "wSerialNumber", 13, 13
+            };
+            values = struct();
+            for i = 1:size(mappings, 1)
+                source = mappings{i, 1};
+                target = mappings{i, 2};
+                minimumLength = mappings{i, 3};
+                maximumLength = mappings{i, 4};
+                if isfield(settings, source)
+                    values.(target) = PowerTestBench.validateMetadata( ...
+                        source, settings.(source), minimumLength, maximumLength);
+                end
+            end
+            if isempty(fieldnames(values))
+                error("PowerTestBench:validation", ...
+                    "at least one metadata field must be supplied");
+            end
+
+            raw = obj.writeAndVerify("Converter", values);
+            metadata = PowerTestBench.metadataFromReadback(raw);
+        end
+
+        function status = readScopeStatus(obj)
+            % Read and validate the complete Debug/Scope status object.
+            raw = obj.readObject("Debug/Scope", "scope status");
+            required = [ ...
+                "wArm", "wTrigger", "wPretriggerRatio", "wDecimation", ...
+                "rState", "rSampleCount", "rChannelCount", ...
+                "rSamplePeriod_us", "rCaptureDuration_ms", ...
+                "rFinalIndex", "rLastError"];
+            missing = required(~isfield(raw, cellstr(required)));
+            if ~isempty(missing)
+                error("PowerTestBench:readback", ...
+                    "scope status is missing: %s", strjoin(missing, ", "));
+            end
+
+            stateNames = [ ...
+                "IDLE", "ARMED", "TRIGGERED", ...
+                "READY", "STREAMING", "ERROR"];
+            errorNames = [ ...
+                "NONE", "INVALID_STATE", "INVALID_DECIMATION", ...
+                "TRANSFER", "INTERNAL"];
+            stateCode = raw.rState;
+            errorCode = raw.rLastError;
+            if ~PowerTestBench.isIntegerInRange( ...
+                    stateCode, 0, numel(stateNames) - 1)
+                error("PowerTestBench:readback", ...
+                    "invalid scope state code");
+            end
+            if ~PowerTestBench.isIntegerInRange( ...
+                    errorCode, 0, numel(errorNames) - 1)
+                error("PowerTestBench:readback", ...
+                    "invalid scope error code");
+            end
+
+            configuredDecimation = raw.wDecimation;
+            sampleCount = raw.rSampleCount;
+            channelCount = raw.rChannelCount;
+            samplePeriodUs = raw.rSamplePeriod_us;
+            finalIndex = raw.rFinalIndex;
+            pretriggerRatio = raw.wPretriggerRatio;
+            durationMs = raw.rCaptureDuration_ms;
+            if ~PowerTestBench.isIntegerInRange( ...
+                    configuredDecimation, 1, 100) || ...
+                    ~PowerTestBench.isIntegerInRange(sampleCount, 1, Inf) || ...
+                    ~PowerTestBench.isIntegerInRange(channelCount, 1, Inf) || ...
+                    ~PowerTestBench.isIntegerInRange(samplePeriodUs, 1, Inf) || ...
+                    ~PowerTestBench.isIntegerInRange(finalIndex, 0, Inf) || ...
+                    ~PowerTestBench.isFiniteScalar(pretriggerRatio) || ...
+                    ~PowerTestBench.isFiniteScalar(durationMs)
+                error("PowerTestBench:readback", ...
+                    "scope status contains invalid numeric values");
+            end
+            if pretriggerRatio < 0 || pretriggerRatio > 0.9
+                error("PowerTestBench:readback", ...
+                    "scope pre-trigger ratio is outside 0.0 to 0.9");
+            end
+            if sampleCount ~= ScopeSerial.SampleCount
+                error("PowerTestBench:readback", ...
+                    "scope reports %d samples, expected %d", ...
+                    sampleCount, ScopeSerial.SampleCount);
+            end
+            if channelCount ~= numel(ScopeSerial.ChannelNames)
+                error("PowerTestBench:readback", ...
+                    "scope reports %d channels, expected %d", ...
+                    channelCount, numel(ScopeSerial.ChannelNames));
+            end
+            if mod(samplePeriodUs, 100) ~= 0
+                error("PowerTestBench:readback", ...
+                    "scope sample period is not a multiple of 100 us");
+            end
+            activeDecimation = samplePeriodUs / 100;
+            if activeDecimation < 1 || activeDecimation > 100
+                error("PowerTestBench:readback", ...
+                    "scope active decimation is invalid");
+            end
+            expectedDurationMs = sampleCount * samplePeriodUs / 1000;
+            if abs(durationMs - expectedDurationMs) > 0.05
+                error("PowerTestBench:readback", ...
+                    "scope duration does not match the sample timing");
+            end
+            if finalIndex >= sampleCount
+                error("PowerTestBench:readback", ...
+                    "scope final index is out of range");
+            end
+
+            status = struct( ...
+                "state", stateNames(stateCode + 1), ...
+                "stateCode", double(stateCode), ...
+                "lastError", errorNames(errorCode + 1), ...
+                "lastErrorCode", double(errorCode), ...
+                "configuredDecimation", double(configuredDecimation), ...
+                "activeDecimation", double(activeDecimation), ...
+                "pretriggerRatio", double(pretriggerRatio), ...
+                "sampleCount", double(sampleCount), ...
+                "channelCount", double(channelCount), ...
+                "samplePeriodUs", double(samplePeriodUs), ...
+                "durationMs", double(durationMs), ...
+                "finalIndex", double(finalIndex));
+        end
+
+        function status = armScope(obj, options)
+            % Configure and arm one capture with verified readback.
+            arguments
+                obj
+                options.PretriggerRatio = 0.2
+                options.Decimation = 1
+            end
+            pretriggerRatio = PowerTestBench.validateFinite( ...
+                "PretriggerRatio", options.PretriggerRatio);
+            if pretriggerRatio < 0 || pretriggerRatio > 0.9
+                error("PowerTestBench:validation", ...
+                    "PretriggerRatio must be between 0.0 and 0.9");
+            end
+            decimation = PowerTestBench.validateInteger( ...
+                "Decimation", options.Decimation, 1, 100);
+
+            obj.writeAndVerify( ...
+                "Debug/Scope", ...
+                struct( ...
+                    "wPretriggerRatio", pretriggerRatio, ...
+                    "wDecimation", decimation), ...
+                5e-4);
+            obj.writeAndVerify( ...
+                "Debug/Scope", struct("wArm", true), 0, ...
+                struct("wArm", false));
+            obj.ArmedPretriggerRatio = pretriggerRatio;
+            status = obj.waitForScopeStates( ...
+                ["ARMED", "TRIGGERED", "READY"], 1.0);
+            if status.activeDecimation ~= decimation
+                error("PowerTestBench:readback", ...
+                    "firmware armed with the wrong decimation");
+            end
+        end
+
+        function status = triggerScope(obj)
+            % Queue a one-shot software trigger while armed.
+            status = obj.readScopeStatus();
+            if status.state ~= "ARMED"
+                error("PowerTestBench:scopeState", ...
+                    "scope trigger requires ARMED, got %s", status.state);
+            end
+            obj.writeAndVerify( ...
+                "Debug/Scope", struct("wTrigger", true), 0, ...
+                struct("wTrigger", false));
+            status = obj.waitForScopeStates( ...
+                ["TRIGGERED", "READY"], 1.0);
+        end
+
+        function status = waitScopeReady(obj, options)
+            % Wait for READY with a capture-duration-aware timeout.
+            arguments
+                obj
+                options.Timeout = NaN
+                options.PollInterval = 0.02
+            end
+            pollInterval = PowerTestBench.validateFinite( ...
+                "PollInterval", options.PollInterval);
+            if pollInterval <= 0
+                error("PowerTestBench:validation", ...
+                    "PollInterval must be positive");
+            end
+
+            status = obj.readScopeStatus();
+            if isnumeric(options.Timeout) && isscalar(options.Timeout) && ...
+                    isnan(options.Timeout)
+                pretriggerRatio = obj.ArmedPretriggerRatio;
+                if isnan(pretriggerRatio)
+                    pretriggerRatio = status.pretriggerRatio;
+                end
+                timeout = status.sampleCount * status.samplePeriodUs * ...
+                    (1 - pretriggerRatio) / 1e6 + 2.0;
+            else
+                timeout = PowerTestBench.validateFinite( ...
+                    "Timeout", options.Timeout);
+                if timeout <= 0
+                    error("PowerTestBench:validation", ...
+                        "Timeout must be positive");
+                end
+            end
+
+            started = tic;
+            while true
+                if status.state == "READY"
+                    return
+                elseif status.state == "ERROR"
+                    error("PowerTestBench:scopeState", ...
+                        "scope entered ERROR: %s", status.lastError);
+                elseif ~any(status.state == ["ARMED", "TRIGGERED"])
+                    error("PowerTestBench:scopeState", ...
+                        "scope wait requires ARMED, TRIGGERED, or READY");
+                elseif toc(started) >= timeout
+                    error("PowerTestBench:scopeTimeout", ...
+                        "scope was not READY within %g seconds", timeout);
+                end
+                pause(pollInterval);
+                status = obj.readScopeStatus();
+            end
+        end
+
+        function capture = downloadScope(obj, options)
+            % Download the frozen READY capture through the data port.
+            arguments
+                obj
+                options.Timeout = 15.0
+            end
+            timeout = PowerTestBench.validateFinite( ...
+                "Timeout", options.Timeout);
+            if timeout <= 0
+                error("PowerTestBench:validation", ...
+                    "Timeout must be positive");
+            end
+            if isempty(obj.ScopeClient)
+                error("PowerTestBench:scopeTransport", ...
+                    "scope data transport is not configured");
+            end
+            status = obj.readScopeStatus();
+            if status.state ~= "READY"
+                error("PowerTestBench:scopeState", ...
+                    "scope download requires READY, got %s", status.state);
+            end
+            pretriggerRatio = obj.ArmedPretriggerRatio;
+            if isnan(pretriggerRatio)
+                pretriggerRatio = status.pretriggerRatio;
+            end
+            metadata = struct( ...
+                "decimation", status.activeDecimation, ...
+                "samplePeriodUs", status.samplePeriodUs, ...
+                "durationMs", status.durationMs, ...
+                "pretriggerRatio", pretriggerRatio);
+            try
+                capture = obj.ScopeClient.download( ...
+                    metadata, Timeout=timeout);
+            catch ME
+                error("PowerTestBench:scopeDownload", ...
+                    "scope download failed: %s", ME.message);
+            end
+            if ~isequal(capture.channelNames, ScopeSerial.ChannelNames)
+                error("PowerTestBench:readback", ...
+                    "scope download channel order mismatch");
+            end
+            if ~isequal(size(capture.samples), ...
+                    [status.sampleCount, status.channelCount])
+                error("PowerTestBench:readback", ...
+                    "scope download dimensions mismatch");
+            end
+            if capture.finalIndex ~= status.finalIndex
+                error("PowerTestBench:readback", ...
+                    "scope download final index does not match ThingSet");
+            end
+        end
+
+        function powerOn(obj, leg, settings, options)
+            % Safely configure and energize exactly one selected leg.
+            arguments
+                obj
+                leg
+                settings (1,1) struct = struct()
+                options.ConnectDriver (1,1) logical = false
+                options.ConnectCapacitor (1,1) logical = false
+            end
+            legNumber = PowerTestBench.normalizeLeg(leg);
+            forbidden = intersect( ...
+                fieldnames(settings), {'enable', 'driver', 'capacitor'});
+            if ~isempty(forbidden)
+                error("PowerTestBench:validation", ...
+                    "powerOn controls these settings directly: %s", ...
+                    strjoin(forbidden, ", "));
+            end
+
+            try
+                obj.setMode(PowerTestBench.ModePowerOff);
+                obj.configureLeg(1, struct("enable", false));
+                obj.configureLeg(2, struct("enable", false));
+                settings.enable = true;
+                settings.driver = options.ConnectDriver;
+                settings.capacitor = options.ConnectCapacitor;
+                obj.configureLeg(legNumber, settings);
+                obj.setMode(PowerTestBench.ModePowerOn);
+            catch ME
+                try
+                    obj.shutdown();
+                catch
+                    % Keep the original power-on error.
+                end
+                rethrow(ME);
+            end
+        end
+
+        function shutdown(obj, options)
+            % Request POWER_OFF and disable both legs, attempting every step.
+            arguments
+                obj
+                options.DisconnectHardware (1,1) logical = false
+            end
+            failures = strings(0, 1);
+
+            try
+                obj.setMode(PowerTestBench.ModePowerOff);
+            catch ME
+                failures(end+1) = string(ME.message);
+            end
+
+            for leg = 1:2
+                settings = struct("enable", false);
+                if options.DisconnectHardware
+                    settings.driver = false;
+                    settings.capacitor = false;
+                end
+                try
+                    obj.configureLeg(leg, settings);
+                catch ME
+                    failures(end+1) = string(ME.message); %#ok<AGROW>
+                end
+            end
+
+            if ~isempty(failures)
+                error("PowerTestBench:shutdown", ...
+                    "shutdown completed with errors: %s", ...
+                    strjoin(failures, "; "));
+            end
+        end
+    end
+
+    methods (Access = private)
+        function status = waitForScopeStates(obj, states, timeout)
+            started = tic;
+            while true
+                status = obj.readScopeStatus();
+                if any(status.state == states)
+                    return
+                end
+                if status.state == "ERROR"
+                    error("PowerTestBench:scopeState", ...
+                        "scope entered ERROR: %s", status.lastError);
+                end
+                if toc(started) >= timeout
+                    error("PowerTestBench:scopeTimeout", ...
+                        "scope did not enter the requested state");
+                end
+                pause(0.01);
+            end
+        end
+
+        function value = readObject(obj, path, label)
+            try
+                value = obj.Client.read(path);
+            catch ME
+                error("PowerTestBench:communication", ...
+                    "ThingSet read failed at %s: %s", path, ME.message);
+            end
+            if ~isstruct(value) || ~isscalar(value)
+                error("PowerTestBench:readback", ...
+                    "%s readback is not a ThingSet object", label);
+            end
+        end
+
+        function readback = writeAndVerify( ...
+                obj, path, values, absoluteTolerance, expected)
+            if nargin < 4
+                absoluteTolerance = 0;
+            end
+            if nargin < 5
+                expected = values;
+            end
+
+            try
+                obj.Client.write(path, values);
+                readback = obj.Client.read(path);
+            catch ME
+                error("PowerTestBench:communication", ...
+                    "ThingSet operation failed at %s: %s", path, ME.message);
+            end
+            if ~isstruct(readback) || ~isscalar(readback)
+                error("PowerTestBench:readback", ...
+                    "expected object readback from %s", path);
+            end
+
+            names = fieldnames(expected);
+            for i = 1:numel(names)
+                name = names{i};
+                if ~isfield(readback, name)
+                    error("PowerTestBench:readback", ...
+                        "%s/%s is missing from the firmware readback", ...
+                        path, name);
+                end
+                if ~PowerTestBench.valuesMatch( ...
+                        readback.(name), expected.(name), absoluteTolerance)
+                    error("PowerTestBench:readback", ...
+                        "%s/%s readback does not match the requested value", ...
+                        path, name);
+                end
+            end
+        end
+    end
+
+    methods (Static, Access = private)
+        function valid = isFiniteScalar(value)
+            valid = isnumeric(value) && ~islogical(value) && ...
+                isscalar(value) && isreal(value) && isfinite(value);
+        end
+
+        function valid = isIntegerInRange(value, minimum, maximum)
+            valid = PowerTestBench.isFiniteScalar(value) && ...
+                fix(double(value)) == double(value) && ...
+                value >= minimum && value <= maximum;
+        end
+
+        function legNumber = normalizeLeg(leg)
+            if isnumeric(leg) && isscalar(leg) && isreal(leg) && ...
+                    isfinite(leg) && fix(double(leg)) == double(leg) && ...
+                    any(double(leg) == [1, 2])
+                legNumber = double(leg);
+                return
+            end
+            if ischar(leg) || (isstring(leg) && isscalar(leg))
+                normalized = upper(string(leg));
+                if normalized == "1" || normalized == "LEG1"
+                    legNumber = 1;
+                    return
+                elseif normalized == "2" || normalized == "LEG2"
+                    legNumber = 2;
+                    return
+                end
+            end
+            error("PowerTestBench:validation", ...
+                "leg must be 1, 2, 'Leg1', or 'Leg2'");
+        end
+
+        function channel = normalizeChannel(channel)
+            if ~(ischar(channel) || (isstring(channel) && isscalar(channel)))
+                error("PowerTestBench:validation", ...
+                    "channel must be V1, V2, VH, I1, I2, or IH");
+            end
+            channel = upper(string(channel));
+            if ~any(channel == ["V1", "V2", "VH", "I1", "I2", "IH"])
+                error("PowerTestBench:validation", ...
+                    "channel must be V1, V2, VH, I1, I2, or IH");
+            end
+        end
+
+        function modeValue = normalizeMode(mode)
+            if ischar(mode) || (isstring(mode) && isscalar(mode))
+                switch upper(string(mode))
+                    case "IDLE"
+                        modeValue = PowerTestBench.ModeIdle;
+                    case "POWER_ON"
+                        modeValue = PowerTestBench.ModePowerOn;
+                    case "POWER_OFF"
+                        modeValue = PowerTestBench.ModePowerOff;
+                    otherwise
+                        error("PowerTestBench:validation", ...
+                            "mode must be IDLE, POWER_ON, POWER_OFF, 0, 1, or 2");
+                end
+                return
+            end
+            if isnumeric(mode) && isscalar(mode) && isreal(mode) && ...
+                    isfinite(mode) && any(double(mode) == [0, 1, 2])
+                modeValue = double(mode);
+                return
+            end
+            error("PowerTestBench:validation", ...
+                "mode must be IDLE, POWER_ON, POWER_OFF, 0, 1, or 2");
+        end
+
+        function value = validateLogical(name, value)
+            if ~islogical(value) || ~isscalar(value)
+                error("PowerTestBench:validation", "%s must be logical", name);
+            end
+        end
+
+        function value = validateFinite(name, value)
+            if ~isnumeric(value) || ~isscalar(value) || ~isreal(value) || ...
+                    ~isfinite(value)
+                error("PowerTestBench:validation", ...
+                    "%s must be a finite number", name);
+            end
+            value = double(value);
+        end
+
+        function value = validateInteger(name, value, minimum, maximum)
+            value = PowerTestBench.validateFinite(name, value);
+            if fix(value) ~= value || value < minimum || value > maximum
+                error("PowerTestBench:validation", ...
+                    "%s must be an integer between %g and %g", ...
+                    name, minimum, maximum);
+            end
+        end
+
+        function value = validateMetadata(name, value, minimumLength, maximumLength)
+            if ~(ischar(value) || (isstring(value) && isscalar(value)))
+                error("PowerTestBench:validation", "%s must be text", name);
+            end
+            value = char(string(value));
+            codes = double(value);
+            if numel(value) < minimumLength || numel(value) > maximumLength || ...
+                    any(codes < 32 | codes > 126)
+                if minimumLength == maximumLength
+                    error("PowerTestBench:validation", ...
+                        "%s must be exactly %d printable ASCII characters", ...
+                        name, minimumLength);
+                end
+                error("PowerTestBench:validation", ...
+                    "%s must contain %d to %d printable ASCII characters", ...
+                    name, minimumLength, maximumLength);
+            end
+        end
+
+        function rejectUnknownFields(settings, allowed, description)
+            unknown = setdiff(string(fieldnames(settings)), string(allowed));
+            if ~isempty(unknown)
+                error("PowerTestBench:validation", ...
+                    "unknown %s: %s", description, strjoin(unknown, ", "));
+            end
+        end
+
+        function matches = valuesMatch(actual, expected, absoluteTolerance)
+            if isnumeric(expected) && ~islogical(expected)
+                matches = isnumeric(actual) && isscalar(actual) && ...
+                    isreal(actual) && isfinite(actual) && ...
+                    abs(double(actual) - double(expected)) <= ...
+                    max(absoluteTolerance, abs(double(expected)) * 1e-6);
+            elseif ischar(expected) || isstring(expected)
+                matches = (ischar(actual) || isstring(actual)) && ...
+                    isscalar(string(actual)) && ...
+                    string(actual) == string(expected);
+            else
+                matches = isequal(actual, expected);
+            end
+        end
+
+        function metadata = metadataFromReadback(raw)
+            required = [ ...
+                "wBoardVersion", "wSerialNumber"];
+            missing = required(~isfield(raw, cellstr(required)));
+            if ~isempty(missing)
+                error("PowerTestBench:readback", ...
+                    "Converter metadata is missing: %s", ...
+                    strjoin(missing, ", "));
+            end
+            metadata = struct( ...
+                "boardVersion", string(raw.wBoardVersion), ...
+                "serialNumber", string(raw.wSerialNumber));
+        end
+    end
+end
