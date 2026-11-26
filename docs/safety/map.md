@@ -15,72 +15,40 @@ flowchart LR
   classDef out fill:#fff,stroke:#adb5bd,color:#868e96,stroke-dasharray:2 2
   classDef dest fill:#343a40,stroke:#000,color:#fff,font-weight:bold
 
-  DEST(["🎯 Safety API merged into<br/>Core-staging, SPOC CI green"]):::dest
-
-  subgraph Built["Built and L0-verified on safety-hw"]
-    N16["✓ #16 CPU supervision"]:::done
-    N17["✓ #17 Devicetree, allocation,<br/>manifest"]:::done
-    N18["✓ #18 Comparator path"]:::done
-    N19["✓ #19 ADC-watchdog path"]:::done
-    N20["✓ #20 Safe states, outputs,<br/>fault record"]:::done
-    N21["✓ #21 Class B self-tests"]:::done
-    N22["✓ #22 One API,<br/>development mode"]:::done
+  subgraph Out["Out of scope"]
+    OUT["#24 L1 switched model<br/>#25 L2 powered tests<br/>timing step 2 (uSolarVerter)<br/>S1 software check speed-up<br/>TIM6/7 irq_connect_dynamic<br/>staging → Core promotion"]:::out
   end
 
-  subgraph Bench["Test bench and findings"]
-    N15["✓ #15 Test infrastructure"]:::done
-    N26["✓ #26 SPOC bench"]:::done
-    N23["✓ #23 L0 runner on SPOC<br/>final campaign 11-23"]:::done
-    N27["✓ #27 Timing overhead<br/>step 1"]:::done
-    N28["✓ #28 Ownverter scaling<br/>(Core#171 upstream)"]:::done
+  subgraph Done["Done"]
+    direction TB
+    BUILT["✓ Built on safety-hw, #16–#22<br/>CPU supervision · allocation · comparator<br/>ADC watchdog · safe states · Class B · one API"]:::done
+    BENCH["✓ Bench and findings<br/>#15 infra · #26 SPOC · #23 L0 runner<br/>#27 timing · #28 Ownverter scaling"]:::done
+    DEC["✓ Decided<br/>#30 push · #32 #38 #39 Zephyr 4.4.2<br/>#33 timing declared · #31 one PR on staging"]:::done
   end
 
-  subgraph Decide["Before the PR"]
-    N30["✓ #30 Push safety-hw<br/>to GitHub"]:::done
-    N32["✓ 🔎 #32 Zephyr 4.4.2<br/>still holds?"]:::done
-    N33["✓ #33 Timing: declared,<br/>no fix"]:::done
-    N31["✓ #31 One PR on<br/>Core-staging, tests in"]:::done
-    N38["✓ #38 Fault ISR:<br/>IRQ_DIRECT_CONNECT"]:::done
-    N39["✓ #39 L0 on<br/>Zephyr 4.4.2"]:::done
-  end
-
-  subgraph Comp["Companion PRs on Core-staging (land first)"]
-    N40["🔨👤 #40 Ownverter scaling<br/>(Core#171)"]:::open
+  subgraph Comp["Companion PRs on Core-staging"]
+    direction TB
+    N40["🔨👤 #40 Ownverter<br/>scaling (Core#171)"]:::open
     N41["🔨👤 #41 HRTIM up-down<br/>re-init (Core#172)"]:::open
     N42["🔨👤 #42 TIM6/7<br/>reconnect fix"]:::open
   end
 
-  subgraph PR["The Safety API PR on Core-staging (lands last)"]
-    N34["🔨 #34 Cut the PR branch"]:::blocked
-    N35["🔨👤 #35 L0 campaign<br/>on the PR branch"]:::blocked
-    N36["🔨👤 #36 Open the PR"]:::blocked
-    N37["👤 #37 Reviewed and merged"]:::blocked
-    FR["review follow-ups"]:::fog
+  subgraph PR["Safety API PR on Core-staging, lands last"]
+    direction LR
+    N34["🔨 #34 Cut<br/>the branch"]:::blocked
+    N35["🔨👤 #35 L0<br/>campaign"]:::blocked
+    N36["🔨👤 #36 Open<br/>the PR"]:::blocked
+    FR["review<br/>follow-ups"]:::fog
+    N37["👤 #37 Reviewed<br/>and merged"]:::blocked
+    N34 --> N35 --> N36 --> N37
+    N36 -.-> FR -.-> N37
   end
 
-  subgraph Out["Out of scope"]
-    N24["#24 L1 switched model"]:::out
-    N25["#25 L2 powered tests"]:::out
-    OST["staging → Core<br/>promotion"]:::out
-    OIRQ["TIM6/7<br/>irq_connect_dynamic"]:::out
-    OS1["S1 old software check<br/>speed-up"]:::out
-  end
+  DEST(["🎯 Merged into Core-staging,<br/>SPOC CI green"]):::dest
 
-  N16 & N17 & N18 & N19 & N20 & N21 & N22 --> N31
-  N23 & N28 --> N35
-  N27 --> N33
-  N32 --> N31
-  N32 --> N38 --> N34
-  N38 --> N39 --> N31
-  N28 --> N40
-  N31 --> N40 & N41 & N42
-  N40 & N41 & N42 --> N34
-  N31 --> N34
-  N33 --> N34
-  N34 --> N35 --> N36
-  N30 --> N36
-  N36 --> N37 --> DEST
-  N37 -.-> FR -.-> DEST
+  Out ~~~ Done
+  Done --> Comp --> PR
+  N37 --> DEST
 ```
 
 <sub>Green done · blue takeable · purple in progress · orange blocked · red ⏳ stale (3 days without activity) · grey dashed fog · white dashed out of scope · 🔨 build · 🔎 research · 👤 can't move without Luiz.</sub>
