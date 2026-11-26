@@ -53,9 +53,10 @@ flowchart LR
   end
 
   subgraph Comp["Companion PRs on Core-staging (land first)"]
-    N40["🔨👤 #40 Ownverter scaling<br/>(Core#171)"]:::open
-    N41["🔨👤 #41 HRTIM up-down<br/>re-init (Core#172)"]:::open
-    N42["🔨👤 #42 TIM6/7<br/>reconnect fix"]:::open
+    S17["👤 staging #17 I_HIGH sign,<br/>calibration evidence"]:::open
+    N40["🔨👤 #40 Ownverter scaling<br/>(Core#171)"]:::blocked
+    N41["🔨👤 #41 HRTIM up-down<br/>re-init (Core#172)<br/>prepped, needs a Spin"]:::wip
+    N42["🔨👤 #42 TIM6/7<br/>reconnect fix<br/>prepped, needs a Spin"]:::wip
   end
 
   subgraph PR["The Safety API PR on Core-staging (lands last)"]
@@ -75,6 +76,7 @@ flowchart LR
   N32 --> N38 --> N34
   N38 --> N39 --> N31
   N28 --> N40
+  S17 --> N40
   N31 --> N40 & N41 & N42
   N40 & N41 & N42 --> N34
   N31 --> N34
