@@ -53,10 +53,15 @@ flowchart LR
   end
 
   subgraph Comp["Companion PRs on Core-staging (land first)"]
-    S17["👤 staging #17 I_HIGH sign,<br/>calibration evidence"]:::open
-    N40["🔨👤 #40 Ownverter scaling<br/>(Core#171)"]:::blocked
+    S17["✓ staging #17 I_HIGH reads +I,<br/>calibration evidence"]:::done
+    N40["🔨👤 #40 Ownverter scaling<br/>(Core#171), I_HIGH +I"]:::wip
     N41["🔨👤 #41 HRTIM up-down<br/>re-init (Core#172)<br/>prepped, needs a Spin"]:::wip
     N42["🔨👤 #42 TIM6/7<br/>reconnect fix<br/>prepped, needs a Spin"]:::wip
+  end
+
+  subgraph Amend["Safety API amendments on safety-hw"]
+    N43["🔨 #43 Sensors whose counts<br/>fall as the value rises"]:::open
+    N44["🔨 #44 Thresholds from the<br/>NVS calibration at boot"]:::blocked
   end
 
   subgraph PR["The Safety API PR on Core-staging (lands last)"]
@@ -80,6 +85,8 @@ flowchart LR
   N31 --> N40 & N41 & N42
   N40 & N41 & N42 --> N34
   N31 --> N34
+  S17 --> N43 --> N44 --> N34
+  N43 --> N34
   N33 --> N34
   N34 --> N35 --> N36
   N30 --> N36

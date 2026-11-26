@@ -193,6 +193,15 @@ All tests are generated from the protection manifest, with one hand-written inpu
 
 For the uSolarVerter: owntech-foundation/micro-inverter#48.
 
+### Calibration and inverted sensors (amended 2026-11-26)
+
+Decided with Luiz in [Core-staging#17](https://github.com/owntech-foundation/Core-staging/issues/17), to be built in #43 and #44.
+
+- **Thresholds follow the board's calibration.** A board's NVS calibration overrides its devicetree scaling for the readings, so the hardware limits must use it too. Otherwise they are off by the difference, up to about 4 % on the three v1.1.1 Ownverters measured. At boot, before arming, each protected sensor's limits are converted to counts with its NVS gain and offset when it has them, and with the devicetree's otherwise. A calibration that the application stores or sets at run time takes effect at the next boot. Flashing a new firmware leaves the NVS partition alone, so a calibrated board uses its calibration from its first boot.
+- **A fishy calibration blocks arming.** A gain whose sign differs from the devicetree's, or more than 25 % away from it, means a corrupt or wrong entry. The Safety API refuses to arm and reports a fault, so the outputs stay off. In development mode it warns and uses the devicetree values. The devicetree is the sanity reference for every calibration.
+- **Where the safety is linked is printed.** At boot there is one line per protected sensor: the source (NVS or devicetree), the gain and the programmed counts. At run time, a one-time warning is printed when the application changes a protected sensor's calibration. The manifest and docs table keep the devicetree values and say that an NVS calibration replaces them at boot.
+- **Sensors whose counts fall as the value rises are supported.** Ownverter v1.1.x reads I_HIGH with its true sign (+I), as the production calibrations already do, so its devicetree gain is negative. The allocator swaps the bounds, the comparator's polarity is flipped, and the ADC watchdog takes the swapped window. Limits stay written in value terms, and tightening still means a lower high limit and a higher low limit.
+
 ### Out of scope
 
 EMC immunity (IEC 60730-1 H.25, level 3 for a protective control) is left for its own series of runs.
